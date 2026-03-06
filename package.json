@@ -1,0 +1,26 @@
+{
+  "name": "m88-interns-productivity-tracker",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "keywords": [],
+  "author": "Madison 88 Business Solutions Asia Inc.",
+  "license": "UNLICENSED",
+  "description": "Interns Productivity Tracker Tool for Madison 88 Business Solutions Asia Inc.",
+  "dependencies": {
+    "@supabase/supabase-js": "^2.98.0",
+    "@tailwindcss/vite": "^4.2.1",
+    "chart.js": "^4.5.1",
+    "jspdf": "^4.2.0",
+    "jspdf-autotable": "^5.0.7",
+    "quill": "^2.0.3",
+    "tailwindcss": "^4.2.1",
+    "vite": "^7.3.1",
+    "xlsx": "^0.18.5"
+  }
+}

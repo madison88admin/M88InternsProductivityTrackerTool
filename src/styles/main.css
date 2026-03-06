@@ -1,0 +1,277 @@
+@import "tailwindcss";
+
+/* ===== Custom Design Tokens ===== */
+@theme {
+  --color-primary-50: #eff6ff;
+  --color-primary-100: #dbeafe;
+  --color-primary-200: #bfdbfe;
+  --color-primary-300: #93c5fd;
+  --color-primary-400: #60a5fa;
+  --color-primary-500: #3b82f6;
+  --color-primary-600: #2563eb;
+  --color-primary-700: #1d4ed8;
+  --color-primary-800: #1e40af;
+  --color-primary-900: #1e3a8a;
+
+  --color-success-50: #f0fdf4;
+  --color-success-500: #22c55e;
+  --color-success-600: #16a34a;
+
+  --color-warning-50: #fffbeb;
+  --color-warning-500: #f59e0b;
+  --color-warning-600: #d97706;
+
+  --color-danger-50: #fef2f2;
+  --color-danger-500: #ef4444;
+  --color-danger-600: #dc2626;
+
+  --color-neutral-50: #f8fafc;
+  --color-neutral-100: #f1f5f9;
+  --color-neutral-200: #e2e8f0;
+  --color-neutral-300: #cbd5e1;
+  --color-neutral-400: #94a3b8;
+  --color-neutral-500: #64748b;
+  --color-neutral-600: #475569;
+  --color-neutral-700: #334155;
+  --color-neutral-800: #1e293b;
+  --color-neutral-900: #0f172a;
+}
+
+/* ===== Base Styles ===== */
+body {
+  @apply bg-neutral-50 text-neutral-800 font-sans antialiased;
+  min-height: 100vh;
+}
+
+/* ===== Quill Editor Overrides ===== */
+.ql-editor {
+  min-height: 120px;
+  font-size: 0.875rem;
+  line-height: 1.5;
+}
+
+.ql-toolbar.ql-snow {
+  border-radius: 0.5rem 0.5rem 0 0;
+  border-color: var(--color-neutral-200);
+}
+
+.ql-container.ql-snow {
+  border-radius: 0 0 0.5rem 0.5rem;
+  border-color: var(--color-neutral-200);
+}
+
+/* ===== Utility Classes ===== */
+.page-container {
+  @apply max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6;
+}
+
+.card {
+  @apply bg-white rounded-lg shadow-sm border border-neutral-200 p-6;
+}
+
+/* --- Buttons (no chained @apply — Tailwind v4 requirement) --- */
+.btn,
+.btn-primary,
+.btn-secondary,
+.btn-success,
+.btn-danger,
+.btn-warning {
+  @apply inline-flex items-center justify-center px-4 py-2 rounded-lg font-medium text-sm
+         transition-colors duration-150 focus:outline-none focus:ring-2 focus:ring-offset-2
+         disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer;
+}
+
+.btn-primary {
+  @apply bg-primary-600 text-white hover:bg-primary-700 focus:ring-primary-500;
+}
+
+.btn-secondary {
+  @apply bg-white text-neutral-700 border border-neutral-300 hover:bg-neutral-50 focus:ring-primary-500;
+}
+
+.btn-success {
+  @apply bg-success-600 text-white hover:bg-success-500 focus:ring-success-500;
+}
+
+.btn-danger {
+  @apply bg-danger-600 text-white hover:bg-danger-500 focus:ring-danger-500;
+}
+
+.btn-warning {
+  @apply bg-warning-600 text-white hover:bg-warning-500 focus:ring-warning-500;
+}
+
+.btn-sm {
+  @apply px-3 py-1.5 text-xs;
+}
+
+.btn-lg {
+  @apply px-6 py-3 text-base;
+}
+
+/* --- Forms --- */
+.form-input {
+  @apply block w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm
+         placeholder-neutral-400 shadow-sm
+         focus:border-primary-500 focus:ring-1 focus:ring-primary-500 focus:outline-none
+         disabled:bg-neutral-100 disabled:cursor-not-allowed;
+}
+
+.form-label {
+  @apply block text-sm font-medium text-neutral-700 mb-1;
+}
+
+.form-error {
+  @apply text-danger-500 text-xs mt-1;
+}
+
+/* --- Badges (no chained @apply) --- */
+.badge,
+.badge-pending,
+.badge-approved,
+.badge-rejected,
+.badge-info,
+.badge-primary,
+.badge-success,
+.badge-danger,
+.badge-warning,
+.badge-secondary {
+  @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium;
+}
+
+.badge-pending {
+  @apply bg-warning-50 text-warning-600;
+}
+
+.badge-approved,
+.badge-success {
+  @apply bg-success-50 text-success-600;
+}
+
+.badge-rejected,
+.badge-danger {
+  @apply bg-danger-50 text-danger-600;
+}
+
+.badge-info,
+.badge-primary {
+  @apply bg-primary-50 text-primary-600;
+}
+
+.badge-warning {
+  @apply bg-warning-50 text-warning-600;
+}
+
+.badge-secondary {
+  @apply bg-neutral-100 text-neutral-600;
+}
+
+/* ===== Table Styles ===== */
+.data-table {
+  @apply w-full text-sm text-left;
+}
+
+.data-table thead {
+  @apply bg-neutral-50 border-b border-neutral-200;
+}
+
+.data-table th {
+  @apply px-4 py-3 font-medium text-neutral-600 uppercase tracking-wider text-xs;
+}
+
+.data-table td {
+  @apply px-4 py-3 border-b border-neutral-100;
+}
+
+.data-table tbody tr:hover {
+  @apply bg-neutral-50;
+}
+
+/* ===== Sidebar ===== */
+.sidebar {
+  @apply fixed left-0 top-0 h-full w-64 bg-neutral-900 text-white flex flex-col z-40
+         transition-transform duration-200;
+}
+
+.sidebar-link {
+  @apply flex items-center gap-3 px-4 py-2.5 text-sm text-neutral-300
+         hover:bg-neutral-800 hover:text-white rounded-lg transition-colors duration-150;
+}
+
+.sidebar-link.active {
+  @apply bg-primary-600 text-white;
+}
+
+/* ===== Toast Notifications ===== */
+.toast-container {
+  @apply fixed top-4 right-4 z-50 flex flex-col gap-2;
+}
+
+.toast,
+.toast-success,
+.toast-error,
+.toast-warning,
+.toast-info {
+  @apply flex items-center gap-3 px-4 py-3 rounded-lg shadow-lg text-sm font-medium;
+  animation: slideIn 0.3s ease-out;
+}
+
+.toast-success {
+  @apply bg-success-600 text-white;
+}
+
+.toast-error {
+  @apply bg-danger-600 text-white;
+}
+
+.toast-warning {
+  @apply bg-warning-600 text-white;
+}
+
+.toast-info {
+  @apply bg-primary-600 text-white;
+}
+
+@keyframes slideIn {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+/* ===== Modal ===== */
+.modal-backdrop {
+  @apply fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4;
+}
+
+.modal-content {
+  @apply bg-white rounded-xl shadow-xl max-w-lg w-full max-h-[90vh] overflow-y-auto;
+}
+
+.modal-header {
+  @apply flex items-center justify-between px-6 py-4 border-b border-neutral-200;
+}
+
+.modal-body {
+  @apply px-6 py-4;
+}
+
+.modal-footer {
+  @apply flex items-center justify-end gap-3 px-6 py-4 border-t border-neutral-200;
+}
+
+/* ===== Loading Spinner ===== */
+.spinner {
+  @apply w-5 h-5 border-2 border-neutral-300 border-t-primary-600 rounded-full animate-spin;
+}
+
+.spinner-lg {
+  @apply w-8 h-8 rounded-full animate-spin;
+  border-width: 3px;
+  border-color: var(--color-neutral-300);
+  border-top-color: var(--color-primary-600);
+}

@@ -1,0 +1,134 @@
+/**
+ * Intern Directory Page (HR)
+ * View and search all interns with OJT progress.
+ */
+import { renderLayout } from '../components/layout.js';
+import { supabase } from '../lib/supabase.js';
+import { icons } from '../lib/icons.js';
+import { formatDate, formatHoursDisplay, debounce } from '../lib/utils.js';
+
+export async function renderInternDirectoryPage() {
+  const { data: interns } = await supabase
+    .from('profiles')
+    .select('*, department:departments(name), location:locations(name), supervisor:profiles!profiles_supervisor_id_fkey(full_name)')
+    .eq('role', 'intern')
+    .order('full_name');
+
+  // Fetch hours per intern (approved attendance)
+  const internIds = (interns || []).map(i => i.id);
+  let hoursMap = {};
+  if (internIds.length > 0) {
+    const { data: attendance } = await supabase
+      .from('attendance_records')
+      .select('intern_id, total_hours')
+      .in('intern_id', internIds)
+      .eq('status', 'approved');
+    (attendance || []).forEach(r => {
+      hoursMap[r.intern_id] = (hoursMap[r.intern_id] || 0) + (r.total_hours || 0);
+    });
+  }
+
+  let searchTerm = '';
+  let statusFilter = '';
+
+  function getFiltered() {
+    let list = interns || [];
+    if (searchTerm) {
+      const q = searchTerm.toLowerCase();
+      list = list.filter(i => i.full_name?.toLowerCase().includes(q) || i.email?.toLowerCase().includes(q) || i.school?.toLowerCase().includes(q));
+    }
+    if (statusFilter === 'active') list = list.filter(i => i.is_active);
+    if (statusFilter === 'inactive') list = list.filter(i => !i.is_active);
+    return list;
+  }
+
+  function renderContent(el) {
+    const filtered = getFiltered();
+    const container = el.querySelector('#intern-grid');
+
+    if (filtered.length === 0) {
+      container.innerHTML = '<div class="col-span-full text-center text-neutral-400 py-12">No interns found</div>';
+      el.querySelector('#intern-count').textContent = '0 interns';
+      return;
+    }
+
+    container.innerHTML = filtered.map(i => {
+      const completed = hoursMap[i.id] || 0;
+      const required = i.required_hours || 600;
+      const pct = Math.min(100, (completed / required) * 100);
+
+      return `
+        <div class="card">
+          <div class="flex items-center gap-3 mb-3">
+            <div class="w-10 h-10 rounded-full bg-primary-100 text-primary-600 flex items-center justify-center font-bold">
+              ${i.full_name?.charAt(0)?.toUpperCase() || '?'}
+            </div>
+            <div class="flex-1 min-w-0">
+              <h4 class="font-medium text-neutral-800 truncate">${i.full_name}</h4>
+              <p class="text-xs text-neutral-400 truncate">${i.email}</p>
+            </div>
+            <span class="badge-${i.is_active ? 'success' : 'danger'} text-xs">${i.is_active ? 'Active' : 'Inactive'}</span>
+          </div>
+          <div class="space-y-1 text-sm text-neutral-600">
+            ${i.school ? `<p>${icons.building} ${i.school}</p>` : ''}
+            ${i.course ? `<p>Course: ${i.course}</p>` : ''}
+            ${i.department?.name ? `<p>Dept: ${i.department.name}</p>` : ''}
+            ${i.location?.name ? `<p>${icons.location} ${i.location.name}</p>` : ''}
+            ${i.supervisor?.full_name ? `<p>Supervisor: ${i.supervisor.full_name}</p>` : ''}
+            ${i.ojt_start_date ? `<p>${icons.calendar} ${formatDate(i.ojt_start_date)} – ${formatDate(i.ojt_end_date)}</p>` : ''}
+          </div>
+          <div class="mt-3 pt-3 border-t border-neutral-200">
+            <div class="flex justify-between text-xs mb-1">
+              <span>OJT Progress</span>
+              <span>${pct.toFixed(1)}%</span>
+            </div>
+            <div class="w-full bg-neutral-200 rounded-full h-2">
+              <div class="bg-primary-500 h-2 rounded-full" style="width: ${pct.toFixed(1)}%"></div>
+            </div>
+            <p class="text-xs text-neutral-400 mt-1">${formatHoursDisplay(completed)} / ${formatHoursDisplay(required)}</p>
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    el.querySelector('#intern-count').textContent = `${filtered.length} intern${filtered.length !== 1 ? 's' : ''}`;
+  }
+
+  renderLayout(`
+    <div class="mb-6">
+      <h1 class="text-2xl font-bold text-neutral-800">Intern Directory</h1>
+      <p class="text-neutral-500 mt-1">All registered interns and their OJT progress</p>
+    </div>
+
+    <div class="card mb-6">
+      <div class="flex items-center gap-4 flex-wrap">
+        <div class="flex-1 min-w-[200px]">
+          <div class="relative">
+            <span class="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400">${icons.search}</span>
+            <input type="text" id="search-intern" class="form-input pl-10" placeholder="Search by name, email, school..." />
+          </div>
+        </div>
+        <select id="filter-status" class="form-input w-auto">
+          <option value="">All Status</option>
+          <option value="active">Active</option>
+          <option value="inactive">Inactive</option>
+        </select>
+        <p class="text-sm text-neutral-500" id="intern-count">${(interns || []).length} interns</p>
+      </div>
+    </div>
+
+    <div id="intern-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"></div>
+  `, (el) => {
+    renderContent(el);
+
+    const debouncedSearch = debounce(() => renderContent(el), 300);
+    el.querySelector('#search-intern').addEventListener('input', (e) => {
+      searchTerm = e.target.value;
+      debouncedSearch();
+    });
+    el.querySelector('#filter-status').addEventListener('change', (e) => {
+      statusFilter = e.target.value;
+      renderContent(el);
+    });
+  });
+}

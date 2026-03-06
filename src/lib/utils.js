@@ -1,0 +1,177 @@
+/**
+ * Utility helpers used across the application.
+ */
+
+/**
+ * Format a date to a readable string.
+ * @param {string|Date} date
+ * @param {object} [options]
+ * @returns {string}
+ */
+export function formatDate(date, options = {}) {
+  const d = new Date(date);
+  return d.toLocaleDateString('en-US', {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    ...options,
+  });
+}
+
+/**
+ * Format a time to HH:MM AM/PM.
+ * @param {string|Date} date
+ * @returns {string}
+ */
+export function formatTime(date) {
+  const d = new Date(date);
+  return d.toLocaleTimeString('en-US', {
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+/**
+ * Format a datetime to readable string.
+ * @param {string|Date} date
+ * @returns {string}
+ */
+export function formatDateTime(date) {
+  return `${formatDate(date)} ${formatTime(date)}`;
+}
+
+/**
+ * Calculate hours between two timestamps.
+ * @param {string|Date} start
+ * @param {string|Date} end
+ * @returns {number} Hours (decimal)
+ */
+export function calculateHours(start, end) {
+  const ms = new Date(end) - new Date(start);
+  return Math.max(0, ms / (1000 * 60 * 60));
+}
+
+/**
+ * Get the Monday of the week for a given date.
+ * @param {Date} date
+ * @returns {Date}
+ */
+export function getMonday(date) {
+  const d = new Date(date);
+  const day = d.getDay();
+  const diff = d.getDate() - day + (day === 0 ? -6 : 1);
+  d.setDate(diff);
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
+
+/**
+ * Get the Friday of the week for a given date.
+ * @param {Date} date
+ * @returns {Date}
+ */
+export function getFriday(date) {
+  const monday = getMonday(date);
+  monday.setDate(monday.getDate() + 4);
+  monday.setHours(23, 59, 59, 999);
+  return monday;
+}
+
+/**
+ * Debounce a function.
+ * @param {Function} fn
+ * @param {number} delay
+ * @returns {Function}
+ */
+export function debounce(fn, delay = 300) {
+  let timer;
+  return (...args) => {
+    clearTimeout(timer);
+    timer = setTimeout(() => fn(...args), delay);
+  };
+}
+
+/**
+ * Generate a simple UUID v4.
+ * @returns {string}
+ */
+export function uuid() {
+  return crypto.randomUUID();
+}
+
+/**
+ * Check if a time is considered "late" (9:00 AM or later).
+ * @param {string|Date} timestamp
+ * @returns {boolean}
+ */
+export function isLateArrival(timestamp) {
+  const d = new Date(timestamp);
+  return d.getHours() >= 9;
+}
+
+/**
+ * Check if a time is outside allowed hours (before 7AM or after 6PM).
+ * @param {string|Date} timestamp
+ * @returns {boolean}
+ */
+export function isOutsideAllowedHours(timestamp) {
+  const d = new Date(timestamp);
+  const hour = d.getHours();
+  return hour < 7 || hour >= 18;
+}
+
+/**
+ * Format hours to display (e.g., 8.5 → "8h 30m").
+ * @param {number} hours
+ * @returns {string}
+ */
+export function formatHoursDisplay(hours) {
+  const h = Math.floor(hours);
+  const m = Math.round((hours - h) * 60);
+  if (m === 0) return `${h}h`;
+  return `${h}h ${m}m`;
+}
+
+/**
+ * Get today's date as YYYY-MM-DD string.
+ * @returns {string}
+ */
+export function getTodayDate() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+/**
+ * Get the public IP address of the current user.
+ * @returns {Promise<string>}
+ */
+export async function getPublicIP() {
+  try {
+    const response = await fetch('https://api.ipify.org?format=json');
+    const data = await response.json();
+    return data.ip;
+  } catch {
+    return 'unknown';
+  }
+}
+
+/**
+ * Sanitize HTML string to prevent XSS (for display).
+ * @param {string} html
+ * @returns {string}
+ */
+export function sanitizeHtml(html) {
+  const div = document.createElement('div');
+  div.textContent = html;
+  return div.innerHTML;
+}
+
+/**
+ * Truncate text to a specified length.
+ * @param {string} text
+ * @param {number} maxLength
+ * @returns {string}
+ */
+export function truncate(text, maxLength = 100) {
+  if (!text || text.length <= maxLength) return text || '';
+  return text.slice(0, maxLength) + '…';
+}
