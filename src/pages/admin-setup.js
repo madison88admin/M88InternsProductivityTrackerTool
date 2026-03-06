@@ -9,10 +9,10 @@ import { navigateTo } from '../lib/router.js';
 
 export function renderAdminSetupPage() {
   renderPage(`
-    <div class="min-h-screen flex items-center justify-center bg-gradient-to-br from-neutral-800 to-neutral-900 px-4">
+    <div class="min-h-screen flex items-center justify-center bg-linear-to-br from-primary-700 to-primary-900 px-4">
       <div class="w-full max-w-md">
         <div class="text-center mb-8">
-          <div class="inline-flex items-center justify-center w-16 h-16 bg-white rounded-2xl shadow-lg mb-4">
+          <div class="inline-flex items-center justify-center w-16 h-16 rounded-2xl shadow-lg mb-4" style="background: white;">
             <span class="text-2xl font-bold text-primary-600">M88</span>
           </div>
           <h1 class="text-2xl font-bold text-white">Admin Setup</h1>

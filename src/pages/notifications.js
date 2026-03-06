@@ -44,7 +44,7 @@ export async function renderNotificationsPage() {
       ` : ''}
       ${(notifications || []).map(n => `
         <div class="card flex items-start gap-4 cursor-pointer notification-item ${n.read_at ? 'opacity-60' : 'border-l-4 border-primary-500'}" data-id="${n.id}" data-read="${!!n.read_at}">
-          <div class="flex-shrink-0 w-10 h-10 rounded-full flex items-center justify-center ${getNotifColor(n.type)}">
+          <div class="shrink-0 w-10 h-10 rounded-full flex items-center justify-center ${getNotifColor(n.type)}">
             ${getNotifIcon(n.type)}
           </div>
           <div class="flex-1 min-w-0">
@@ -52,7 +52,7 @@ export async function renderNotificationsPage() {
             <p class="text-sm text-neutral-500 mt-1">${n.message || ''}</p>
             <p class="text-xs text-neutral-400 mt-2">${formatDateTime(n.created_at)}</p>
           </div>
-          ${!n.read_at ? `<span class="w-2 h-2 bg-primary-500 rounded-full flex-shrink-0 mt-2"></span>` : ''}
+          ${!n.read_at ? `<span class="w-2 h-2 bg-primary-500 rounded-full shrink-0 mt-2"></span>` : ''}
         </div>
       `).join('')}
     </div>

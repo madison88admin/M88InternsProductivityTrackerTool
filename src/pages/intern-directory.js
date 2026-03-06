@@ -102,7 +102,7 @@ export async function renderInternDirectoryPage() {
 
     <div class="card mb-6">
       <div class="flex items-center gap-4 flex-wrap">
-        <div class="flex-1 min-w-[200px]">
+        <div class="flex-1 min-w-50">
           <div class="relative">
             <span class="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400">${icons.search}</span>
             <input type="text" id="search-intern" class="form-input pl-10" placeholder="Search by name, email, school..." />

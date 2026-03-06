@@ -133,31 +133,29 @@ function openLocationModal(loc) {
     el.querySelector('#loc-cancel').addEventListener('click', close);
     el.querySelector('#loc-form').addEventListener('submit', async (e) => {
       e.preventDefault();
-      try {
-        const ipsRaw = el.querySelector('#loc-ips').value.trim();
-        const ips = ipsRaw ? ipsRaw.split('\n').map(ip => ip.trim()).filter(Boolean) : [];
+      const ipsRaw = el.querySelector('#loc-ips').value.trim();
+      const ips = ipsRaw ? ipsRaw.split('\n').map(ip => ip.trim()).filter(Boolean) : [];
 
-        const payload = {
-          name: el.querySelector('#loc-name').value,
-          address: el.querySelector('#loc-address').value || null,
-          timezone: el.querySelector('#loc-timezone').value,
-          allowed_ips: ips,
-        };
+      const payload = {
+        name: el.querySelector('#loc-name').value.trim(),
+        address: el.querySelector('#loc-address').value.trim() || '',
+        timezone: el.querySelector('#loc-timezone').value,
+        allowed_ips: ips,
+      };
 
-        if (isEdit) {
-          payload.is_active = el.querySelector('#loc-active').checked;
-          await supabase.from('locations').update(payload).eq('id', loc.id);
-          await logAudit('location.updated', 'location', loc.id);
-        } else {
-          await supabase.from('locations').insert(payload);
-          await logAudit('location.created', 'location', null);
-        }
-        showToast(`Location ${isEdit ? 'updated' : 'created'}`, 'success');
-        close();
-        renderLocationsPage();
-      } catch (err) {
-        showToast(err.message || 'Failed to save', 'error');
+      if (isEdit) {
+        payload.is_active = el.querySelector('#loc-active').checked;
+        const { error } = await supabase.from('locations').update(payload).eq('id', loc.id);
+        if (error) { showToast(error.message || 'Failed to update', 'error'); return; }
+        await logAudit('location.updated', 'location', loc.id);
+      } else {
+        const { error } = await supabase.from('locations').insert(payload);
+        if (error) { showToast(error.message || 'Failed to create', 'error'); return; }
+        await logAudit('location.created', 'location', null);
       }
+      showToast(`Location ${isEdit ? 'updated' : 'created'}`, 'success');
+      close();
+      renderLocationsPage();
     });
   });
 }

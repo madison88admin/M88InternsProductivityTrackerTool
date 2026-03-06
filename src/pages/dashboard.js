@@ -189,7 +189,9 @@ async function buildInternDashboard(profile) {
     <!-- Weekly Hours Chart -->
     <div class="card">
       <h3 class="text-lg font-semibold mb-4">This Week's Hours</h3>
-      <canvas id="weekly-hours-chart" height="200"></canvas>
+      <div style="position: relative; height: 200px;">
+        <canvas id="weekly-hours-chart"></canvas>
+      </div>
     </div>
   `;
 }
@@ -276,12 +278,16 @@ async function buildSupervisorDashboard(profile) {
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
       <div class="card">
         <h3 class="text-lg font-semibold mb-4">Team Attendance Today</h3>
-        <canvas id="team-attendance-chart" height="200"></canvas>
+        <div style="position: relative; height: 200px;">
+          <canvas id="team-attendance-chart"></canvas>
+        </div>
       </div>
 
       <div class="card">
         <h3 class="text-lg font-semibold mb-4">Task Status Overview</h3>
-        <canvas id="task-status-chart" height="200"></canvas>
+        <div style="position: relative; height: 200px;">
+          <canvas id="task-status-chart"></canvas>
+        </div>
       </div>
     </div>
   `;
@@ -358,12 +364,16 @@ async function buildHRDashboard(profile) {
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
       <div class="card">
         <h3 class="text-lg font-semibold mb-4">Weekly Attendance Overview</h3>
-        <canvas id="attendance-overview-chart" height="200"></canvas>
+        <div style="position: relative; height: 200px;">
+          <canvas id="attendance-overview-chart"></canvas>
+        </div>
       </div>
 
       <div class="card">
         <h3 class="text-lg font-semibold mb-4">Allowance Summary</h3>
-        <canvas id="allowance-summary-chart" height="200"></canvas>
+        <div style="position: relative; height: 200px;">
+          <canvas id="allowance-summary-chart"></canvas>
+        </div>
       </div>
     </div>
   `;
@@ -482,23 +492,51 @@ async function buildAdminDashboard(profile) {
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
       <div class="card">
         <h3 class="text-lg font-semibold mb-4">Users by Role</h3>
-        <canvas id="users-by-role-chart" height="200"></canvas>
+        <div style="position: relative; height: 200px;">
+          <canvas id="users-by-role-chart"></canvas>
+        </div>
       </div>
 
       <div class="card">
         <h3 class="text-lg font-semibold mb-4">System Activity (Last 7 Days)</h3>
-        <canvas id="system-activity-chart" height="200"></canvas>
+        <div style="position: relative; height: 200px;">
+          <canvas id="system-activity-chart"></canvas>
+        </div>
       </div>
     </div>
   `;
 }
 
 /**
+ * Track active chart instances so we can destroy before re-creating.
+ */
+const activeCharts = [];
+
+function destroyCharts() {
+  activeCharts.forEach(c => c.destroy());
+  activeCharts.length = 0;
+}
+
+function createChart(canvas, config) {
+  // Destroy any existing chart on the same canvas
+  const existing = Chart.getChart(canvas);
+  if (existing) existing.destroy();
+  const chart = new Chart(canvas, config);
+  activeCharts.push(chart);
+  return chart;
+}
+
+let Chart;
+
+/**
  * Initialize Chart.js charts on dashboard.
  */
 async function initDashboardCharts(role, container) {
-  const { Chart, registerables } = await import('chart.js');
-  Chart.register(...registerables);
+  const chartModule = await import('chart.js');
+  Chart = chartModule.Chart;
+  Chart.register(...chartModule.registerables);
+
+  destroyCharts();
 
   const defaultOptions = {
     responsive: true,
@@ -530,7 +568,7 @@ async function initDashboardCharts(role, container) {
         return record?.total_hours || 0;
       });
 
-      new Chart(canvas, {
+      createChart(canvas, {
         type: 'bar',
         data: {
           labels: days,
@@ -558,7 +596,7 @@ async function initDashboardCharts(role, container) {
       const counts = { not_started: 0, in_progress: 0, completed: 0 };
       tasks?.forEach(t => { counts[t.status] = (counts[t.status] || 0) + 1; });
 
-      new Chart(taskCanvas, {
+      createChart(taskCanvas, {
         type: 'doughnut',
         data: {
           labels: ['Not Started', 'In Progress', 'Completed'],
@@ -583,7 +621,7 @@ async function initDashboardCharts(role, container) {
       const roleCounts = { admin: 0, hr: 0, supervisor: 0, intern: 0 };
       users?.forEach(u => { roleCounts[u.role] = (roleCounts[u.role] || 0) + 1; });
 
-      new Chart(roleCanvas, {
+      createChart(roleCanvas, {
         type: 'doughnut',
         data: {
           labels: ['Admin', 'HR', 'Supervisor', 'Intern'],

@@ -7,7 +7,7 @@ import { showToast } from '../lib/toast.js';
 
 export function renderForgotPasswordPage() {
   renderPage(`
-    <div class="min-h-screen flex items-center justify-center bg-gradient-to-br from-primary-600 to-primary-800 px-4">
+    <div class="min-h-screen flex items-center justify-center bg-linear-to-br from-primary-600 to-primary-800 px-4">
       <div class="w-full max-w-md">
         <div class="card">
           <h2 class="text-xl font-semibold text-neutral-800 mb-2">Reset Password</h2>

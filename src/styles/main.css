@@ -1,40 +1,42 @@
 @import "tailwindcss";
 
-/* ===== Custom Design Tokens ===== */
+/* ===== Custom Design Tokens — Dark Mode + M88 Navy #003060 ===== */
 @theme {
-  --color-primary-50: #eff6ff;
-  --color-primary-100: #dbeafe;
-  --color-primary-200: #bfdbfe;
-  --color-primary-300: #93c5fd;
-  --color-primary-400: #60a5fa;
-  --color-primary-500: #3b82f6;
-  --color-primary-600: #2563eb;
-  --color-primary-700: #1d4ed8;
-  --color-primary-800: #1e40af;
-  --color-primary-900: #1e3a8a;
+  /* Primary — Company navy. #003060 sits at primary-600 (base CTA / brand). */
+  --color-primary-50:  #e0f0ff;
+  --color-primary-100: #b8d8f8;
+  --color-primary-200: #8ab8f0;
+  --color-primary-300: #5a94e0;
+  --color-primary-400: #2d70c8;
+  --color-primary-500: #0a50a0;
+  --color-primary-600: #003060;
+  --color-primary-700: #002250;
+  --color-primary-800: #001640;
+  --color-primary-900: #000e2c;
 
-  --color-success-50: #f0fdf4;
+  /* Neutrals — soft dark scale (50 = darkest bg → 900 = lightest text) */
+  --color-neutral-50:  #1a2840;
+  --color-neutral-100: #1f3250;
+  --color-neutral-200: #274060;
+  --color-neutral-300: #3a567a;
+  --color-neutral-400: #5e7e9e;
+  --color-neutral-500: #8aaabb;
+  --color-neutral-600: #a8c0d4;
+  --color-neutral-700: #c4d8e8;
+  --color-neutral-800: #ddeaf8;
+  --color-neutral-900: #eef4fc;
+
+  --color-success-50:  #0d2a1e;
   --color-success-500: #22c55e;
-  --color-success-600: #16a34a;
+  --color-success-600: #18b850;
 
-  --color-warning-50: #fffbeb;
+  --color-warning-50:  #2a1d00;
   --color-warning-500: #f59e0b;
-  --color-warning-600: #d97706;
+  --color-warning-600: #e8960a;
 
-  --color-danger-50: #fef2f2;
-  --color-danger-500: #ef4444;
-  --color-danger-600: #dc2626;
-
-  --color-neutral-50: #f8fafc;
-  --color-neutral-100: #f1f5f9;
-  --color-neutral-200: #e2e8f0;
-  --color-neutral-300: #cbd5e1;
-  --color-neutral-400: #94a3b8;
-  --color-neutral-500: #64748b;
-  --color-neutral-600: #475569;
-  --color-neutral-700: #334155;
-  --color-neutral-800: #1e293b;
-  --color-neutral-900: #0f172a;
+  --color-danger-50:   #2a0e0e;
+  --color-danger-500:  #ef4444;
+  --color-danger-600:  #e23030;
 }
 
 /* ===== Base Styles ===== */
@@ -43,21 +45,30 @@ body {
   min-height: 100vh;
 }
 
+/* Map bg-white utility to the dark card surface throughout the app */
+.bg-white {
+  background-color: var(--color-neutral-100) !important;
+}
+
 /* ===== Quill Editor Overrides ===== */
 .ql-editor {
   min-height: 120px;
   font-size: 0.875rem;
   line-height: 1.5;
+  color: var(--color-neutral-800);
 }
 
 .ql-toolbar.ql-snow {
   border-radius: 0.5rem 0.5rem 0 0;
-  border-color: var(--color-neutral-200);
+  border-color: var(--color-neutral-300);
+  background-color: var(--color-neutral-200);
 }
 
 .ql-container.ql-snow {
   border-radius: 0 0 0.5rem 0.5rem;
-  border-color: var(--color-neutral-200);
+  border-color: var(--color-neutral-300);
+  background-color: var(--color-neutral-200);
+  color: var(--color-neutral-800);
 }
 
 /* ===== Utility Classes ===== */
@@ -66,10 +77,10 @@ body {
 }
 
 .card {
-  @apply bg-white rounded-lg shadow-sm border border-neutral-200 p-6;
+  @apply bg-neutral-100 rounded-lg shadow-sm border border-neutral-300 p-6;
 }
 
-/* --- Buttons (no chained @apply — Tailwind v4 requirement) --- */
+/* --- Buttons --- */
 .btn,
 .btn-primary,
 .btn-secondary,
@@ -82,11 +93,11 @@ body {
 }
 
 .btn-primary {
-  @apply bg-primary-600 text-white hover:bg-primary-700 focus:ring-primary-500;
+  @apply bg-primary-600 text-white hover:bg-primary-500 focus:ring-primary-400;
 }
 
 .btn-secondary {
-  @apply bg-white text-neutral-700 border border-neutral-300 hover:bg-neutral-50 focus:ring-primary-500;
+  @apply bg-neutral-200 text-neutral-700 border border-neutral-300 hover:bg-neutral-300 focus:ring-primary-400;
 }
 
 .btn-success {
@@ -112,9 +123,9 @@ body {
 /* --- Forms --- */
 .form-input {
   @apply block w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm
-         placeholder-neutral-400 shadow-sm
-         focus:border-primary-500 focus:ring-1 focus:ring-primary-500 focus:outline-none
-         disabled:bg-neutral-100 disabled:cursor-not-allowed;
+         bg-neutral-200 text-neutral-800 placeholder-neutral-400 shadow-sm
+         focus:border-primary-400 focus:ring-1 focus:ring-primary-400 focus:outline-none
+         disabled:opacity-50 disabled:cursor-not-allowed;
 }
 
 .form-label {
@@ -125,7 +136,7 @@ body {
   @apply text-danger-500 text-xs mt-1;
 }
 
-/* --- Badges (no chained @apply) --- */
+/* --- Badges --- */
 .badge,
 .badge-pending,
 .badge-approved,
@@ -140,30 +151,30 @@ body {
 }
 
 .badge-pending {
-  @apply bg-warning-50 text-warning-600;
+  @apply bg-warning-500/15 text-warning-500;
 }
 
 .badge-approved,
 .badge-success {
-  @apply bg-success-50 text-success-600;
+  @apply bg-success-500/15 text-success-500;
 }
 
 .badge-rejected,
 .badge-danger {
-  @apply bg-danger-50 text-danger-600;
+  @apply bg-danger-500/15 text-danger-500;
 }
 
 .badge-info,
 .badge-primary {
-  @apply bg-primary-50 text-primary-600;
+  @apply bg-primary-400/20 text-primary-300;
 }
 
 .badge-warning {
-  @apply bg-warning-50 text-warning-600;
+  @apply bg-warning-500/15 text-warning-500;
 }
 
 .badge-secondary {
-  @apply bg-neutral-100 text-neutral-600;
+  @apply bg-neutral-400/20 text-neutral-600;
 }
 
 /* ===== Table Styles ===== */
@@ -172,7 +183,7 @@ body {
 }
 
 .data-table thead {
-  @apply bg-neutral-50 border-b border-neutral-200;
+  @apply bg-neutral-200 border-b border-neutral-300;
 }
 
 .data-table th {
@@ -180,26 +191,33 @@ body {
 }
 
 .data-table td {
-  @apply px-4 py-3 border-b border-neutral-100;
+  @apply px-4 py-3 border-b border-neutral-200;
 }
 
 .data-table tbody tr:hover {
-  @apply bg-neutral-50;
+  @apply bg-neutral-200;
 }
 
 /* ===== Sidebar ===== */
 .sidebar {
-  @apply fixed left-0 top-0 h-full w-64 bg-neutral-900 text-white flex flex-col z-40
+  @apply fixed left-0 top-0 h-full w-64 text-white flex flex-col z-40
          transition-transform duration-200;
+  background-color: #142236;
 }
 
 .sidebar-link {
-  @apply flex items-center gap-3 px-4 py-2.5 text-sm text-neutral-300
-         hover:bg-neutral-800 hover:text-white rounded-lg transition-colors duration-150;
+  @apply flex items-center gap-3 px-4 py-2.5 text-sm rounded-lg transition-colors duration-150;
+  color: rgba(255, 255, 255, 0.65);
+}
+
+.sidebar-link:hover {
+  background-color: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.95);
 }
 
 .sidebar-link.active {
-  @apply bg-primary-600 text-white;
+  background-color: #003060;
+  color: #ffffff;
 }
 
 /* ===== Toast Notifications ===== */
@@ -229,7 +247,7 @@ body {
 }
 
 .toast-info {
-  @apply bg-primary-600 text-white;
+  @apply bg-primary-500 text-white;
 }
 
 @keyframes slideIn {
@@ -245,15 +263,16 @@ body {
 
 /* ===== Modal ===== */
 .modal-backdrop {
-  @apply fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4;
+  @apply fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4;
 }
 
 .modal-content {
-  @apply bg-white rounded-xl shadow-xl max-w-lg w-full max-h-[90vh] overflow-y-auto;
+  @apply bg-neutral-100 rounded-xl shadow-2xl max-w-lg w-full max-h-[90vh] overflow-y-auto;
+  border: 1px solid var(--color-neutral-300);
 }
 
 .modal-header {
-  @apply flex items-center justify-between px-6 py-4 border-b border-neutral-200;
+  @apply flex items-center justify-between px-6 py-4 border-b border-neutral-300;
 }
 
 .modal-body {
@@ -261,17 +280,20 @@ body {
 }
 
 .modal-footer {
-  @apply flex items-center justify-end gap-3 px-6 py-4 border-t border-neutral-200;
+  @apply flex items-center justify-end gap-3 px-6 py-4 border-t border-neutral-300;
 }
 
 /* ===== Loading Spinner ===== */
 .spinner {
-  @apply w-5 h-5 border-2 border-neutral-300 border-t-primary-600 rounded-full animate-spin;
+  @apply w-5 h-5 rounded-full animate-spin;
+  border: 2px solid var(--color-neutral-300);
+  border-top-color: var(--color-primary-400);
 }
 
 .spinner-lg {
   @apply w-8 h-8 rounded-full animate-spin;
   border-width: 3px;
+  border-style: solid;
   border-color: var(--color-neutral-300);
-  border-top-color: var(--color-primary-600);
+  border-top-color: var(--color-primary-400);
 }

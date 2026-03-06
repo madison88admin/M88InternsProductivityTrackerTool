@@ -76,9 +76,8 @@ export function renderLayout(contentHtml, init) {
 
     <!-- Sidebar -->
     <aside id="sidebar" class="sidebar -translate-x-full lg:translate-x-0">
-      <div class="p-4 border-b border-neutral-700">
-        <h1 class="text-lg font-bold text-white">M88 Tracker</h1>
-        <p class="text-xs text-neutral-400 mt-1">Interns Productivity</p>
+      <div class="p-4 border-b border-white/10 flex flex-col items-center justify-center">
+        <img src="/logo.png" alt="Madison 88" class="h-10 w-auto object-contain" style="filter: brightness(0) invert(1);" />
       </div>
 
       <nav class="flex-1 overflow-y-auto p-3 space-y-1">
@@ -92,14 +91,14 @@ export function renderLayout(contentHtml, init) {
         `).join('')}
       </nav>
 
-      <div class="p-3 border-t border-neutral-700">
+      <div class="p-3 border-t border-white/10">
         <div class="flex items-center gap-3 px-3 py-2 mb-2">
-          <div class="w-8 h-8 rounded-full bg-primary-600 flex items-center justify-center text-white text-sm font-medium">
+          <div class="w-8 h-8 rounded-full bg-primary-400 flex items-center justify-center text-white text-sm font-medium">
             ${(profile?.full_name || 'U').charAt(0).toUpperCase()}
           </div>
           <div class="flex-1 min-w-0">
             <p class="text-sm text-white truncate">${profile?.full_name || 'User'}</p>
-            <p class="text-xs text-neutral-400 capitalize">${role || 'Unknown'}</p>
+            <p class="text-xs text-neutral-500 capitalize">${role || 'Unknown'}</p>
           </div>
         </div>
         <a href="#/profile" class="sidebar-link ${currentPath === '/profile' ? 'active' : ''}">
