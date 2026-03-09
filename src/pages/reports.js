@@ -128,7 +128,7 @@ export async function renderReportsPage() {
     el.querySelector('#export-pdf-btn').addEventListener('click', () => {
       if (reportData) exportPdf(reportData, el.querySelector('#report-type').value);
     });
-  });
+  }, '/reports');
 }
 
 async function fetchReportData(type, dateFrom, dateTo, locationId) {

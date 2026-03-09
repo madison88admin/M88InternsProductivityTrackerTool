@@ -2,6 +2,7 @@
  * Application Entry Point
  * Initializes auth, registers all routes with the SPA router, and starts the app.
  */
+import 'quill/dist/quill.snow.css';
 import './styles/main.css';
 import { initAuth, isAuthenticated, getUserRole, hasRole } from './lib/auth.js';
 import { addRoute, setBeforeEach, setNotFound, initRouter, navigateTo } from './lib/router.js';

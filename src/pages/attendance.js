@@ -223,7 +223,7 @@ export async function renderAttendancePage() {
     if (correctionBtn) {
       correctionBtn.addEventListener('click', () => openCorrectionModal(todayRecord, profile));
     }
-  });
+  }, '/attendance');
 }
 
 function renderPunchSlot(label, timestamp, type) {

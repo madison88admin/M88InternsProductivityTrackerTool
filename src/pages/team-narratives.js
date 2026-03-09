@@ -116,5 +116,5 @@ export async function renderTeamNarrativesPage() {
       selectedIntern = e.target.value;
       renderContent(el);
     });
-  });
+  }, '/team-narratives');
 }

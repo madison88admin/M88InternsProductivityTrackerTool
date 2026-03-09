@@ -196,7 +196,7 @@ export async function renderAttendanceOverviewPage() {
           showToast('Export failed', 'error');
         }
       });
-    });
+    }, '/attendance-overview');
   }
 
   await render();

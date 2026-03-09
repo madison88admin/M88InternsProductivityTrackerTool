@@ -94,7 +94,7 @@ export async function renderDepartmentsPage() {
         }, 'Delete');
       });
     });
-  });
+  }, '/departments');
 }
 
 function openDeptModal(dept, locations) {

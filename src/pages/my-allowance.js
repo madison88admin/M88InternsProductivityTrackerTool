@@ -79,5 +79,5 @@ export async function renderMyAllowancePage() {
         </table>
       </div>
     </div>
-  `);
+  `, null, '/my-allowance');
 }

@@ -130,5 +130,5 @@ export async function renderInternDirectoryPage() {
       statusFilter = e.target.value;
       renderContent(el);
     });
-  });
+  }, '/intern-directory');
 }

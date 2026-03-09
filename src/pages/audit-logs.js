@@ -121,7 +121,7 @@ export async function renderAuditLogsPage() {
       el.querySelector('#next-page')?.addEventListener('click', () => {
         if (currentPage < totalPages - 1) { currentPage++; render(); }
       });
-    });
+    }, '/audit-logs');
   }
 
   await render();

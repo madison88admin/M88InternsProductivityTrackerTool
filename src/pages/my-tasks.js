@@ -122,7 +122,7 @@ export async function renderMyTasksPage() {
         }
       });
     });
-  });
+  }, '/my-tasks');
 }
 
 function renderTaskCard(task) {

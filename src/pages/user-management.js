@@ -167,7 +167,7 @@ export async function renderUserManagementPage() {
     filterRole.addEventListener('change', applyFilters);
     filterStatus.addEventListener('change', applyFilters);
     filterSearch.addEventListener('input', applyFilters);
-  });
+  }, '/user-management');
 }
 
 function openInviteModal(departments, locations, supervisors) {

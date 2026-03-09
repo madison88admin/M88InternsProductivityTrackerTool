@@ -11,6 +11,7 @@ let currentSession = { user: null, profile: null };
  * Initialize auth — check for existing session and set up listener.
  */
 export async function initAuth() {
+  // Get session directly first
   const { data: { session } } = await supabase.auth.getSession();
 
   if (session?.user) {
@@ -18,12 +19,15 @@ export async function initAuth() {
     await loadProfile(session.user.id);
   }
 
+  // Listen for future auth changes
   supabase.auth.onAuthStateChange(async (event, session) => {
     if (event === 'SIGNED_IN' && session?.user) {
       currentSession.user = session.user;
       await loadProfile(session.user.id);
     } else if (event === 'SIGNED_OUT') {
       currentSession = { user: null, profile: null };
+    } else if (event === 'TOKEN_REFRESHED' && session?.user) {
+      currentSession.user = session.user;
     }
   });
 }

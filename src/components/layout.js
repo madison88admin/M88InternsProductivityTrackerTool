@@ -61,7 +61,11 @@ function getNavItems(role) {
  * @param {string} contentHtml
  * @param {Function} [init]
  */
-export function renderLayout(contentHtml, init) {
+export function renderLayout(contentHtml, init, guardPath) {
+  // Stale-render guard: if the URL changed while this page's async queries were
+  // running (e.g. user switched tabs then navigated), abandon the render so we
+  // never overwrite freshly rendered content with a slow stale response.
+  if (guardPath && window.location.hash !== `#${guardPath}`) return;
   const role = getUserRole();
   const profile = getProfile();
   const navItems = getNavItems(role);
@@ -136,6 +140,26 @@ export function renderLayout(contentHtml, init) {
   overlay?.addEventListener('click', () => {
     sidebar.classList.add('-translate-x-full');
     overlay.classList.add('hidden');
+  });
+
+  // Intercept all sidebar anchor clicks via event delegation.
+  // Do a full page reload on navigation to ensure a clean state on every panel switch.
+  sidebar?.addEventListener('click', (e) => {
+    const link = e.target.closest('a[href^="#"]');
+    if (link) {
+      e.preventDefault();
+      const newHash = link.getAttribute('href'); // e.g. '#/dashboard'
+      const newPath = newHash.slice(1);          // e.g. '/dashboard'
+      if (window.location.hash === newHash) {
+        // Same page — just re-render in place without a full reload
+        navigateTo(newPath);
+      } else {
+        // Silently update the hash (no hashchange event, no in-page loader),
+        // then do a single full reload which picks up the new hash.
+        history.replaceState(null, '', newHash);
+        window.location.reload();
+      }
+    }
   });
 
   document.getElementById('logout-btn')?.addEventListener('click', async () => {

@@ -87,7 +87,7 @@ export async function renderLocationsPage() {
         }, 'Delete');
       });
     });
-  });
+  }, '/locations');
 }
 
 function openLocationModal(loc) {

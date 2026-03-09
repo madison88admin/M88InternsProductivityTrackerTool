@@ -54,11 +54,11 @@ export async function renderAllowanceManagementPage() {
     <div class="card mb-6">
       <div class="flex items-center justify-between">
         <div>
-          <p class="text-sm text-neutral-500">Current Hourly Rate</p>
-          <p class="text-3xl font-bold text-primary-600">₱${currentRate?.hourly_rate?.toFixed(2) || '0.00'}</p>
-          ${currentRate ? `<p class="text-xs text-neutral-400 mt-1">Effective from ${formatDate(currentRate.effective_from)}</p>` : ''}
+          <p class="text-sm text-white">Current Hourly Rate</p>
+          <p class="text-3xl font-bold text-white">₱${currentRate?.hourly_rate?.toFixed(2) || '0.00'}</p>
+          ${currentRate ? `<p class="text-xs text-white mt-1">Effective from ${formatDate(currentRate.effective_from)}</p>` : ''}
         </div>
-        ${currentRate?.notes ? `<p class="text-sm text-neutral-500 max-w-xs">${currentRate.notes}</p>` : ''}
+        ${currentRate?.notes ? `<p class="text-sm text-white max-w-xs">${currentRate.notes}</p>` : ''}
       </div>
     </div>
 
@@ -223,7 +223,7 @@ export async function renderAllowanceManagementPage() {
         }
       }, 'Approve All');
     });
-  });
+  }, '/allowance-management');
 }
 
 function openSetRateModal(currentRate, profile) {

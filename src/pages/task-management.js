@@ -140,7 +140,7 @@ export async function renderTaskManagementPage() {
 
     filterStatus.addEventListener('change', applyFilters);
     filterIntern.addEventListener('change', applyFilters);
-  });
+  }, '/task-management');
 }
 
 function openCreateTaskModal(interns, profile) {

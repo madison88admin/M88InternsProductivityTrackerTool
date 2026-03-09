@@ -19,7 +19,7 @@ export async function renderNotificationsPage() {
     .order('created_at', { ascending: false })
     .limit(100);
 
-  const unreadCount = (notifications || []).filter(n => !n.read_at).length;
+  const unreadCount = (notifications || []).filter(n => !n.is_read).length;
 
   renderLayout(`
     <div class="flex items-center justify-between mb-6">
@@ -43,7 +43,7 @@ export async function renderNotificationsPage() {
         </div>
       ` : ''}
       ${(notifications || []).map(n => `
-        <div class="card flex items-start gap-4 cursor-pointer notification-item ${n.read_at ? 'opacity-60' : 'border-l-4 border-primary-500'}" data-id="${n.id}" data-read="${!!n.read_at}">
+        <div class="card flex items-start gap-4 cursor-pointer notification-item ${n.is_read ? 'opacity-60' : 'border-l-4 border-primary-500'}" data-id="${n.id}" data-read="${!!n.is_read}">
           <div class="shrink-0 w-10 h-10 rounded-full flex items-center justify-center ${getNotifColor(n.type)}">
             ${getNotifIcon(n.type)}
           </div>
@@ -52,7 +52,7 @@ export async function renderNotificationsPage() {
             <p class="text-sm text-neutral-500 mt-1">${n.message || ''}</p>
             <p class="text-xs text-neutral-400 mt-2">${formatDateTime(n.created_at)}</p>
           </div>
-          ${!n.read_at ? `<span class="w-2 h-2 bg-primary-500 rounded-full shrink-0 mt-2"></span>` : ''}
+          ${!n.is_read ? `<span class="w-2 h-2 bg-primary-500 rounded-full shrink-0 mt-2"></span>` : ''}
         </div>
       `).join('')}
     </div>
@@ -62,9 +62,9 @@ export async function renderNotificationsPage() {
       try {
         await supabase
           .from('notifications')
-          .update({ read_at: new Date().toISOString() })
+          .update({ is_read: true })
           .eq('user_id', profile.id)
-          .is('read_at', null);
+          .eq('is_read', false);
         showToast('All marked as read', 'success');
         renderNotificationsPage();
       } catch (err) {
@@ -78,7 +78,7 @@ export async function renderNotificationsPage() {
         if (item.dataset.read === 'false') {
           await supabase
             .from('notifications')
-            .update({ read_at: new Date().toISOString() })
+            .update({ is_read: true })
             .eq('id', item.dataset.id);
           item.classList.remove('border-l-4', 'border-primary-500');
           item.classList.add('opacity-60');
@@ -88,7 +88,7 @@ export async function renderNotificationsPage() {
         }
       });
     });
-  });
+  }, '/notifications');
 }
 
 function getNotifColor(type) {

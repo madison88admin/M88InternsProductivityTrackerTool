@@ -33,7 +33,7 @@ export async function renderDashboard() {
 
   renderLayout(content, (el) => {
     initDashboardCharts(role, el);
-  });
+  }, '/dashboard');
 }
 
 async function buildInternDashboard(profile) {

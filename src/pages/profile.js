@@ -197,5 +197,5 @@ export async function renderProfilePage() {
         showToast(err.message || 'Failed to update password', 'error');
       }
     });
-  });
+  }, '/profile');
 }

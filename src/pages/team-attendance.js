@@ -136,5 +136,5 @@ export async function renderTeamAttendancePage() {
       selectedStatus = e.target.value;
       renderContent(el);
     });
-  });
+  }, '/team-attendance');
 }

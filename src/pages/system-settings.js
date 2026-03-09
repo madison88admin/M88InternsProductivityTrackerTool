@@ -136,5 +136,5 @@ export async function renderSystemSettingsPage() {
         btn.disabled = false;
       }
     });
-  });
+  }, '/system-settings');
 }

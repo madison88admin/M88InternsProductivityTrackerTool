@@ -124,7 +124,7 @@ export async function renderApprovalsPage() {
       showToast(`${todayPending.length} items approved`, 'success');
       renderApprovalsPage();
     });
-  });
+  }, '/approvals');
 }
 
 function renderApprovalCard(approval) {

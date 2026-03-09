@@ -39,7 +39,13 @@ export function setBeforeEach(guard) {
  * @param {string} path
  */
 export function navigateTo(path) {
-  window.location.hash = `#${path}`;
+  const newHash = `#${path}`;
+  if (window.location.hash === newHash) {
+    // Hash already matches — hashchange won't fire, so force a re-render
+    handleRouteChange();
+  } else {
+    window.location.hash = newHash;
+  }
 }
 
 /**
@@ -89,15 +95,39 @@ function matchRoute(path) {
   return null;
 }
 
+/** Counter to detect stale navigations */
+let navigationId = 0;
+
+/**
+ * Show a full-page loading screen immediately while a route is loading.
+ */
+function showPageLoader() {
+  const app = document.getElementById('app');
+  if (app) {
+    app.innerHTML = `
+      <div class="min-h-screen flex items-center justify-center bg-neutral-50">
+        <div class="flex flex-col items-center gap-4">
+          <div class="spinner-lg"></div>
+          <p class="text-sm text-neutral-500">Loading...</p>
+        </div>
+      </div>
+    `;
+  }
+}
+
 /**
  * Handle route changes.
  */
 async function handleRouteChange() {
+  const thisNav = ++navigationId;
   const path = getCurrentPath();
+
+  // Show loader immediately so there's visual feedback while async queries run
+  showPageLoader();
 
   if (beforeEachGuard) {
     const allowed = await beforeEachGuard(path);
-    if (!allowed) return;
+    if (!allowed || thisNav !== navigationId) return;
   }
 
   const matched = matchRoute(path);
@@ -107,6 +137,20 @@ async function handleRouteChange() {
       await matched.route.handler(matched.params);
     } catch (err) {
       console.error(`Route error for ${path}:`, err);
+      // Always show the error state — never silently leave a stale page visible.
+      if (thisNav === navigationId) {
+        const app = document.getElementById('app');
+        if (app) {
+          app.innerHTML = `
+            <div class="min-h-screen flex items-center justify-center">
+              <div class="text-center">
+                <p class="text-neutral-500 mb-4">Something went wrong loading this page.</p>
+                <button onclick="location.reload()" class="btn-primary">Reload</button>
+              </div>
+            </div>
+          `;
+        }
+      }
     }
   } else if (notFoundHandler) {
     await notFoundHandler();
@@ -118,6 +162,7 @@ async function handleRouteChange() {
  */
 export function initRouter() {
   window.addEventListener('hashchange', handleRouteChange);
+
   // Handle initial load
   if (!window.location.hash) {
     window.location.hash = '#/login';

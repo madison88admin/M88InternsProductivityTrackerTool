@@ -238,7 +238,7 @@ function openNarrativeModal(tasks, profile, today) {
         submitBtn.textContent = 'Submit Narrative';
       }
     });
-  });
+  }, '/narratives');
 }
 
 function openEditNarrativeModal(narrative, tasks, profile) {
