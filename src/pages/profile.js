@@ -22,7 +22,7 @@ export async function renderProfilePage() {
       .eq('intern_id', profile.id)
       .eq('status', 'approved');
     const completedHours = (attendance || []).reduce((s, r) => s + (r.total_hours || 0), 0);
-    ojtInfo = { completed: completedHours, required: profile.required_hours || 600 };
+    ojtInfo = { completed: completedHours, required: profile.hours_required || 600 };
   }
 
   const avatarUrl = profile.avatar_url

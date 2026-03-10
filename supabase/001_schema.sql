@@ -443,10 +443,11 @@ BEGIN
     SET ojt_end_date = (
       SELECT CASE 
         WHEN hours_required > 0 AND hours_rendered > 0 THEN
-          ojt_start_date + (
-            (hours_required / GREATEST(hours_rendered / GREATEST(
-              EXTRACT(DAY FROM NOW() - ojt_start_date)::integer, 1
-            ), 0.1)) * INTERVAL '1 day'
+          ojt_start_date + ROUND(
+            hours_required / GREATEST(
+              hours_rendered / GREATEST(
+                EXTRACT(DAY FROM NOW() - ojt_start_date)::numeric, 1
+              ), 0.1)
           )::integer
         ELSE NULL
       END

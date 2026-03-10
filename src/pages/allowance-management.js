@@ -284,23 +284,40 @@ async function computeWeeklyAllowances(currentRate, profile) {
     return;
   }
 
+  // Default to the current week's Monday
   const now = new Date();
-  const lastMonday = getMonday(new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000));
-  const lastFriday = getFriday(lastMonday);
+  const thisMonday = getMonday(now);
+  const defaultWeekStart = thisMonday.toISOString().slice(0, 10);
 
   createModal('Compute Weekly Allowances', `
     <div class="space-y-4">
-      <p class="text-sm text-neutral-600">
-        This will compute allowances for the week of <strong>${formatDate(lastMonday)} – ${formatDate(lastFriday)}</strong>
-        using the current rate of <strong>₱${currentRate.hourly_rate.toFixed(2)}/hour</strong>.
+      <div>
+        <label class="form-label">Week Starting (Monday) <span class="text-danger-500">*</span></label>
+        <input type="date" id="compute-week-start" class="form-input" value="${defaultWeekStart}" />
+        <p class="text-xs text-neutral-400 mt-1">The Friday of the selected week will be the end date.</p>
+      </div>
+      <p class="text-sm text-neutral-500">
+        Current rate: <strong>₱${currentRate.hourly_rate.toFixed(2)}/hour</strong>. Only approved attendance records will be counted.
       </p>
-      <p class="text-sm text-neutral-500">Only approved attendance records will be counted.</p>
+      <p id="compute-week-label" class="text-sm text-neutral-600"></p>
       <div class="flex justify-end gap-3">
         <button id="compute-cancel" class="btn-secondary">Cancel</button>
         <button id="compute-confirm" class="btn-primary">Compute Now</button>
       </div>
     </div>
   `, (el, close) => {
+    const weekStartInput = el.querySelector('#compute-week-start');
+    const weekLabel = el.querySelector('#compute-week-label');
+
+    function updateLabel() {
+      const picked = new Date(weekStartInput.value + 'T00:00:00');
+      const monday = getMonday(picked);
+      const friday = getFriday(monday);
+      weekLabel.textContent = `Will compute: ${formatDate(monday)} – ${formatDate(friday)}`;
+    }
+    updateLabel();
+    weekStartInput.addEventListener('change', updateLabel);
+
     el.querySelector('#compute-cancel').addEventListener('click', close);
 
     el.querySelector('#compute-confirm').addEventListener('click', async () => {
@@ -309,6 +326,12 @@ async function computeWeeklyAllowances(currentRate, profile) {
       btn.textContent = 'Computing...';
 
       try {
+        const picked = new Date(weekStartInput.value + 'T00:00:00');
+        const monday = getMonday(picked);
+        const friday = getFriday(monday);
+        const weekStart = monday.toISOString().slice(0, 10);
+        const weekEnd = friday.toISOString().slice(0, 10);
+
         // Get all active interns
         const { data: interns } = await supabase
           .from('profiles')
@@ -317,17 +340,15 @@ async function computeWeeklyAllowances(currentRate, profile) {
           .eq('is_active', true);
 
         let computed = 0;
-        const weekStart = lastMonday.toISOString().slice(0, 10);
-        const weekEnd = lastFriday.toISOString().slice(0, 10);
 
         for (const intern of (interns || [])) {
-          // Check if already computed
+          // Check if already computed for this week
           const { data: existing } = await supabase
             .from('allowance_periods')
             .select('id')
             .eq('intern_id', intern.id)
             .eq('week_start', weekStart)
-            .single();
+            .maybeSingle();
 
           if (existing) continue;
 
@@ -362,7 +383,7 @@ async function computeWeeklyAllowances(currentRate, profile) {
           interns_computed: computed,
         });
 
-        showToast(`Allowances computed for ${computed} interns`, 'success');
+        showToast(computed > 0 ? `Allowances computed for ${computed} intern${computed !== 1 ? 's' : ''}` : 'No new allowances to compute (already computed or no approved hours)', computed > 0 ? 'success' : 'info');
         close();
         renderAllowanceManagementPage();
       } catch (err) {

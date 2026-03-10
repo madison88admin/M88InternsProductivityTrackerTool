@@ -2,7 +2,7 @@
  * Dashboard Page
  * Renders role-specific dashboard content.
  */
-import { getUserRole, getProfile } from '../lib/auth.js';
+import { getUserRole, getProfile, refreshProfile } from '../lib/auth.js';
 import { renderLayout } from '../components/layout.js';
 import { supabase } from '../lib/supabase.js';
 import { icons } from '../lib/icons.js';
@@ -37,6 +37,10 @@ export async function renderDashboard() {
 }
 
 async function buildInternDashboard(profile) {
+  // Refresh profile so hours_rendered reflects latest approved attendance
+  await refreshProfile();
+  profile = getProfile();
+
   const today = getTodayDate();
 
   // Fetch today's attendance

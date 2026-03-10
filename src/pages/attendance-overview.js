@@ -6,7 +6,7 @@ import { renderLayout } from '../components/layout.js';
 import { supabase } from '../lib/supabase.js';
 import { showToast } from '../lib/toast.js';
 import { icons } from '../lib/icons.js';
-import { formatDate, formatHoursDisplay } from '../lib/utils.js';
+import { formatDate, formatHoursDisplay, formatTime } from '../lib/utils.js';
 
 export async function renderAttendanceOverviewPage() {
   const { data: locations } = await supabase
@@ -146,10 +146,10 @@ export async function renderAttendanceOverviewPage() {
                 <tr>
                   <td>${r.intern?.full_name || '—'}</td>
                   <td>${formatDate(r.date)}</td>
-                  <td class="text-sm">${r.morning_in || '—'}</td>
-                  <td class="text-sm">${r.morning_out || '—'}</td>
-                  <td class="text-sm">${r.afternoon_in || '—'}</td>
-                  <td class="text-sm">${r.afternoon_out || '—'}</td>
+                  <td class="text-sm">${r.time_in_1 ? formatTime(r.time_in_1) : '—'}</td>
+                  <td class="text-sm">${r.time_out_1 ? formatTime(r.time_out_1) : '—'}</td>
+                  <td class="text-sm">${r.time_in_2 ? formatTime(r.time_in_2) : '—'}</td>
+                  <td class="text-sm">${r.time_out_2 ? formatTime(r.time_out_2) : '—'}</td>
                   <td>${formatHoursDisplay(r.total_hours)}</td>
                   <td><span class="badge-${r.status === 'approved' ? 'success' : r.status === 'rejected' ? 'danger' : 'pending'}">${r.status}</span></td>
                   <td>
@@ -179,10 +179,10 @@ export async function renderAttendanceOverviewPage() {
             Intern: r.intern?.full_name,
             Email: r.intern?.email,
             Date: r.date,
-            'AM In': r.morning_in,
-            'AM Out': r.morning_out,
-            'PM In': r.afternoon_in,
-            'PM Out': r.afternoon_out,
+            'AM In': r.time_in_1 ? formatTime(r.time_in_1) : '',
+            'AM Out': r.time_out_1 ? formatTime(r.time_out_1) : '',
+            'PM In': r.time_in_2 ? formatTime(r.time_in_2) : '',
+            'PM Out': r.time_out_2 ? formatTime(r.time_out_2) : '',
             Hours: r.total_hours,
             Status: r.status,
             Late: r.is_late ? 'Yes' : 'No',

@@ -205,7 +205,7 @@ function openRejectModal(approvalId, approvals) {
 
 async function processApproval(approvalId, status, comments, approval) {
   // Update approval record
-  await supabase
+  const { error: approvalError } = await supabase
     .from('approvals')
     .update({
       status,
@@ -214,9 +214,11 @@ async function processApproval(approvalId, status, comments, approval) {
     })
     .eq('id', approvalId);
 
+  if (approvalError) throw new Error(approvalError.message);
+
   // Update the underlying entity based on type
   if (approval.type === 'attendance') {
-    await supabase
+    const { error } = await supabase
       .from('attendance_records')
       .update({
         status,
@@ -224,8 +226,10 @@ async function processApproval(approvalId, status, comments, approval) {
         approved_at: status === 'approved' ? new Date().toISOString() : null,
       })
       .eq('id', approval.entity_id);
+
+    if (error) throw new Error(error.message);
   } else if (approval.type === 'narrative') {
-    await supabase
+    const { error } = await supabase
       .from('narratives')
       .update({
         status,
@@ -233,6 +237,8 @@ async function processApproval(approvalId, status, comments, approval) {
         approved_at: status === 'approved' ? new Date().toISOString() : null,
       })
       .eq('id', approval.entity_id);
+
+    if (error) throw new Error(error.message);
   } else if (approval.type === 'task_status') {
     if (status === 'approved') {
       // Get the task's pending status and apply it
@@ -243,16 +249,20 @@ async function processApproval(approvalId, status, comments, approval) {
         .single();
 
       if (task?.pending_status) {
-        await supabase
+        const { error } = await supabase
           .from('tasks')
           .update({ status: task.pending_status, pending_status: null })
           .eq('id', approval.entity_id);
+
+        if (error) throw new Error(error.message);
       }
     } else {
-      await supabase
+      const { error } = await supabase
         .from('tasks')
         .update({ pending_status: null })
         .eq('id', approval.entity_id);
+
+      if (error) throw new Error(error.message);
     }
   } else if (approval.type === 'attendance_correction') {
     if (status === 'approved') {
@@ -263,12 +273,14 @@ async function processApproval(approvalId, status, comments, approval) {
         .single();
 
       if (correction) {
-        await supabase
+        const { error: recError } = await supabase
           .from('attendance_records')
           .update({ [correction.punch_type]: correction.requested_value })
           .eq('id', correction.attendance_id);
 
-        await supabase
+        if (recError) throw new Error(recError.message);
+
+        const { error: corrError } = await supabase
           .from('attendance_corrections')
           .update({
             status: 'approved',
@@ -276,9 +288,11 @@ async function processApproval(approvalId, status, comments, approval) {
             reviewed_at: new Date().toISOString(),
           })
           .eq('id', correction.id);
+
+        if (corrError) throw new Error(corrError.message);
       }
     } else {
-      await supabase
+      const { error } = await supabase
         .from('attendance_corrections')
         .update({
           status: 'rejected',
@@ -287,6 +301,8 @@ async function processApproval(approvalId, status, comments, approval) {
           reviewed_at: new Date().toISOString(),
         })
         .eq('id', approval.entity_id);
+
+      if (error) throw new Error(error.message);
     }
   }
 
