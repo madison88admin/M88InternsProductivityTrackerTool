@@ -5,7 +5,7 @@
 import { renderLayout } from '../components/layout.js';
 import { supabase } from '../lib/supabase.js';
 import { icons } from '../lib/icons.js';
-import { formatDate, formatHoursDisplay, debounce, renderAvatar } from '../lib/utils.js';
+import { formatDate, formatHoursDisplay, debounce, renderAvatar, computeEstimatedEndDate } from '../lib/utils.js';
 
 export async function renderInternDirectoryPage() {
   const { data: interns } = await supabase
@@ -25,17 +25,20 @@ export async function renderInternDirectoryPage() {
     (supervisors || []).forEach(s => { supervisorMap[s.id] = s.full_name; });
   }
 
-  // Fetch hours per intern (approved attendance)
+  // Fetch hours and days worked per intern (approved attendance)
   const internIds = (interns || []).map(i => i.id);
   let hoursMap = {};
+  let daysWorkedMap = {};
   if (internIds.length > 0) {
     const { data: attendance } = await supabase
       .from('attendance_records')
-      .select('intern_id, total_hours')
+      .select('intern_id, total_hours, date')
       .in('intern_id', internIds)
       .eq('status', 'approved');
     (attendance || []).forEach(r => {
       hoursMap[r.intern_id] = (hoursMap[r.intern_id] || 0) + (r.total_hours || 0);
+      if (!daysWorkedMap[r.intern_id]) daysWorkedMap[r.intern_id] = new Set();
+      daysWorkedMap[r.intern_id].add(r.date);
     });
   }
 
@@ -65,8 +68,10 @@ export async function renderInternDirectoryPage() {
 
     container.innerHTML = filtered.map(i => {
       const completed = hoursMap[i.id] || 0;
-      const required = i.required_hours || 600;
+      const required = i.hours_required || 500;
       const pct = Math.min(100, (completed / required) * 100);
+      const daysWorked = daysWorkedMap[i.id] ? daysWorkedMap[i.id].size : 0;
+      const estEnd = computeEstimatedEndDate(required, completed, daysWorked);
 
       return `
         <div class="card">
@@ -95,6 +100,7 @@ export async function renderInternDirectoryPage() {
               <div class="progress-bar-fill" style="width: ${pct.toFixed(1)}%"></div>
             </div>
             <p class="text-xs text-neutral-400 mt-1">${formatHoursDisplay(completed)} / ${formatHoursDisplay(required)}</p>
+            ${estEnd ? `<p class="text-xs text-primary-500 mt-1">${icons.calendar} Est. completion: ${formatDate(estEnd)}</p>` : completed >= required && required > 0 ? `<p class="text-xs text-success-500 mt-1">✅ Completed</p>` : ''}
           </div>
         </div>
       `;

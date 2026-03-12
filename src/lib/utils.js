@@ -142,6 +142,31 @@ export function getTodayDate() {
 }
 
 /**
+ * Compute the estimated OJT end date.
+ * Uses average daily hours rendered (or 8 hrs/day default) and skips weekends.
+ * @param {number} hoursRequired
+ * @param {number} hoursRendered
+ * @param {number} daysWorked - Distinct days with approved attendance
+ * @returns {Date|null}
+ */
+export function computeEstimatedEndDate(hoursRequired, hoursRendered, daysWorked) {
+  if (hoursRequired <= 0) return null;
+  const remaining = hoursRequired - hoursRendered;
+  if (remaining <= 0) return null;
+  const avgDaily = daysWorked > 0 ? hoursRendered / daysWorked : 8;
+  const weekdaysNeeded = Math.ceil(remaining / avgDaily);
+  const date = new Date();
+  date.setHours(0, 0, 0, 0);
+  let added = 0;
+  while (added < weekdaysNeeded) {
+    date.setDate(date.getDate() + 1);
+    const day = date.getDay();
+    if (day !== 0 && day !== 6) added++;
+  }
+  return date;
+}
+
+/**
  * Get the public IP address of the current user.
  * @returns {Promise<string>}
  */

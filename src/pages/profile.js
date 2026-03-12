@@ -8,7 +8,7 @@ import { supabase } from '../lib/supabase.js';
 import { showToast } from '../lib/toast.js';
 import { logAudit } from '../lib/audit.js';
 import { icons } from '../lib/icons.js';
-import { formatDate, formatHoursDisplay } from '../lib/utils.js';
+import { formatDate, formatHoursDisplay, computeEstimatedEndDate } from '../lib/utils.js';
 
 export async function renderProfilePage() {
   const profile = getProfile();
@@ -22,7 +22,13 @@ export async function renderProfilePage() {
       .eq('intern_id', profile.id)
       .eq('status', 'approved');
     const completedHours = (attendance || []).reduce((s, r) => s + (r.total_hours || 0), 0);
-    ojtInfo = { completed: completedHours, required: profile.hours_required || 600 };
+    const daysWorked = (attendance || []).length;
+    ojtInfo = { completed: completedHours, required: profile.hours_required || 500, daysWorked };
+  }
+
+  let estimatedEnd = null;
+  if (ojtInfo && ojtInfo.completed < ojtInfo.required && ojtInfo.required > 0) {
+    estimatedEnd = computeEstimatedEndDate(ojtInfo.required, ojtInfo.completed, ojtInfo.daysWorked);
   }
 
   const avatarUrl = profile.avatar_url
@@ -61,6 +67,7 @@ export async function renderProfilePage() {
             </div>
             <p class="text-sm font-semibold text-neutral-900">${formatHoursDisplay(ojtInfo.completed)} / ${formatHoursDisplay(ojtInfo.required)}</p>
             <p class="text-xs text-neutral-400 mt-0.5">${Math.min(100, (ojtInfo.completed / ojtInfo.required * 100)).toFixed(1)}% complete</p>
+            ${estimatedEnd ? `<p class="text-xs text-primary-500 mt-2">${icons.calendar} Est. completion: ${formatDate(estimatedEnd)}</p>` : ojtInfo.completed >= ojtInfo.required ? `<p class="text-xs text-success-500 mt-2">✅ OJT Completed!</p>` : ''}
           </div>
         ` : ''}
       </div>

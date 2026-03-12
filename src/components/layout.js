@@ -7,11 +7,12 @@ import { navigateTo } from '../lib/router.js';
 import { icons } from '../lib/icons.js';
 import { showToast } from '../lib/toast.js';
 import { renderAvatar } from '../lib/utils.js';
+import { supabase } from '../lib/supabase.js';
 
 /**
  * Get navigation items grouped by section based on role.
  */
-function getNavSections(role) {
+function getNavSections(role, profile) {
   const sections = {
     intern: [
       { label: 'Main', items: [
@@ -24,7 +25,7 @@ function getNavSections(role) {
         { path: '/narratives', label: 'Daily Narratives', icon: icons.narrative },
       ]},
       { label: 'Compensation', items: [
-        { path: '/my-allowance', label: 'My Allowance', icon: icons.money },
+        { path: '/my-allowance', label: 'My Allowance', icon: icons.php },
       ]},
     ],
     supervisor: [
@@ -54,9 +55,13 @@ function getNavSections(role) {
         { path: '/departments', label: 'Departments', icon: icons.building },
         { path: '/locations', label: 'Locations', icon: icons.location },
       ]},
+      ...(profile?.department_id ? [{ label: 'Team', items: [
+        { path: '/team-attendance', label: 'Team Attendance', icon: icons.clock },
+        { path: '/team-narratives', label: 'Team Narratives', icon: icons.narrative },
+      ]}] : []),
       { label: 'Operations', items: [
         { path: '/attendance-overview', label: 'Attendance', icon: icons.clock },
-        { path: '/allowance-management', label: 'Allowance', icon: icons.money },
+        { path: '/allowance-management', label: 'Allowance', icon: icons.php },
         { path: '/task-management', label: 'Tasks', icon: icons.tasks },
         { path: '/approvals', label: 'Approvals', icon: icons.approval },
         { path: '/reports', label: 'Reports', icon: icons.reports },
@@ -78,7 +83,7 @@ export function renderLayout(contentHtml, init, guardPath) {
   if (guardPath && window.location.hash !== `#${guardPath}`) return;
   const role = getUserRole();
   const profile = getProfile();
-  const navSections = getNavSections(role);
+  const navSections = getNavSections(role, profile);
   const currentPath = window.location.hash.slice(1);
 
   const roleLabels = { admin: 'Administrator', supervisor: 'Supervisor', intern: 'Intern' };
@@ -111,6 +116,7 @@ export function renderLayout(contentHtml, init, guardPath) {
                data-path="${item.path}">
               ${item.icon}
               <span>${item.label}</span>
+              ${item.path === '/notifications' ? `<span id="notif-dot" class="hidden ml-auto w-2.5 h-2.5 bg-red-500 rounded-full shrink-0"></span>` : ''}
             </a>
           `).join('')}
         `).join('')}
@@ -173,17 +179,36 @@ export function renderLayout(contentHtml, init, guardPath) {
     }
   });
 
-  document.getElementById('logout-btn')?.addEventListener('click', async () => {
+  document.getElementById('logout-btn')?.addEventListener('click', async (e) => {
+    const btn = e.currentTarget;
+    if (btn.disabled) return;
+    btn.disabled = true;
     try {
       await logout();
       showToast('Signed out successfully', 'success');
       navigateTo('/login');
     } catch (err) {
       showToast('Failed to sign out', 'error');
+      btn.disabled = false;
     }
   });
 
   if (init) {
     requestAnimationFrame(() => init(document.getElementById('page-content')));
+  }
+
+  // Show red dot on Notifications link if there are unread notifications
+  const notifDot = document.getElementById('notif-dot');
+  if (notifDot && profile?.id) {
+    supabase
+      .from('notifications')
+      .select('id', { count: 'exact', head: true })
+      .eq('user_id', profile.id)
+      .eq('is_read', false)
+      .then(({ count }) => {
+        if (count && count > 0) {
+          notifDot.classList.remove('hidden');
+        }
+      });
   }
 }

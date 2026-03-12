@@ -29,6 +29,7 @@ export async function renderApprovalsPage() {
 
   const pendingApprovals = (approvals || []).filter(a => a.status === 'pending');
   const reviewedApprovals = (approvals || []).filter(a => a.status !== 'pending');
+  const actionablePendingCount = pendingApprovals.filter(a => isAdmin || a.type !== 'attendance_correction').length;
 
   renderLayout(`
     <div class="page-header animate-fade-in-up">
@@ -41,7 +42,7 @@ export async function renderApprovalsPage() {
       <div class="flex items-center justify-between mb-4">
         <h3 class="text-base font-bold text-neutral-900">Pending (${pendingApprovals.length})</h3>
         ${pendingApprovals.length > 0 ? `
-          <button id="bulk-approve-btn" class="btn-sm btn-success">
+          <button id="bulk-approve-btn" class="btn-sm ${actionablePendingCount > 0 ? 'btn-success' : 'btn-secondary opacity-50 cursor-not-allowed'}" ${actionablePendingCount === 0 ? 'disabled' : ''}>
             ${icons.check} Approve All Today
           </button>
         ` : ''}
@@ -49,7 +50,7 @@ export async function renderApprovalsPage() {
 
       ${pendingApprovals.length > 0 ? `
         <div class="space-y-3">
-          ${pendingApprovals.map(a => renderApprovalCard(a)).join('')}
+          ${pendingApprovals.map(a => renderApprovalCard(a, isAdmin)).join('')}
         </div>
       ` : `
         <div class="text-center py-8 text-neutral-400">
@@ -110,7 +111,10 @@ export async function renderApprovalsPage() {
     // Bulk approve
     el.querySelector('#bulk-approve-btn')?.addEventListener('click', async () => {
       const today = new Date().toISOString().slice(0, 10);
-      const todayPending = pendingApprovals.filter(a => a.submitted_at?.slice(0, 10) === today);
+      const todayPending = pendingApprovals.filter(a =>
+        a.submitted_at?.slice(0, 10) === today &&
+        (isAdmin || a.type !== 'attendance_correction')
+      );
 
       if (todayPending.length === 0) {
         showToast('No pending approvals for today', 'info');
@@ -127,7 +131,8 @@ export async function renderApprovalsPage() {
   }, '/approvals');
 }
 
-function renderApprovalCard(approval) {
+function renderApprovalCard(approval, isAdmin = false) {
+  const canActOnCorrection = isAdmin || approval.type !== 'attendance_correction';
   return `
     <div class="border border-neutral-200 rounded-lg p-4 hover:bg-neutral-50 transition-colors">
       <div class="flex items-center justify-between">
@@ -136,6 +141,7 @@ function renderApprovalCard(approval) {
             <span class="badge-info">${approval.type.replace('_', ' ')}</span>
             <span class="font-medium text-neutral-900">${approval.intern?.full_name || 'Unknown'}</span>
             ${approval.is_escalated ? '<span class="badge-rejected">Escalated</span>' : ''}
+            ${approval.type === 'attendance_correction' && !isAdmin ? '<span class="text-xs text-neutral-400 italic">Admin approval required</span>' : ''}
           </div>
           <p class="text-sm text-neutral-500">
             Submitted ${formatDateTime(approval.submitted_at)}
@@ -146,12 +152,14 @@ function renderApprovalCard(approval) {
           <button class="btn-sm btn-secondary view-details-btn" data-approval-id="${approval.id}" title="View Details">
             ${icons.eye}
           </button>
-          <button class="btn-sm btn-success approve-btn" data-approval-id="${approval.id}" title="Approve">
-            ${icons.check}
-          </button>
-          <button class="btn-sm btn-danger reject-btn" data-approval-id="${approval.id}" title="Reject">
-            ${icons.x}
-          </button>
+          ${canActOnCorrection ? `
+            <button class="btn-sm btn-success approve-btn" data-approval-id="${approval.id}" title="Approve">
+              ${icons.check}
+            </button>
+            <button class="btn-sm btn-danger reject-btn" data-approval-id="${approval.id}" title="Reject">
+              ${icons.x}
+            </button>
+          ` : ''}
         </div>
       </div>
     </div>
@@ -388,10 +396,27 @@ async function viewApprovalDetails(approvalId, approvals) {
             <p class="text-xs text-neutral-500">Task</p>
             <p class="font-medium">${narrative.task?.title || 'Unknown'}</p>
           </div>
-          <div class="p-3 bg-neutral-50 rounded-lg">
-            <p class="text-xs text-neutral-500">Date</p>
-            <p class="font-medium">${formatDate(narrative.date)}</p>
+          <div class="grid grid-cols-2 gap-3">
+            <div class="p-3 bg-neutral-50 rounded-lg">
+              <p class="text-xs text-neutral-500">Date</p>
+              <p class="font-medium">${formatDate(narrative.date)}</p>
+            </div>
+            <div class="p-3 bg-neutral-50 rounded-lg">
+              <p class="text-xs text-neutral-500">Session</p>
+              <p class="font-medium capitalize">${narrative.session || '—'}</p>
+            </div>
           </div>
+          ${narrative.hours ? `
+            <div class="p-3 bg-neutral-50 rounded-lg">
+              <p class="text-xs text-neutral-500">Hours</p>
+              <p class="font-medium">${formatHoursDisplay(narrative.hours)}</p>
+            </div>
+          ` : ''}
+          ${narrative.is_late_submission ? `
+            <div class="p-2 bg-warning-50 rounded-lg">
+              <p class="text-sm text-warning-600">⚠ Late submission</p>
+            </div>
+          ` : ''}
           <div>
             <p class="text-xs text-neutral-500 mb-1">Narrative Content</p>
             <div class="prose prose-sm border border-neutral-200 rounded-lg p-3">${narrative.content}</div>
@@ -422,6 +447,50 @@ async function viewApprovalDetails(approvalId, approvals) {
               <p class="text-xs text-neutral-500">Requested Status</p>
               <p class="font-medium capitalize">${task.pending_status?.replace('_', ' ') || '—'}</p>
             </div>
+          </div>
+        </div>
+      `;
+    }
+  } else if (approval.type === 'attendance_correction') {
+    const { data: correction } = await supabase
+      .from('attendance_corrections')
+      .select('*, attendance:attendance_records!attendance_id(date)')
+      .eq('id', approval.entity_id)
+      .single();
+
+    const punchLabels = {
+      time_in_1: 'Morning Time In',
+      time_out_1: 'Lunch Time Out',
+      time_in_2: 'Afternoon Time In',
+      time_out_2: 'End of Day Time Out',
+    };
+
+    if (correction) {
+      detailHtml = `
+        <div class="space-y-3">
+          <div class="grid grid-cols-2 gap-3">
+            <div class="p-3 bg-neutral-50 rounded-lg">
+              <p class="text-xs text-neutral-500">Date</p>
+              <p class="font-medium">${correction.attendance?.date ? formatDate(correction.attendance.date) : '—'}</p>
+            </div>
+            <div class="p-3 bg-neutral-50 rounded-lg">
+              <p class="text-xs text-neutral-500">Punch Type</p>
+              <p class="font-medium">${punchLabels[correction.punch_type] || correction.punch_type}</p>
+            </div>
+          </div>
+          <div class="grid grid-cols-2 gap-3">
+            <div class="p-3 bg-neutral-50 rounded-lg">
+              <p class="text-xs text-neutral-500">Original Time</p>
+              <p class="font-medium">${correction.original_value ? formatTime(correction.original_value) : '—'}</p>
+            </div>
+            <div class="p-3 bg-info-50 rounded-lg border border-info-200">
+              <p class="text-xs text-neutral-500">Requested Time</p>
+              <p class="font-medium text-info-700">${correction.requested_value ? formatTime(correction.requested_value) : '—'}</p>
+            </div>
+          </div>
+          <div class="p-3 bg-neutral-50 rounded-lg">
+            <p class="text-xs text-neutral-500 mb-1">Reason</p>
+            <p class="text-sm text-neutral-800">${correction.reason || '—'}</p>
           </div>
         </div>
       `;

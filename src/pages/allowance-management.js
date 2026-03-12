@@ -44,7 +44,7 @@ export async function renderAllowanceManagementPage() {
           <span class="ml-2">Set Rate</span>
         </button>
         <button id="compute-btn" class="btn-primary">
-          ${icons.money}
+          ${icons.php}
           <span class="ml-2">Compute Weekly</span>
         </button>
       </div>

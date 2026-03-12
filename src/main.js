@@ -57,8 +57,8 @@ addRoute('/my-allowance', renderMyAllowancePage, ['intern']);
 // Supervisor
 addRoute('/approvals', renderApprovalsPage, ['supervisor', 'admin']);
 addRoute('/task-management', renderTaskManagementPage, ['supervisor', 'admin']);
-addRoute('/team-attendance', renderTeamAttendancePage, ['supervisor']);
-addRoute('/team-narratives', renderTeamNarrativesPage, ['supervisor']);
+addRoute('/team-attendance', renderTeamAttendancePage, ['supervisor', 'admin']);
+addRoute('/team-narratives', renderTeamNarrativesPage, ['supervisor', 'admin']);
 
 // HR (Admin only)
 addRoute('/allowance-management', renderAllowanceManagementPage, ['admin']);
@@ -116,8 +116,8 @@ registerRoles('/narratives', ['intern']);
 registerRoles('/my-allowance', ['intern']);
 registerRoles('/approvals', ['supervisor', 'admin']);
 registerRoles('/task-management', ['supervisor', 'admin']);
-registerRoles('/team-attendance', ['supervisor']);
-registerRoles('/team-narratives', ['supervisor']);
+registerRoles('/team-attendance', ['supervisor', 'admin']);
+registerRoles('/team-narratives', ['supervisor', 'admin']);
 registerRoles('/allowance-management', ['admin']);
 registerRoles('/reports', ['admin']);
 registerRoles('/intern-directory', ['admin']);

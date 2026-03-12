@@ -309,27 +309,57 @@ function openCorrectionModal(record, profile) {
       const correctedTimestamp = new Date(`${record.date}T${timeValue}:00`).toISOString();
 
       try {
-        const { error } = await supabase.from('attendance_corrections').insert({
+        const { data: correctionData, error } = await supabase.from('attendance_corrections').insert({
           attendance_id: record.id,
           intern_id: profile.id,
           punch_type: punchType,
           original_value: record[punchType] || null,
           requested_value: correctedTimestamp,
           reason: reason.trim(),
-        });
+        }).select().single();
 
         if (error) throw error;
 
-        // Notify supervisor
+        // Create approval entry so supervisor/admin can act on it from the Approvals page
         if (profile.supervisor_id) {
+          await supabase.from('approvals').insert({
+            type: 'attendance_correction',
+            entity_id: correctionData.id,
+            intern_id: profile.id,
+            supervisor_id: profile.supervisor_id,
+          });
+
           await supabase.from('notifications').insert({
             user_id: profile.supervisor_id,
             type: 'pending_approval',
             title: 'Attendance Correction Request',
             message: `${profile.full_name} has requested an attendance correction for ${formatDate(record.date)}`,
             entity_type: 'attendance_correction',
-            entity_id: record.id,
+            entity_id: correctionData.id,
           });
+        }
+
+        // Also notify all active admins since only admins can approve corrections
+        const { data: admins } = await supabase
+          .from('profiles')
+          .select('id')
+          .eq('role', 'admin')
+          .eq('is_active', true);
+
+        if (admins && admins.length > 0) {
+          const adminNotifs = admins
+            .filter(a => a.id !== profile.supervisor_id)
+            .map(a => ({
+              user_id: a.id,
+              type: 'pending_approval',
+              title: 'Attendance Correction Request',
+              message: `${profile.full_name} has requested an attendance correction for ${formatDate(record.date)}`,
+              entity_type: 'attendance_correction',
+              entity_id: correctionData.id,
+            }));
+          if (adminNotifs.length > 0) {
+            await supabase.from('notifications').insert(adminNotifs);
+          }
         }
 
         await logAudit('attendance.correction_requested', 'attendance_correction', record.id, {

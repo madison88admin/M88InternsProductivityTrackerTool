@@ -1,5 +1,5 @@
 /**
- * Team Attendance Page (Supervisor)
+ * Team Attendance Page (Supervisor / Admin with department)
  * View and manage attendance of assigned interns.
  */
 import { getProfile } from '../lib/auth.js';
@@ -10,15 +10,23 @@ import { formatDate, formatHoursDisplay, getMonday, getFriday } from '../lib/uti
 
 export async function renderTeamAttendancePage() {
   const profile = getProfile();
+  const isAdmin = profile.role === 'admin';
 
-  // Get interns assigned to this supervisor
-  const { data: interns } = await supabase
+  // Admins find their interns by department; supervisors by supervisor_id
+  let internsQuery = supabase
     .from('profiles')
     .select('id, full_name, email')
-    .eq('supervisor_id', profile.id)
     .eq('role', 'intern')
     .eq('is_active', true)
     .order('full_name');
+
+  if (isAdmin && profile.department_id) {
+    internsQuery = internsQuery.or(`department_id.eq.${profile.department_id},supervisor_id.eq.${profile.id}`);
+  } else {
+    internsQuery = internsQuery.eq('supervisor_id', profile.id);
+  }
+
+  const { data: interns } = await internsQuery;
 
   const internIds = (interns || []).map(i => i.id);
 
@@ -74,6 +82,10 @@ export async function renderTeamAttendancePage() {
     el.querySelector('#record-count').textContent = `${filtered.length} record${filtered.length !== 1 ? 's' : ''}`;
   }
 
+  const allInternsLabel = isAdmin && profile.department_id
+    ? `All Interns — ${profile.departments?.name || 'Department'}`
+    : 'All Interns';
+
   renderLayout(`
     <div class="page-header animate-fade-in-up">
       <h1 class="page-title">Team Attendance</h1>
@@ -86,7 +98,7 @@ export async function renderTeamAttendancePage() {
         <div>
           <label class="form-label">Intern</label>
           <select id="filter-intern" class="form-input">
-            <option value="">All Interns</option>
+            <option value="">${allInternsLabel}</option>
             ${(interns || []).map(i => `<option value="${i.id}">${i.full_name}</option>`).join('')}
           </select>
         </div>

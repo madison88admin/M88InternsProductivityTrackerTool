@@ -21,7 +21,12 @@ export async function renderUserManagementPage() {
 
   const { data: departments } = await supabase.from('departments').select('id, name').eq('is_active', true);
   const { data: locations } = await supabase.from('locations').select('id, name').eq('is_active', true);
-  const { data: supervisors } = await supabase.from('profiles').select('id, full_name').eq('role', 'supervisor').eq('is_active', true);
+  const { data: supervisors } = await supabase
+    .from('profiles')
+    .select('id, full_name, department_id')
+    .or('role.eq.supervisor,and(role.eq.admin,department_id.not.is.null)')
+    .eq('is_active', true)
+    .order('full_name');
 
   renderLayout(`
     <div class="flex items-center justify-between page-header animate-fade-in-up">
@@ -167,6 +172,30 @@ export async function renderUserManagementPage() {
   }, '/user-management');
 }
 
+/**
+ * Auto-populate the supervisor select based on the chosen department.
+ * - 1 match  → auto-select & disable (only one possibility)
+ * - 2+ match → show only those supervisors so the admin picks
+ * - 0 match  → show the full list as a fallback
+ */
+function applyDeptSupervisor(deptId, supervisors, selectEl, currentValue = null, emptyLabel = 'Select supervisor...') {
+  const matching = deptId
+    ? (supervisors || []).filter(s => s.department_id === deptId)
+    : [];
+
+  if (matching.length === 1) {
+    selectEl.innerHTML = `<option value="${matching[0].id}">${matching[0].full_name}</option>`;
+    selectEl.value = matching[0].id;
+    selectEl.disabled = true;
+  } else {
+    const options = matching.length > 1 ? matching : (supervisors || []);
+    selectEl.innerHTML = `<option value="">${emptyLabel}</option>` +
+      options.map(s => `<option value="${s.id}">${s.full_name}</option>`).join('');
+    selectEl.disabled = false;
+    if (currentValue) selectEl.value = currentValue;
+  }
+}
+
 function openInviteModal(departments, locations, supervisors) {
   createModal('Invite New User', `
     <form id="invite-form" class="space-y-4">
@@ -263,6 +292,18 @@ function openInviteModal(departments, locations, supervisors) {
 
       roleFields.classList.toggle('hidden', !role);
       internFields.classList.toggle('hidden', role !== 'intern');
+
+      // When switching to intern, apply dept→supervisor logic if a dept is already chosen
+      if (role === 'intern') {
+        const deptId = el.querySelector('#invite-department').value;
+        applyDeptSupervisor(deptId, supervisors, el.querySelector('#invite-supervisor'));
+      }
+    });
+
+    // Auto-populate supervisor when department changes (intern role only)
+    el.querySelector('#invite-department').addEventListener('change', (e) => {
+      if (el.querySelector('#invite-role').value !== 'intern') return;
+      applyDeptSupervisor(e.target.value, supervisors, el.querySelector('#invite-supervisor'));
     });
 
     el.querySelector('#invite-form').addEventListener('submit', async (e) => {
@@ -395,6 +436,19 @@ function openEditUserModal(user, departments, locations, supervisors) {
     </form>
   `, (el, close) => {
     el.querySelector('#edit-cancel').addEventListener('click', close);
+
+    // Auto-populate supervisor when department changes
+    const editDeptSelect = el.querySelector('#edit-department');
+    const editSupervisorSelect = el.querySelector('#edit-supervisor');
+
+    editDeptSelect.addEventListener('change', (e) => {
+      applyDeptSupervisor(e.target.value, supervisors, editSupervisorSelect, null, 'None');
+    });
+
+    // On initial load for interns with a department, filter & auto-select supervisor
+    if (user.role === 'intern' && user.department_id) {
+      applyDeptSupervisor(user.department_id, supervisors, editSupervisorSelect, user.supervisor_id, 'None');
+    }
 
     el.querySelector('#edit-user-form').addEventListener('submit', async (e) => {
       e.preventDefault();

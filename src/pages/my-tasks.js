@@ -84,40 +84,101 @@ export async function renderMyTasksPage() {
 
         btn.disabled = true;
         try {
-          // Status changes require supervisor approval
-          const { error } = await supabase
-            .from('tasks')
-            .update({ pending_status: newStatus })
-            .eq('id', taskId);
+          if (newStatus === 'in_progress') {
+            // Starting a task: apply immediately, just notify supervisor
+            const { error } = await supabase
+              .from('tasks')
+              .update({ status: 'in_progress' })
+              .eq('id', taskId);
 
-          if (error) throw error;
+            if (error) throw error;
 
-          // Create approval entry
-          await supabase.from('approvals').insert({
-            type: 'task_status',
-            entity_id: taskId,
-            intern_id: profile.id,
-            supervisor_id: profile.supervisor_id,
-            comments: `Requesting status change to: ${newStatus.replace('_', ' ')}`,
-          });
+            // Notify supervisor that task is now in progress
+            const { data: taskData } = await supabase
+              .from('tasks')
+              .select('title')
+              .eq('id', taskId)
+              .single();
 
-          // Notify supervisor
-          if (profile.supervisor_id) {
-            await supabase.from('notifications').insert({
-              user_id: profile.supervisor_id,
+            const taskStartNotif = {
+              type: 'system',
+              title: 'Task In Progress',
+              message: `${profile.full_name} has started working on "${taskData?.title || 'a task'}".`,
+              entity_type: 'task',
+              entity_id: taskId,
+            };
+
+            if (profile.supervisor_id) {
+              await supabase.from('notifications').insert({ user_id: profile.supervisor_id, ...taskStartNotif });
+            }
+
+            // Also notify all active admins
+            const { data: admins } = await supabase
+              .from('profiles')
+              .select('id')
+              .eq('role', 'admin')
+              .eq('is_active', true);
+
+            if (admins && admins.length > 0) {
+              const adminNotifs = admins
+                .filter(a => a.id !== profile.supervisor_id)
+                .map(a => ({ user_id: a.id, ...taskStartNotif }));
+              if (adminNotifs.length > 0) await supabase.from('notifications').insert(adminNotifs);
+            }
+
+            await logAudit('task.started', 'task', taskId, { status: 'in_progress' });
+            showToast('Task started!', 'success');
+          } else {
+            // Completing a task: still requires supervisor approval
+            const { error } = await supabase
+              .from('tasks')
+              .update({ pending_status: newStatus })
+              .eq('id', taskId);
+
+            if (error) throw error;
+
+            // Create approval entry
+            await supabase.from('approvals').insert({
+              type: 'task_status',
+              entity_id: taskId,
+              intern_id: profile.id,
+              supervisor_id: profile.supervisor_id,
+              comments: `Requesting status change to: ${newStatus.replace('_', ' ')}`,
+            });
+
+            // Notify supervisor
+            const taskCompleteNotif = {
               type: 'pending_approval',
               title: 'Task Status Change Request',
               message: `${profile.full_name} is requesting to change task status to "${newStatus.replace('_', ' ')}"`,
               entity_type: 'task',
               entity_id: taskId,
-            });
-          }
+            };
 
-          await logAudit('task.status_change_requested', 'task', taskId, { requested_status: newStatus });
-          showToast('Status change request sent to supervisor', 'success');
+            if (profile.supervisor_id) {
+              await supabase.from('notifications').insert({ user_id: profile.supervisor_id, ...taskCompleteNotif });
+            }
+
+            // Also notify all active admins
+            const { data: admins } = await supabase
+              .from('profiles')
+              .select('id')
+              .eq('role', 'admin')
+              .eq('is_active', true);
+
+            if (admins && admins.length > 0) {
+              const adminNotifs = admins
+                .filter(a => a.id !== profile.supervisor_id)
+                .map(a => ({ user_id: a.id, ...taskCompleteNotif }));
+              if (adminNotifs.length > 0) await supabase.from('notifications').insert(adminNotifs);
+            }
+
+            await logAudit('task.status_change_requested', 'task', taskId, { requested_status: newStatus });
+            showToast('Completion request sent to supervisor', 'success');
+          }
           renderMyTasksPage();
         } catch (err) {
-          showToast(err.message || 'Failed to request status change', 'error');
+          showToast(err.message || 'Failed to update task status', 'error');
           btn.disabled = false;
         }
       });

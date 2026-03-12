@@ -6,7 +6,7 @@ import { getUserRole, getProfile, refreshProfile } from '../lib/auth.js';
 import { renderLayout } from '../components/layout.js';
 import { supabase } from '../lib/supabase.js';
 import { icons } from '../lib/icons.js';
-import { formatDate, formatHoursDisplay, getTodayDate } from '../lib/utils.js';
+import { formatDate, formatHoursDisplay, getTodayDate, computeEstimatedEndDate } from '../lib/utils.js';
 
 export async function renderDashboard() {
   const role = getUserRole();
@@ -69,9 +69,20 @@ async function buildInternDashboard(profile) {
     .eq('user_id', profile.id)
     .eq('is_read', false);
 
+  // Fetch distinct days worked for estimated end date
+  const { count: daysWorked } = await supabase
+    .from('attendance_records')
+    .select('*', { count: 'exact', head: true })
+    .eq('intern_id', profile.id)
+    .eq('status', 'approved');
+
   const hoursRendered = profile.hours_rendered || 0;
   const hoursRequired = profile.hours_required || 0;
   const progress = hoursRequired > 0 ? Math.min(100, (hoursRendered / hoursRequired) * 100) : 0;
+  const estimatedEnd = computeEstimatedEndDate(hoursRequired, hoursRendered, daysWorked || 0);
+  const avgDailyHours = (daysWorked || 0) > 0 ? hoursRendered / daysWorked : 8;
+  const remainingHours = Math.max(0, hoursRequired - hoursRendered);
+  const weekdaysRemaining = avgDailyHours > 0 ? Math.ceil(remainingHours / avgDailyHours) : 0;
 
   const attendanceStatus = todayAttendance ? (todayAttendance.time_out_2 ? 'Complete' : 'Logged In') : 'Not Logged';
   const attendanceColor = todayAttendance ? (todayAttendance.time_out_2 ? 'text-success-600' : 'text-primary-600') : 'text-neutral-400';
@@ -150,7 +161,17 @@ async function buildInternDashboard(profile) {
         <span class="text-neutral-500"><span class="font-semibold text-neutral-700">${formatHoursDisplay(hoursRendered)}</span> rendered</span>
         <span class="text-neutral-500"><span class="font-semibold text-neutral-700">${formatHoursDisplay(hoursRequired)}</span> required</span>
       </div>
-      ${profile.ojt_end_date ? `<p class="text-xs text-neutral-400 mt-3">Estimated completion: ${formatDate(profile.ojt_end_date)}</p>` : ''}
+      ${hoursRequired > 0 && hoursRendered < hoursRequired && estimatedEnd ? `
+        <div class="flex items-center justify-between mt-4 pt-4" style="border-top: 1px solid var(--color-neutral-100);">
+          <div>
+            <p class="text-sm font-semibold text-neutral-700">${icons.calendar} Estimated Completion</p>
+            <p class="text-xs text-neutral-400 mt-0.5">~${weekdaysRemaining} weekdays remaining · ${avgDailyHours.toFixed(1)} hrs/day avg</p>
+          </div>
+          <p class="text-sm font-bold text-primary-600">${formatDate(estimatedEnd)}</p>
+        </div>
+      ` : hoursRendered >= hoursRequired && hoursRequired > 0 ? `
+        <p class="text-sm font-semibold text-success-600 mt-4">✅ OJT Hours Completed!</p>
+      ` : ''}
     </div>
 
     <!-- Quick Actions -->
@@ -505,6 +526,55 @@ async function initDashboardCharts(role, container) {
   }
 
   if (role === 'supervisor') {
+    const attendanceCanvas = container.querySelector('#team-attendance-chart');
+    if (attendanceCanvas) {
+      const profile = getProfile();
+      const today = new Date().toISOString().slice(0, 10);
+
+      const { data: teamInterns } = await supabase
+        .from('profiles')
+        .select('id')
+        .eq('supervisor_id', profile.id)
+        .eq('role', 'intern')
+        .eq('is_active', true);
+
+      const internIds = (teamInterns || []).map(i => i.id);
+      let presentIds = [];
+
+      if (internIds.length > 0) {
+        const { data: todayRecords } = await supabase
+          .from('attendance_records')
+          .select('intern_id, is_late')
+          .in('intern_id', internIds)
+          .eq('date', today);
+
+        presentIds = (todayRecords || []).map(r => r.intern_id);
+        const lateCount = (todayRecords || []).filter(r => r.is_late).length;
+        const onTimeCount = presentIds.length - lateCount;
+        const absentCount = internIds.length - presentIds.length;
+
+        createChart(attendanceCanvas, {
+          type: 'doughnut',
+          data: {
+            labels: ['On Time', 'Late', 'Not Yet Checked In'],
+            datasets: [{
+              data: [onTimeCount, lateCount, absentCount],
+              backgroundColor: ['#34d399', '#fbbf24', '#cbd5e1'],
+              borderWidth: 0,
+            }],
+          },
+          options: defaultOptions,
+        });
+      } else {
+        // No interns assigned — show empty state text instead of blank canvas
+        attendanceCanvas.style.display = 'none';
+        const msg = document.createElement('p');
+        msg.className = 'text-center text-neutral-400 py-8 text-sm';
+        msg.textContent = 'No interns assigned to your team.';
+        attendanceCanvas.parentElement.appendChild(msg);
+      }
+    }
+
     const taskCanvas = container.querySelector('#task-status-chart');
     if (taskCanvas) {
       const profile = getProfile();
@@ -553,6 +623,59 @@ async function initDashboardCharts(role, container) {
           }],
         },
         options: defaultOptions,
+      });
+    }
+
+    const activityCanvas = container.querySelector('#system-activity-chart');
+    if (activityCanvas) {
+      const since = new Date();
+      since.setDate(since.getDate() - 6);
+      since.setHours(0, 0, 0, 0);
+
+      const { data: auditData } = await supabase
+        .from('audit_logs')
+        .select('created_at')
+        .gte('created_at', since.toISOString());
+
+      // Build last-7-days labels and counts
+      const days = [];
+      const counts = [];
+      for (let i = 6; i >= 0; i--) {
+        const d = new Date();
+        d.setDate(d.getDate() - i);
+        days.push(d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }));
+        const dateStr = d.toISOString().slice(0, 10);
+        counts.push(auditData?.filter(r => r.created_at.slice(0, 10) === dateStr).length || 0);
+      }
+
+      createChart(activityCanvas, {
+        type: 'bar',
+        data: {
+          labels: days,
+          datasets: [{
+            label: 'Actions',
+            data: counts,
+            backgroundColor: 'rgba(99, 102, 241, 0.8)',
+            hoverBackgroundColor: '#4f46e5',
+            borderRadius: 6,
+            borderSkipped: false,
+          }],
+        },
+        options: {
+          ...defaultOptions,
+          plugins: { legend: { display: false } },
+          scales: {
+            y: {
+              beginAtZero: true,
+              ticks: { stepSize: 1, font: { family: 'Inter', size: 11 } },
+              grid: { color: 'rgba(0,0,0,0.05)' },
+            },
+            x: {
+              ticks: { font: { family: 'Inter', size: 11 } },
+              grid: { display: false },
+            },
+          },
+        },
       });
     }
   }

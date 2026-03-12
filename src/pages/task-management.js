@@ -39,12 +39,13 @@ export async function renderTaskManagementPage() {
     <div class="flex items-center justify-between page-header animate-fade-in-up">
       <div>
         <h1 class="page-title">Task Management</h1>
-        <p class="page-subtitle">Create and manage intern tasks</p>
+        <p class="page-subtitle">${isAdmin ? 'View and track intern tasks' : 'Create and manage intern tasks'}</p>
       </div>
+      ${!isAdmin ? `
       <button id="create-task-btn" class="btn-primary" ${(!interns || interns.length === 0) ? 'disabled title="No interns available"' : ''}>
         ${icons.plus}
         <span class="ml-2">Create Task</span>
-      </button>
+      </button>` : ''}
     </div>
 
     <!-- Filters -->
@@ -73,7 +74,7 @@ export async function renderTaskManagementPage() {
               <th>Est. Hours</th>
               <th>Due Date</th>
               <th>Created</th>
-              <th>Actions</th>
+              ${!isAdmin ? '<th>Actions</th>' : ''}
             </tr>
           </thead>
           <tbody>
@@ -95,34 +96,53 @@ export async function renderTaskManagementPage() {
                 <td>${task.estimated_hours || '—'}</td>
                 <td>${task.due_date ? formatDate(task.due_date) : '—'}</td>
                 <td>${formatDate(task.created_at)}</td>
+                ${!isAdmin ? `
                 <td>
                   <div class="flex gap-1">
                     <button class="btn-sm btn-secondary edit-task-btn" data-task-id="${task.id}" title="Edit">
                       ${icons.edit}
                     </button>
+                    <button
+                      class="btn-sm btn-danger delete-task-btn"
+                      data-task-id="${task.id}"
+                      title="${task.status !== 'not_started' ? 'Cannot delete a task that has already been started' : 'Delete task'}"
+                      ${task.status !== 'not_started' ? 'disabled' : ''}>
+                      ${icons.trash}
+                    </button>
                   </div>
-                </td>
+                </td>` : ''}
               </tr>
             `).join('')}
-            ${(!tasks || tasks.length === 0) ? '<tr><td colspan="7" class="text-center text-neutral-400 py-8">No tasks created yet</td></tr>' : ''}
+            ${(!tasks || tasks.length === 0) ? `<tr><td colspan="${isAdmin ? 6 : 7}" class="text-center text-neutral-400 py-8">No tasks found</td></tr>` : ''}
           </tbody>
         </table>
       </div>
     </div>
   `, (el) => {
-    // Create task button
-    el.querySelector('#create-task-btn')?.addEventListener('click', () => {
-      openCreateTaskModal(interns, profile);
-    });
-
-    // Edit task buttons
-    el.querySelectorAll('.edit-task-btn').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const taskId = btn.dataset.taskId;
-        const task = tasks.find(t => t.id === taskId);
-        if (task) openEditTaskModal(task, interns, profile);
+    // Create task button (supervisor only)
+    if (!isAdmin) {
+      el.querySelector('#create-task-btn')?.addEventListener('click', () => {
+        openCreateTaskModal(interns, profile);
       });
-    });
+
+      // Edit task buttons
+      el.querySelectorAll('.edit-task-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const taskId = btn.dataset.taskId;
+          const task = tasks.find(t => t.id === taskId);
+          if (task) openEditTaskModal(task, interns, profile);
+        });
+      });
+
+      // Delete task buttons
+      el.querySelectorAll('.delete-task-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const taskId = btn.dataset.taskId;
+          const task = tasks.find(t => t.id === taskId);
+          if (task) confirmDeleteTask(task);
+        });
+      });
+    }
 
     // Filters
     const filterStatus = el.querySelector('#filter-status');
@@ -303,6 +323,47 @@ function openEditTaskModal(task, interns, profile) {
         showToast(err.message || 'Failed to update task', 'error');
         submitBtn.disabled = false;
         submitBtn.textContent = 'Save Changes';
+      }
+    });
+  });
+}
+
+function confirmDeleteTask(task) {
+  createModal('Delete Task', `
+    <div class="space-y-4">
+      <p class="text-sm text-neutral-600">
+        Are you sure you want to delete the task <strong>"${task.title}"</strong>?
+        This action cannot be undone.
+      </p>
+      <div class="flex justify-end gap-3 pt-2">
+        <button type="button" id="delete-cancel" class="btn-secondary">Cancel</button>
+        <button type="button" id="delete-confirm" class="btn-danger">Delete Task</button>
+      </div>
+    </div>
+  `, (el, close) => {
+    el.querySelector('#delete-cancel').addEventListener('click', close);
+
+    el.querySelector('#delete-confirm').addEventListener('click', async () => {
+      const confirmBtn = el.querySelector('#delete-confirm');
+      confirmBtn.disabled = true;
+      confirmBtn.textContent = 'Deleting...';
+
+      try {
+        const { error } = await supabase
+          .from('tasks')
+          .delete()
+          .eq('id', task.id);
+
+        if (error) throw error;
+
+        await logAudit('task.deleted', 'task', task.id, { title: task.title });
+        showToast('Task deleted successfully', 'success');
+        close();
+        renderTaskManagementPage();
+      } catch (err) {
+        showToast(err.message || 'Failed to delete task', 'error');
+        confirmBtn.disabled = false;
+        confirmBtn.textContent = 'Delete Task';
       }
     });
   });
