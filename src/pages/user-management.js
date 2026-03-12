@@ -8,7 +8,7 @@ import { supabase } from '../lib/supabase.js';
 import { showToast } from '../lib/toast.js';
 import { logAudit } from '../lib/audit.js';
 import { icons } from '../lib/icons.js';
-import { formatDate } from '../lib/utils.js';
+import { formatDate, renderAvatar } from '../lib/utils.js';
 import { createModal, confirmDialog } from '../lib/component.js';
 
 export async function renderUserManagementPage() {
@@ -26,7 +26,7 @@ export async function renderUserManagementPage() {
   renderLayout(`
     <div class="flex items-center justify-between page-header animate-fade-in-up">
       <div>
-        <h1 class="page-title">User Management</h1>
+        <h1 class="page-title">User Maintenance</h1>
         <p class="page-subtitle">Manage system users and accounts</p>
       </div>
       <button id="invite-user-btn" class="btn-primary">
@@ -71,9 +71,7 @@ export async function renderUserManagementPage() {
               <tr data-role="${user.role}" data-active="${user.is_active}" data-name="${(user.full_name || '').toLowerCase()}" data-email="${(user.email || '').toLowerCase()}">
                 <td>
                   <div class="flex items-center gap-3">
-                    <div class="w-8 h-8 rounded-full bg-gradient-to-br from-primary-500 to-primary-700 flex items-center justify-center text-white text-sm font-medium">
-                      ${(user.full_name || 'U').charAt(0).toUpperCase()}
-                    </div>
+                    ${renderAvatar(user, 'w-8 h-8', 'text-sm')}
                     <div>
                       <p class="font-medium">${user.full_name || 'Unknown'}</p>
                       <p class="text-xs text-neutral-400">${user.email}</p>
@@ -172,6 +170,7 @@ export async function renderUserManagementPage() {
 function openInviteModal(departments, locations, supervisors) {
   createModal('Invite New User', `
     <form id="invite-form" class="space-y-4">
+      <!-- Base fields (always visible) -->
       <div>
         <label class="form-label">Email <span class="text-danger-500">*</span></label>
         <input type="email" id="invite-email" class="form-input" placeholder="user@madison88.com" required />
@@ -189,26 +188,63 @@ function openInviteModal(departments, locations, supervisors) {
           <option value="admin">Admin</option>
         </select>
       </div>
-      <div>
-        <label class="form-label">Location</label>
-        <select id="invite-location" class="form-input">
-          <option value="">Select location...</option>
-          ${(locations || []).map(l => `<option value="${l.id}">${l.name}</option>`).join('')}
-        </select>
-      </div>
-      <div>
-        <label class="form-label">Department</label>
-        <select id="invite-department" class="form-input">
-          <option value="">Select department...</option>
-          ${(departments || []).map(d => `<option value="${d.id}">${d.name}</option>`).join('')}
-        </select>
-      </div>
-      <div id="supervisor-field" class="hidden">
-        <label class="form-label">Supervisor</label>
-        <select id="invite-supervisor" class="form-input">
-          <option value="">Select supervisor...</option>
-          ${(supervisors || []).map(s => `<option value="${s.id}">${s.full_name}</option>`).join('')}
-        </select>
+
+      <!-- Role-specific sections (shown after role is selected) -->
+      <div id="role-fields" class="hidden space-y-4">
+
+        <!-- Common fields for all roles -->
+        <div id="common-fields" class="space-y-4">
+          <div>
+            <label class="form-label">Phone</label>
+            <input type="tel" id="invite-phone" class="form-input" placeholder="Phone number" />
+          </div>
+          <div>
+            <label class="form-label">Location</label>
+            <select id="invite-location" class="form-input">
+              <option value="">Select location...</option>
+              ${(locations || []).map(l => `<option value="${l.id}">${l.name}</option>`).join('')}
+            </select>
+          </div>
+          <div>
+            <label class="form-label">Department</label>
+            <select id="invite-department" class="form-input">
+              <option value="">Select department...</option>
+              ${(departments || []).map(d => `<option value="${d.id}">${d.name}</option>`).join('')}
+            </select>
+          </div>
+        </div>
+
+        <!-- Intern-only fields -->
+        <div id="intern-fields" class="hidden space-y-4">
+          <div>
+            <label class="form-label">Supervisor</label>
+            <select id="invite-supervisor" class="form-input">
+              <option value="">Select supervisor...</option>
+              ${(supervisors || []).map(s => `<option value="${s.id}">${s.full_name}</option>`).join('')}
+            </select>
+          </div>
+          <div class="grid grid-cols-2 gap-4">
+            <div>
+              <label class="form-label">School</label>
+              <input type="text" id="invite-school" class="form-input" placeholder="School name" />
+            </div>
+            <div>
+              <label class="form-label">Course</label>
+              <input type="text" id="invite-course" class="form-input" placeholder="Course / Program" />
+            </div>
+          </div>
+          <div class="grid grid-cols-2 gap-4">
+            <div>
+              <label class="form-label">Hours Required</label>
+              <input type="number" id="invite-hours" class="form-input" placeholder="e.g. 480" step="0.5" min="0" />
+            </div>
+            <div>
+              <label class="form-label">OJT Start Date</label>
+              <input type="date" id="invite-start" class="form-input" />
+            </div>
+          </div>
+        </div>
+
       </div>
 
       <div class="flex justify-end gap-3 pt-2">
@@ -219,10 +255,14 @@ function openInviteModal(departments, locations, supervisors) {
   `, (el, close) => {
     el.querySelector('#invite-cancel').addEventListener('click', close);
 
-    // Show supervisor field for interns
+    // Show/hide role-specific fields based on selected role
     el.querySelector('#invite-role').addEventListener('change', (e) => {
-      const supervisorField = el.querySelector('#supervisor-field');
-      supervisorField.classList.toggle('hidden', e.target.value !== 'intern');
+      const role = e.target.value;
+      const roleFields = el.querySelector('#role-fields');
+      const internFields = el.querySelector('#intern-fields');
+
+      roleFields.classList.toggle('hidden', !role);
+      internFields.classList.toggle('hidden', role !== 'intern');
     });
 
     el.querySelector('#invite-form').addEventListener('submit', async (e) => {
@@ -234,8 +274,8 @@ function openInviteModal(departments, locations, supervisors) {
       const email = el.querySelector('#invite-email').value;
       const fullName = el.querySelector('#invite-name').value.trim();
       const role = el.querySelector('#invite-role').value;
-      const locationId = el.querySelector('#invite-location').value || null;
-      const departmentId = el.querySelector('#invite-department').value || null;
+      const locationId = el.querySelector('#invite-location')?.value || null;
+      const departmentId = el.querySelector('#invite-department')?.value || null;
 
       try {
         // Use Supabase auth to invite
@@ -250,11 +290,23 @@ function openInviteModal(departments, locations, supervisors) {
 
         if (error) throw error;
 
-        // Update profile with additional fields after creation
+        // Update profile with all additional fields after creation
         if (data?.user?.id) {
-          const updates = { department_id: departmentId, location_id: locationId };
-          const supervisorId = el.querySelector('#invite-supervisor').value;
-          if (supervisorId) updates.supervisor_id = supervisorId;
+          const updates = {
+            department_id: departmentId,
+            location_id: locationId,
+            phone: el.querySelector('#invite-phone')?.value || null,
+          };
+
+          if (role === 'intern') {
+            const supervisorId = el.querySelector('#invite-supervisor').value;
+            if (supervisorId) updates.supervisor_id = supervisorId;
+            updates.school = el.querySelector('#invite-school').value || null;
+            updates.course = el.querySelector('#invite-course').value || null;
+            const hours = el.querySelector('#invite-hours').value;
+            updates.hours_required = hours ? parseFloat(hours) : null;
+            updates.ojt_start_date = el.querySelector('#invite-start').value || null;
+          }
 
           await supabase.from('profiles').update(updates).eq('id', data.user.id);
         }

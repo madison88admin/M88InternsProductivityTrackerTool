@@ -1,6 +1,7 @@
 /**
  * Utility helpers used across the application.
  */
+import { supabase } from './supabase.js';
 
 /**
  * Format a date to a readable string.
@@ -174,4 +175,32 @@ export function sanitizeHtml(html) {
 export function truncate(text, maxLength = 100) {
   if (!text || text.length <= maxLength) return text || '';
   return text.slice(0, maxLength) + '…';
+}
+
+/**
+ * Render a user avatar as an HTML string.
+ * Shows the uploaded profile photo if available, otherwise a gradient initial circle.
+ * The image layer sits on top of the initial; if the image fails to load it is removed,
+ * revealing the initial underneath.
+ *
+ * @param {object} user          - Profile object with `full_name` and optional `avatar_url`.
+ * @param {string} sizeClass     - Tailwind size classes, e.g. 'w-9 h-9'.
+ * @param {string} textClass     - Tailwind text-size class, e.g. 'text-sm'.
+ * @returns {string}             - HTML string ready to embed in a template literal.
+ */
+export function renderAvatar(user, sizeClass = 'w-9 h-9', textClass = 'text-sm') {
+  const rawInitial = (user?.full_name || 'U').charAt(0).toUpperCase();
+  const initial = rawInitial.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const safeName = (user?.full_name || 'User')
+    .replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+  const wrapper = `${sizeClass} rounded-full shrink-0 relative overflow-hidden flex items-center justify-center text-white ${textClass} font-semibold`;
+  const gradient = `background: linear-gradient(135deg, var(--color-primary-600), var(--color-primary-400));`;
+
+  if (user?.avatar_url) {
+    const { data: { publicUrl } } = supabase.storage.from('avatars').getPublicUrl(user.avatar_url);
+    return `<div class="${wrapper}" style="${gradient}">${initial}<img src="${publicUrl}" alt="${safeName}" class="absolute inset-0 w-full h-full object-cover" onerror="this.remove()" /></div>`;
+  }
+
+  return `<div class="${wrapper}" style="${gradient}">${initial}</div>`;
 }

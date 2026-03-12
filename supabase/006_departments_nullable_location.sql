@@ -1,0 +1,2 @@
+-- This migration is intentionally empty.
+-- departments.location_id remains NOT NULL (location is required).

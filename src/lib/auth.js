@@ -17,6 +17,10 @@ export async function initAuth() {
   if (session?.user) {
     currentSession.user = session.user;
     await loadProfile(session.user.id);
+    if (currentSession.profile?.is_active === false) {
+      await supabase.auth.signOut();
+      currentSession = { user: null, profile: null };
+    }
   }
 
   // Listen for future auth changes
@@ -24,6 +28,10 @@ export async function initAuth() {
     if (event === 'SIGNED_IN' && session?.user) {
       currentSession.user = session.user;
       await loadProfile(session.user.id);
+      if (currentSession.profile?.is_active === false) {
+        await supabase.auth.signOut();
+        currentSession = { user: null, profile: null };
+      }
     } else if (event === 'SIGNED_OUT') {
       currentSession = { user: null, profile: null };
     } else if (event === 'TOKEN_REFRESHED' && session?.user) {
@@ -60,6 +68,12 @@ export async function login(email, password) {
 
   currentSession.user = data.user;
   await loadProfile(data.user.id);
+
+  if (currentSession.profile?.is_active === false) {
+    await supabase.auth.signOut();
+    currentSession = { user: null, profile: null };
+    throw new Error('Your account has been deactivated. Please contact an administrator.');
+  }
 
   return data;
 }

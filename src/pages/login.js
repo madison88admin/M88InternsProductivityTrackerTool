@@ -17,24 +17,24 @@ export function renderLoginPage() {
         <div class="absolute bottom-32 right-20 w-48 h-48 rounded-full opacity-5 bg-white"></div>
         <div class="absolute top-1/3 right-16 w-32 h-32 rounded-2xl rotate-12 opacity-10 bg-white"></div>
         <div class="relative z-10 max-w-md text-center px-8">
-          <div class="inline-flex items-center justify-center w-20 h-20 rounded-3xl bg-white/20 backdrop-blur-sm mb-8" style="box-shadow: 0 8px 32px rgba(0,0,0,0.1);">
-            <span class="text-white font-extrabold text-2xl">M88</span>
+          <div class="flex justify-center mb-8">
+            <img src="/favicon.png" alt="Logo" class="w-25 h-25 object-contain brightness-0 invert drop-shadow-lg" />
           </div>
           <h1 class="text-4xl font-extrabold text-white mb-4 leading-tight">Interns Productivity<br/>Tracker</h1>
           <p class="text-lg text-white/70">Streamline your OJT workflow with intelligent tracking, reporting, and collaboration tools.</p>
-          <div class="flex items-center justify-center gap-6 mt-12">
+          <div class="flex items-center justify-center gap-8 mt-12">
             <div class="text-center">
-              <div class="text-3xl font-bold text-white">100%</div>
+              <div class="text-2xl font-bold text-white whitespace-nowrap">100%</div>
               <div class="text-sm text-white/60 mt-1">Digital</div>
             </div>
-            <div class="w-px h-10 bg-white/20"></div>
+            <div class="w-px h-10 bg-white/20 shrink-0"></div>
             <div class="text-center">
-              <div class="text-3xl font-bold text-white">Real-time</div>
+              <div class="text-2xl font-bold text-white whitespace-nowrap">Real-time</div>
               <div class="text-sm text-white/60 mt-1">Tracking</div>
             </div>
-            <div class="w-px h-10 bg-white/20"></div>
+            <div class="w-px h-10 bg-white/20 shrink-0"></div>
             <div class="text-center">
-              <div class="text-3xl font-bold text-white">Smart</div>
+              <div class="text-2xl font-bold text-white whitespace-nowrap">Smart</div>
               <div class="text-sm text-white/60 mt-1">Reports</div>
             </div>
           </div>
@@ -47,7 +47,7 @@ export function renderLoginPage() {
           <!-- Mobile logo -->
           <div class="lg:hidden text-center mb-10">
             <div class="inline-flex items-center justify-center w-16 h-16 rounded-2xl mb-4" style="background: linear-gradient(135deg, #4f46e5, #6366f1); box-shadow: 0 4px 16px rgba(79,70,229,0.3);">
-              <span class="text-white font-extrabold text-xl">M88</span>
+              <img src="/favicon.png" alt="Logo" class="w-10 h-10 object-contain brightness-0 invert" />
             </div>
             <h1 class="text-2xl font-bold text-neutral-900">Productivity Tracker</h1>
             <p class="text-neutral-500 mt-1 text-sm">Madison 88 Business Solutions Asia Inc.</p>

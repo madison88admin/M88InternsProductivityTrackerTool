@@ -106,8 +106,8 @@ function openDeptModal(dept, locations) {
         <input type="text" id="dept-name" class="form-input" value="${dept?.name || ''}" required />
       </div>
       <div>
-        <label class="form-label">Location</label>
-        <select id="dept-location" class="form-input">
+        <label class="form-label">Location <span class="text-danger-500">*</span></label>
+        <select id="dept-location" class="form-input" required>
           <option value="">— Select —</option>
           ${(locations || []).map(l => `<option value="${l.id}" ${dept?.location_id === l.id ? 'selected' : ''}>${l.name}</option>`).join('')}
         </select>
@@ -127,25 +127,34 @@ function openDeptModal(dept, locations) {
     el.querySelector('#dept-cancel').addEventListener('click', close);
     el.querySelector('#dept-form').addEventListener('submit', async (e) => {
       e.preventDefault();
-      try {
-        const payload = {
-          name: el.querySelector('#dept-name').value,
-          location_id: el.querySelector('#dept-location').value || null,
-        };
-        if (isEdit) {
-          payload.is_active = el.querySelector('#dept-active').checked;
-          await supabase.from('departments').update(payload).eq('id', dept.id);
-          await logAudit('department.updated', 'department', dept.id);
-        } else {
-          await supabase.from('departments').insert(payload);
-          await logAudit('department.created', 'department', null);
-        }
-        showToast(`Department ${isEdit ? 'updated' : 'created'}`, 'success');
-        close();
-        renderDepartmentsPage();
-      } catch (err) {
-        showToast(err.message || 'Failed to save', 'error');
+      const locationId = el.querySelector('#dept-location').value;
+      if (!locationId) {
+        showToast('Please select a location', 'error');
+        return;
       }
+      const payload = {
+        name: el.querySelector('#dept-name').value.trim(),
+        location_id: locationId,
+      };
+      if (isEdit) {
+        payload.is_active = el.querySelector('#dept-active').checked;
+        const { error } = await supabase.from('departments').update(payload).eq('id', dept.id);
+        if (error) {
+          showToast(error.code === '23505' ? 'A department with that name already exists in this location' : (error.message || 'Failed to update'), 'error');
+          return;
+        }
+        await logAudit('department.updated', 'department', dept.id);
+      } else {
+        const { error } = await supabase.from('departments').insert(payload);
+        if (error) {
+          showToast(error.code === '23505' ? 'A department with that name already exists in this location' : (error.message || 'Failed to create'), 'error');
+          return;
+        }
+        await logAudit('department.created', 'department', null);
+      }
+      showToast(`Department ${isEdit ? 'updated' : 'created'}`, 'success');
+      close();
+      renderDepartmentsPage();
     });
   });
 }

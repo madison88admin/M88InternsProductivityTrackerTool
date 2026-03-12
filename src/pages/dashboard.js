@@ -378,7 +378,7 @@ async function buildAdminDashboard(profile) {
       <a href="#/user-management" class="action-card">
         <div class="action-icon bg-primary-50 text-primary-600">${icons.users}</div>
         <div>
-          <p class="font-semibold text-neutral-900">User Management</p>
+          <p class="font-semibold text-neutral-900">User Maintenance</p>
           <p class="text-sm text-neutral-500 mt-0.5">Manage all accounts</p>
         </div>
       </a>

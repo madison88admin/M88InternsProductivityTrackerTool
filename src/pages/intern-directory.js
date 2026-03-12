@@ -5,7 +5,7 @@
 import { renderLayout } from '../components/layout.js';
 import { supabase } from '../lib/supabase.js';
 import { icons } from '../lib/icons.js';
-import { formatDate, formatHoursDisplay, debounce } from '../lib/utils.js';
+import { formatDate, formatHoursDisplay, debounce, renderAvatar } from '../lib/utils.js';
 
 export async function renderInternDirectoryPage() {
   const { data: interns } = await supabase
@@ -71,9 +71,7 @@ export async function renderInternDirectoryPage() {
       return `
         <div class="card">
           <div class="flex items-center gap-3 mb-3">
-            <div class="w-10 h-10 rounded-full bg-gradient-to-br from-primary-500 to-primary-700 text-white flex items-center justify-center font-bold text-sm">
-              ${i.full_name?.charAt(0)?.toUpperCase() || '?'}
-            </div>
+            ${renderAvatar(i, 'w-10 h-10', 'text-sm')}
             <div class="flex-1 min-w-0">
               <h4 class="font-medium text-neutral-900 truncate">${i.full_name}</h4>
               <p class="text-xs text-neutral-400 truncate">${i.email}</p>

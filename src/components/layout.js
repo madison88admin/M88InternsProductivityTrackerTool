@@ -6,6 +6,7 @@ import { getUserRole, getProfile, logout } from '../lib/auth.js';
 import { navigateTo } from '../lib/router.js';
 import { icons } from '../lib/icons.js';
 import { showToast } from '../lib/toast.js';
+import { renderAvatar } from '../lib/utils.js';
 
 /**
  * Get navigation items grouped by section based on role.
@@ -46,7 +47,7 @@ function getNavSections(role) {
         { path: '/notifications', label: 'Notifications', icon: icons.bell },
       ]},
       { label: 'People', items: [
-        { path: '/user-management', label: 'User Management', icon: icons.users },
+        { path: '/user-management', label: 'User Maintenance', icon: icons.users },
         { path: '/intern-directory', label: 'Intern Directory', icon: icons.users },
       ]},
       { label: 'Organization', items: [
@@ -93,11 +94,9 @@ export function renderLayout(contentHtml, init, guardPath) {
     <aside id="sidebar" class="sidebar -translate-x-full lg:translate-x-0">
       <!-- Logo area -->
       <div class="px-5 py-5 flex items-center gap-3" style="border-bottom: 1px solid var(--color-neutral-100);">
-        <div class="w-9 h-9 rounded-xl bg-primary-600 flex items-center justify-center shrink-0" style="box-shadow: 0 2px 8px rgba(79,70,229,0.25);">
-          <span class="text-white font-bold text-sm">M88</span>
-        </div>
+        <img src="/favicon.png" alt="Logo" class="w-15 h-15 object-contain shrink-0" />
         <div class="min-w-0">
-          <p class="text-sm font-bold text-neutral-900 truncate">Productivity Tracker</p>
+          <p class="text-sm font-bold text-neutral-900 truncate">Intern Productivity <br> Tracker</p>
           <p class="text-xs text-neutral-400">Madison 88</p>
         </div>
       </div>
@@ -120,9 +119,7 @@ export function renderLayout(contentHtml, init, guardPath) {
       <!-- User profile section -->
       <div class="px-3 py-4" style="border-top: 1px solid var(--color-neutral-100);">
         <a href="#/profile" class="flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all duration-200 hover:bg-neutral-100 ${currentPath === '/profile' ? 'bg-primary-50' : ''}">
-          <div class="w-9 h-9 rounded-full flex items-center justify-center text-white text-sm font-semibold shrink-0" style="background: linear-gradient(135deg, var(--color-primary-600), var(--color-primary-400));">
-            ${(profile?.full_name || 'U').charAt(0).toUpperCase()}
-          </div>
+          ${renderAvatar(profile, 'w-9 h-9', 'text-sm')}
           <div class="flex-1 min-w-0">
             <p class="text-sm font-semibold text-neutral-800 truncate">${profile?.full_name || 'User'}</p>
             <p class="text-xs text-neutral-400">${roleLabels[role] || 'Unknown'}</p>
