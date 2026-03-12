@@ -10,9 +10,20 @@ import { formatDate, formatHoursDisplay, debounce } from '../lib/utils.js';
 export async function renderInternDirectoryPage() {
   const { data: interns } = await supabase
     .from('profiles')
-    .select('*, department:departments(name), location:locations(name), supervisor:profiles!profiles_supervisor_id_fkey(full_name)')
+    .select('*, department:departments(name), location:locations(name)')
     .eq('role', 'intern')
     .order('full_name');
+
+  // Fetch supervisors separately to avoid self-referencing FK join issues
+  const supervisorIds = [...new Set((interns || []).map(i => i.supervisor_id).filter(Boolean))];
+  let supervisorMap = {};
+  if (supervisorIds.length > 0) {
+    const { data: supervisors } = await supabase
+      .from('profiles')
+      .select('id, full_name')
+      .in('id', supervisorIds);
+    (supervisors || []).forEach(s => { supervisorMap[s.id] = s.full_name; });
+  }
 
   // Fetch hours per intern (approved attendance)
   const internIds = (interns || []).map(i => i.id);
@@ -60,11 +71,11 @@ export async function renderInternDirectoryPage() {
       return `
         <div class="card">
           <div class="flex items-center gap-3 mb-3">
-            <div class="w-10 h-10 rounded-full bg-primary-100 text-primary-600 flex items-center justify-center font-bold">
+            <div class="w-10 h-10 rounded-full bg-gradient-to-br from-primary-500 to-primary-700 text-white flex items-center justify-center font-bold text-sm">
               ${i.full_name?.charAt(0)?.toUpperCase() || '?'}
             </div>
             <div class="flex-1 min-w-0">
-              <h4 class="font-medium text-neutral-800 truncate">${i.full_name}</h4>
+              <h4 class="font-medium text-neutral-900 truncate">${i.full_name}</h4>
               <p class="text-xs text-neutral-400 truncate">${i.email}</p>
             </div>
             <span class="badge-${i.is_active ? 'success' : 'danger'} text-xs">${i.is_active ? 'Active' : 'Inactive'}</span>
@@ -74,7 +85,7 @@ export async function renderInternDirectoryPage() {
             ${i.course ? `<p>Course: ${i.course}</p>` : ''}
             ${i.department?.name ? `<p>Dept: ${i.department.name}</p>` : ''}
             ${i.location?.name ? `<p>${icons.location} ${i.location.name}</p>` : ''}
-            ${i.supervisor?.full_name ? `<p>Supervisor: ${i.supervisor.full_name}</p>` : ''}
+            ${supervisorMap[i.supervisor_id] ? `<p>Supervisor: ${supervisorMap[i.supervisor_id]}</p>` : ''}
             ${i.ojt_start_date ? `<p>${icons.calendar} ${formatDate(i.ojt_start_date)} – ${formatDate(i.ojt_end_date)}</p>` : ''}
           </div>
           <div class="mt-3 pt-3 border-t border-neutral-200">
@@ -82,8 +93,8 @@ export async function renderInternDirectoryPage() {
               <span>OJT Progress</span>
               <span>${pct.toFixed(1)}%</span>
             </div>
-            <div class="w-full bg-neutral-200 rounded-full h-2">
-              <div class="bg-primary-500 h-2 rounded-full" style="width: ${pct.toFixed(1)}%"></div>
+            <div class="progress-bar-track">
+              <div class="progress-bar-fill" style="width: ${pct.toFixed(1)}%"></div>
             </div>
             <p class="text-xs text-neutral-400 mt-1">${formatHoursDisplay(completed)} / ${formatHoursDisplay(required)}</p>
           </div>
@@ -95,9 +106,9 @@ export async function renderInternDirectoryPage() {
   }
 
   renderLayout(`
-    <div class="mb-6">
-      <h1 class="text-2xl font-bold text-neutral-800">Intern Directory</h1>
-      <p class="text-neutral-500 mt-1">All registered interns and their OJT progress</p>
+    <div class="page-header animate-fade-in-up">
+      <h1 class="page-title">Intern Directory</h1>
+      <p class="page-subtitle">All registered interns and their OJT progress</p>
     </div>
 
     <div class="card mb-6">

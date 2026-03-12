@@ -44,9 +44,9 @@ addRoute('/admin-setup', renderAdminSetupPage);
 addRoute('/forgot-password', renderForgotPasswordPage);
 
 // All authenticated users
-addRoute('/dashboard', renderDashboard, ['intern', 'supervisor', 'hr', 'admin']);
-addRoute('/notifications', renderNotificationsPage, ['intern', 'supervisor', 'hr', 'admin']);
-addRoute('/profile', renderProfilePage, ['intern', 'supervisor', 'hr', 'admin']);
+addRoute('/dashboard', renderDashboard, ['intern', 'supervisor', 'admin']);
+addRoute('/notifications', renderNotificationsPage, ['intern', 'supervisor', 'admin']);
+addRoute('/profile', renderProfilePage, ['intern', 'supervisor', 'admin']);
 
 // Intern
 addRoute('/attendance', renderAttendancePage, ['intern']);
@@ -60,12 +60,12 @@ addRoute('/task-management', renderTaskManagementPage, ['supervisor', 'admin']);
 addRoute('/team-attendance', renderTeamAttendancePage, ['supervisor']);
 addRoute('/team-narratives', renderTeamNarrativesPage, ['supervisor']);
 
-// HR
-addRoute('/allowance-management', renderAllowanceManagementPage, ['hr', 'admin']);
-addRoute('/reports', renderReportsPage, ['hr', 'admin']);
-addRoute('/intern-directory', renderInternDirectoryPage, ['hr', 'admin']);
-addRoute('/attendance-overview', renderAttendanceOverviewPage, ['hr', 'admin']);
-addRoute('/departments', renderDepartmentsPage, ['hr', 'admin']);
+// HR (Admin only)
+addRoute('/allowance-management', renderAllowanceManagementPage, ['admin']);
+addRoute('/reports', renderReportsPage, ['admin']);
+addRoute('/intern-directory', renderInternDirectoryPage, ['admin']);
+addRoute('/attendance-overview', renderAttendanceOverviewPage, ['admin']);
+addRoute('/departments', renderDepartmentsPage, ['admin']);
 
 // Admin only
 addRoute('/user-management', renderUserManagementPage, ['admin']);
@@ -107,9 +107,9 @@ function registerRoles(path, roles) { routeRoleMap.set(path, { roles }); }
 function getRouteConfig(path) { return routeRoleMap.get(path) || null; }
 
 // Register the role map
-registerRoles('/dashboard', ['intern', 'supervisor', 'hr', 'admin']);
-registerRoles('/notifications', ['intern', 'supervisor', 'hr', 'admin']);
-registerRoles('/profile', ['intern', 'supervisor', 'hr', 'admin']);
+registerRoles('/dashboard', ['intern', 'supervisor', 'admin']);
+registerRoles('/notifications', ['intern', 'supervisor', 'admin']);
+registerRoles('/profile', ['intern', 'supervisor', 'admin']);
 registerRoles('/attendance', ['intern']);
 registerRoles('/my-tasks', ['intern']);
 registerRoles('/narratives', ['intern']);
@@ -118,11 +118,11 @@ registerRoles('/approvals', ['supervisor', 'admin']);
 registerRoles('/task-management', ['supervisor', 'admin']);
 registerRoles('/team-attendance', ['supervisor']);
 registerRoles('/team-narratives', ['supervisor']);
-registerRoles('/allowance-management', ['hr', 'admin']);
-registerRoles('/reports', ['hr', 'admin']);
-registerRoles('/intern-directory', ['hr', 'admin']);
-registerRoles('/attendance-overview', ['hr', 'admin']);
-registerRoles('/departments', ['hr', 'admin']);
+registerRoles('/allowance-management', ['admin']);
+registerRoles('/reports', ['admin']);
+registerRoles('/intern-directory', ['admin']);
+registerRoles('/attendance-overview', ['admin']);
+registerRoles('/departments', ['admin']);
 registerRoles('/user-management', ['admin']);
 registerRoles('/locations', ['admin']);
 registerRoles('/audit-logs', ['admin']);

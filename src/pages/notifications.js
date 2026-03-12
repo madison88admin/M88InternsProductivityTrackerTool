@@ -22,10 +22,10 @@ export async function renderNotificationsPage() {
   const unreadCount = (notifications || []).filter(n => !n.is_read).length;
 
   renderLayout(`
-    <div class="flex items-center justify-between mb-6">
+    <div class="flex items-center justify-between page-header animate-fade-in-up">
       <div>
-        <h1 class="text-2xl font-bold text-neutral-800">Notifications</h1>
-        <p class="text-neutral-500 mt-1">${unreadCount} unread notification${unreadCount !== 1 ? 's' : ''}</p>
+        <h1 class="page-title">Notifications</h1>
+        <p class="page-subtitle">${unreadCount} unread notification${unreadCount !== 1 ? 's' : ''}</p>
       </div>
       ${unreadCount > 0 ? `
         <button id="mark-all-read" class="btn-secondary">
@@ -48,7 +48,7 @@ export async function renderNotificationsPage() {
             ${getNotifIcon(n.type)}
           </div>
           <div class="flex-1 min-w-0">
-            <p class="text-sm font-medium text-neutral-800">${n.title}</p>
+            <p class="text-sm font-medium text-neutral-900">${n.title}</p>
             <p class="text-sm text-neutral-500 mt-1">${n.message || ''}</p>
             <p class="text-xs text-neutral-400 mt-2">${formatDateTime(n.created_at)}</p>
           </div>
@@ -93,17 +93,17 @@ export async function renderNotificationsPage() {
 
 function getNotifColor(type) {
   const map = {
-    attendance_submitted: 'bg-primary-100 text-primary-600',
-    attendance_approved: 'bg-success-100 text-success-600',
-    attendance_rejected: 'bg-danger-100 text-danger-600',
-    task_assigned: 'bg-primary-100 text-primary-600',
-    task_status_change: 'bg-warning-100 text-warning-600',
-    narrative_submitted: 'bg-primary-100 text-primary-600',
-    narrative_approved: 'bg-success-100 text-success-600',
-    narrative_rejected: 'bg-danger-100 text-danger-600',
-    allowance_approved: 'bg-success-100 text-success-600',
-    correction_submitted: 'bg-warning-100 text-warning-600',
-    escalation: 'bg-danger-100 text-danger-600',
+    attendance_submitted: 'bg-primary-50 text-primary-600',
+    attendance_approved: 'bg-success-50 text-success-600',
+    attendance_rejected: 'bg-danger-50 text-danger-600',
+    task_assigned: 'bg-primary-50 text-primary-600',
+    task_status_change: 'bg-warning-50 text-warning-600',
+    narrative_submitted: 'bg-primary-50 text-primary-600',
+    narrative_approved: 'bg-success-50 text-success-600',
+    narrative_rejected: 'bg-danger-50 text-danger-600',
+    allowance_approved: 'bg-success-50 text-success-600',
+    correction_submitted: 'bg-warning-50 text-warning-600',
+    escalation: 'bg-danger-50 text-danger-600',
   };
   return map[type] || 'bg-neutral-100 text-neutral-600';
 }

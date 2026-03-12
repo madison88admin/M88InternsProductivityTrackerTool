@@ -31,15 +31,15 @@ export async function renderApprovalsPage() {
   const reviewedApprovals = (approvals || []).filter(a => a.status !== 'pending');
 
   renderLayout(`
-    <div class="mb-6">
-      <h1 class="text-2xl font-bold text-neutral-800">Approvals</h1>
-      <p class="text-neutral-500 mt-1">Review and manage submissions</p>
+    <div class="page-header animate-fade-in-up">
+      <h1 class="page-title">Approvals</h1>
+      <p class="page-subtitle">Review and manage submissions</p>
     </div>
 
     <!-- Pending Approvals -->
     <div class="card mb-6">
       <div class="flex items-center justify-between mb-4">
-        <h3 class="text-lg font-semibold">Pending (${pendingApprovals.length})</h3>
+        <h3 class="text-base font-bold text-neutral-900">Pending (${pendingApprovals.length})</h3>
         ${pendingApprovals.length > 0 ? `
           <button id="bulk-approve-btn" class="btn-sm btn-success">
             ${icons.check} Approve All Today
@@ -60,7 +60,7 @@ export async function renderApprovalsPage() {
 
     <!-- Reviewed Approvals -->
     <div class="card">
-      <h3 class="text-lg font-semibold mb-4">Review History</h3>
+      <h3 class="text-base font-bold text-neutral-900 mb-4">Review History</h3>
       <div class="overflow-x-auto">
         <table class="data-table">
           <thead>
@@ -134,7 +134,7 @@ function renderApprovalCard(approval) {
         <div class="flex-1">
           <div class="flex items-center gap-2 mb-1">
             <span class="badge-info">${approval.type.replace('_', ' ')}</span>
-            <span class="font-medium text-neutral-800">${approval.intern?.full_name || 'Unknown'}</span>
+            <span class="font-medium text-neutral-900">${approval.intern?.full_name || 'Unknown'}</span>
             ${approval.is_escalated ? '<span class="badge-rejected">Escalated</span>' : ''}
           </div>
           <p class="text-sm text-neutral-500">

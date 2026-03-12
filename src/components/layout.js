@@ -8,108 +8,127 @@ import { icons } from '../lib/icons.js';
 import { showToast } from '../lib/toast.js';
 
 /**
- * Get navigation items based on role.
+ * Get navigation items grouped by section based on role.
  */
-function getNavItems(role) {
-  const items = {
+function getNavSections(role) {
+  const sections = {
     intern: [
-      { path: '/dashboard', label: 'Dashboard', icon: icons.dashboard },
-      { path: '/attendance', label: 'Attendance', icon: icons.clock },
-      { path: '/my-tasks', label: 'My Tasks', icon: icons.tasks },
-      { path: '/narratives', label: 'Daily Narratives', icon: icons.narrative },
-      { path: '/my-allowance', label: 'My Allowance', icon: icons.money },
-      { path: '/notifications', label: 'Notifications', icon: icons.bell },
+      { label: 'Main', items: [
+        { path: '/dashboard', label: 'Dashboard', icon: icons.dashboard },
+        { path: '/notifications', label: 'Notifications', icon: icons.bell },
+      ]},
+      { label: 'Work', items: [
+        { path: '/attendance', label: 'Attendance', icon: icons.clock },
+        { path: '/my-tasks', label: 'My Tasks', icon: icons.tasks },
+        { path: '/narratives', label: 'Daily Narratives', icon: icons.narrative },
+      ]},
+      { label: 'Compensation', items: [
+        { path: '/my-allowance', label: 'My Allowance', icon: icons.money },
+      ]},
     ],
     supervisor: [
-      { path: '/dashboard', label: 'Dashboard', icon: icons.dashboard },
-      { path: '/approvals', label: 'Approvals', icon: icons.approval },
-      { path: '/task-management', label: 'Task Management', icon: icons.tasks },
-      { path: '/team-attendance', label: 'Team Attendance', icon: icons.clock },
-      { path: '/team-narratives', label: 'Team Narratives', icon: icons.narrative },
-      { path: '/notifications', label: 'Notifications', icon: icons.bell },
-    ],
-    hr: [
-      { path: '/dashboard', label: 'Dashboard', icon: icons.dashboard },
-      { path: '/attendance-overview', label: 'Attendance Overview', icon: icons.clock },
-      { path: '/allowance-management', label: 'Allowance Management', icon: icons.money },
-      { path: '/reports', label: 'Reports', icon: icons.reports },
-      { path: '/intern-directory', label: 'Intern Directory', icon: icons.users },
-      { path: '/departments', label: 'Departments', icon: icons.building },
-      { path: '/notifications', label: 'Notifications', icon: icons.bell },
+      { label: 'Main', items: [
+        { path: '/dashboard', label: 'Dashboard', icon: icons.dashboard },
+        { path: '/notifications', label: 'Notifications', icon: icons.bell },
+      ]},
+      { label: 'Management', items: [
+        { path: '/approvals', label: 'Approvals', icon: icons.approval },
+        { path: '/task-management', label: 'Task Management', icon: icons.tasks },
+      ]},
+      { label: 'Team', items: [
+        { path: '/team-attendance', label: 'Team Attendance', icon: icons.clock },
+        { path: '/team-narratives', label: 'Team Narratives', icon: icons.narrative },
+      ]},
     ],
     admin: [
-      { path: '/dashboard', label: 'Dashboard', icon: icons.dashboard },
-      { path: '/user-management', label: 'User Management', icon: icons.users },
-      { path: '/departments', label: 'Departments', icon: icons.building },
-      { path: '/locations', label: 'Locations', icon: icons.location },
-      { path: '/attendance-overview', label: 'Attendance Overview', icon: icons.clock },
-      { path: '/allowance-management', label: 'Allowance Management', icon: icons.money },
-      { path: '/task-management', label: 'Task Management', icon: icons.tasks },
-      { path: '/approvals', label: 'Approvals', icon: icons.approval },
-      { path: '/reports', label: 'Reports', icon: icons.reports },
-      { path: '/audit-logs', label: 'Audit Logs', icon: icons.audit },
-      { path: '/system-settings', label: 'Settings', icon: icons.settings },
-      { path: '/notifications', label: 'Notifications', icon: icons.bell },
+      { label: 'Main', items: [
+        { path: '/dashboard', label: 'Dashboard', icon: icons.dashboard },
+        { path: '/notifications', label: 'Notifications', icon: icons.bell },
+      ]},
+      { label: 'People', items: [
+        { path: '/user-management', label: 'User Management', icon: icons.users },
+        { path: '/intern-directory', label: 'Intern Directory', icon: icons.users },
+      ]},
+      { label: 'Organization', items: [
+        { path: '/departments', label: 'Departments', icon: icons.building },
+        { path: '/locations', label: 'Locations', icon: icons.location },
+      ]},
+      { label: 'Operations', items: [
+        { path: '/attendance-overview', label: 'Attendance', icon: icons.clock },
+        { path: '/allowance-management', label: 'Allowance', icon: icons.money },
+        { path: '/task-management', label: 'Tasks', icon: icons.tasks },
+        { path: '/approvals', label: 'Approvals', icon: icons.approval },
+        { path: '/reports', label: 'Reports', icon: icons.reports },
+      ]},
+      { label: 'System', items: [
+        { path: '/audit-logs', label: 'Audit Logs', icon: icons.audit },
+        { path: '/system-settings', label: 'Settings', icon: icons.settings },
+      ]},
     ],
   };
 
-  return items[role] || [];
+  return sections[role] || [];
 }
 
 /**
  * Render the main app layout with sidebar.
- * @param {string} contentHtml
- * @param {Function} [init]
  */
 export function renderLayout(contentHtml, init, guardPath) {
-  // Stale-render guard: if the URL changed while this page's async queries were
-  // running (e.g. user switched tabs then navigated), abandon the render so we
-  // never overwrite freshly rendered content with a slow stale response.
   if (guardPath && window.location.hash !== `#${guardPath}`) return;
   const role = getUserRole();
   const profile = getProfile();
-  const navItems = getNavItems(role);
+  const navSections = getNavSections(role);
   const currentPath = window.location.hash.slice(1);
+
+  const roleLabels = { admin: 'Administrator', supervisor: 'Supervisor', intern: 'Intern' };
 
   const app = document.getElementById('app');
   app.innerHTML = `
     <!-- Mobile menu button -->
-    <button id="mobile-menu-btn" class="lg:hidden fixed top-4 left-4 z-50 p-2 bg-white rounded-lg shadow-md">
+    <button id="mobile-menu-btn" class="lg:hidden fixed top-4 left-4 z-50 p-2.5 bg-white rounded-xl shadow-lg border border-neutral-200 text-neutral-600 hover:text-primary-600 hover:bg-primary-50 transition-all duration-200">
       ${icons.menu}
     </button>
 
     <!-- Sidebar -->
     <aside id="sidebar" class="sidebar -translate-x-full lg:translate-x-0">
-      <div class="p-4 border-b border-white/10 flex flex-col items-center justify-center">
-        <img src="/logo.png" alt="Madison 88" class="h-10 w-auto object-contain" style="filter: brightness(0) invert(1);" />
+      <!-- Logo area -->
+      <div class="px-5 py-5 flex items-center gap-3" style="border-bottom: 1px solid var(--color-neutral-100);">
+        <div class="w-9 h-9 rounded-xl bg-primary-600 flex items-center justify-center shrink-0" style="box-shadow: 0 2px 8px rgba(79,70,229,0.25);">
+          <span class="text-white font-bold text-sm">M88</span>
+        </div>
+        <div class="min-w-0">
+          <p class="text-sm font-bold text-neutral-900 truncate">Productivity Tracker</p>
+          <p class="text-xs text-neutral-400">Madison 88</p>
+        </div>
       </div>
 
-      <nav class="flex-1 overflow-y-auto p-3 space-y-1">
-        ${navItems.map(item => `
-          <a href="#${item.path}" 
-             class="sidebar-link ${currentPath === item.path ? 'active' : ''}"
-             data-path="${item.path}">
-            ${item.icon}
-            <span>${item.label}</span>
-          </a>
+      <!-- Navigation -->
+      <nav class="flex-1 overflow-y-auto px-3 py-4 space-y-1">
+        ${navSections.map(section => `
+          <div class="sidebar-section">${section.label}</div>
+          ${section.items.map(item => `
+            <a href="#${item.path}" 
+               class="sidebar-link ${currentPath === item.path ? 'active' : ''}"
+               data-path="${item.path}">
+              ${item.icon}
+              <span>${item.label}</span>
+            </a>
+          `).join('')}
         `).join('')}
       </nav>
 
-      <div class="p-3 border-t border-white/10">
-        <div class="flex items-center gap-3 px-3 py-2 mb-2">
-          <div class="w-8 h-8 rounded-full bg-primary-400 flex items-center justify-center text-white text-sm font-medium">
+      <!-- User profile section -->
+      <div class="px-3 py-4" style="border-top: 1px solid var(--color-neutral-100);">
+        <a href="#/profile" class="flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all duration-200 hover:bg-neutral-100 ${currentPath === '/profile' ? 'bg-primary-50' : ''}">
+          <div class="w-9 h-9 rounded-full flex items-center justify-center text-white text-sm font-semibold shrink-0" style="background: linear-gradient(135deg, var(--color-primary-600), var(--color-primary-400));">
             ${(profile?.full_name || 'U').charAt(0).toUpperCase()}
           </div>
           <div class="flex-1 min-w-0">
-            <p class="text-sm text-white truncate">${profile?.full_name || 'User'}</p>
-            <p class="text-xs text-neutral-500 capitalize">${role || 'Unknown'}</p>
+            <p class="text-sm font-semibold text-neutral-800 truncate">${profile?.full_name || 'User'}</p>
+            <p class="text-xs text-neutral-400">${roleLabels[role] || 'Unknown'}</p>
           </div>
-        </div>
-        <a href="#/profile" class="sidebar-link ${currentPath === '/profile' ? 'active' : ''}">
-          ${icons.user}
-          <span>Profile</span>
         </a>
-        <button id="logout-btn" class="sidebar-link w-full text-left">
+        <button id="logout-btn" class="sidebar-link w-full text-left mt-1 hover:bg-danger-50! hover:text-danger-600!">
           ${icons.logout}
           <span>Sign Out</span>
         </button>
@@ -117,10 +136,10 @@ export function renderLayout(contentHtml, init, guardPath) {
     </aside>
 
     <!-- Mobile overlay -->
-    <div id="sidebar-overlay" class="fixed inset-0 bg-black/50 z-30 hidden lg:hidden"></div>
+    <div id="sidebar-overlay" class="fixed inset-0 bg-neutral-900/30 backdrop-blur-sm z-30 hidden lg:hidden transition-opacity duration-300"></div>
 
     <!-- Main Content -->
-    <main class="lg:ml-64 min-h-screen">
+    <main class="lg:ml-64 min-h-screen bg-neutral-50">
       <div class="page-container" id="page-content">
         ${contentHtml}
       </div>
@@ -142,20 +161,15 @@ export function renderLayout(contentHtml, init, guardPath) {
     overlay.classList.add('hidden');
   });
 
-  // Intercept all sidebar anchor clicks via event delegation.
-  // Do a full page reload on navigation to ensure a clean state on every panel switch.
   sidebar?.addEventListener('click', (e) => {
     const link = e.target.closest('a[href^="#"]');
     if (link) {
       e.preventDefault();
-      const newHash = link.getAttribute('href'); // e.g. '#/dashboard'
-      const newPath = newHash.slice(1);          // e.g. '/dashboard'
+      const newHash = link.getAttribute('href');
+      const newPath = newHash.slice(1);
       if (window.location.hash === newHash) {
-        // Same page — just re-render in place without a full reload
         navigateTo(newPath);
       } else {
-        // Silently update the hash (no hashchange event, no in-page loader),
-        // then do a single full reload which picks up the new hash.
         history.replaceState(null, '', newHash);
         window.location.reload();
       }

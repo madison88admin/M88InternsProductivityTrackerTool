@@ -30,36 +30,37 @@ export async function renderProfilePage() {
     : null;
 
   renderLayout(`
-    <div class="mb-6">
-      <h1 class="text-2xl font-bold text-neutral-800">My Profile</h1>
+    <div class="page-header animate-fade-in-up">
+      <h1 class="page-title">My Profile</h1>
+      <p class="page-subtitle">Manage your personal information and preferences</p>
     </div>
 
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
       <!-- Profile Card -->
       <div class="card text-center">
-        <div class="relative inline-block mx-auto mb-4">
-          <div id="avatar-container" class="w-24 h-24 rounded-full bg-primary-100 flex items-center justify-center text-primary-600 text-3xl font-bold mx-auto overflow-hidden">
+        <div class="relative inline-block mx-auto mb-5">
+          <div id="avatar-container" class="w-24 h-24 rounded-full flex items-center justify-center text-white text-3xl font-bold mx-auto overflow-hidden" style="background: linear-gradient(135deg, var(--color-primary-600), var(--color-primary-400));">
             ${avatarUrl
               ? `<img src="${avatarUrl}" class="w-full h-full object-cover" alt="Avatar" />`
               : profile.full_name?.charAt(0)?.toUpperCase() || '?'}
           </div>
-          <label class="absolute bottom-0 right-0 w-8 h-8 bg-primary-500 text-white rounded-full flex items-center justify-center cursor-pointer hover:bg-primary-600 transition-colors">
+          <label class="absolute bottom-0 right-0 w-8 h-8 bg-white text-primary-600 rounded-full flex items-center justify-center cursor-pointer hover:bg-primary-50 transition-colors shadow-md" style="border: 2px solid var(--color-primary-100);">
             ${icons.edit}
             <input type="file" id="avatar-input" class="hidden" accept="image/png,image/jpeg,image/webp" />
           </label>
         </div>
-        <h2 class="text-xl font-bold text-neutral-800">${profile.full_name}</h2>
-        <p class="text-neutral-500">${profile.email}</p>
-        <span class="badge-primary mt-2 inline-block capitalize">${profile.role}</span>
+        <h2 class="text-xl font-bold text-neutral-900">${profile.full_name}</h2>
+        <p class="text-neutral-500 text-sm mt-1">${profile.email}</p>
+        <span class="badge-primary mt-3 inline-block capitalize">${profile.role}</span>
 
         ${ojtInfo ? `
-          <div class="mt-6 pt-4 border-t border-neutral-200">
-            <p class="text-sm text-neutral-500 mb-2">OJT Progress</p>
-            <div class="w-full bg-neutral-200 rounded-full h-3 mb-2">
-              <div class="bg-primary-500 h-3 rounded-full" style="width: ${Math.min(100, (ojtInfo.completed / ojtInfo.required * 100)).toFixed(1)}%"></div>
+          <div class="mt-6 pt-5" style="border-top: 1px solid var(--color-neutral-100);">
+            <p class="text-xs font-semibold text-neutral-400 uppercase tracking-wider mb-3">OJT Progress</p>
+            <div class="progress-bar-track mb-3">
+              <div class="progress-bar-fill" style="width: ${Math.min(100, (ojtInfo.completed / ojtInfo.required * 100)).toFixed(1)}%"></div>
             </div>
-            <p class="text-sm font-medium">${formatHoursDisplay(ojtInfo.completed)} / ${formatHoursDisplay(ojtInfo.required)}</p>
-            <p class="text-xs text-neutral-400">${Math.min(100, (ojtInfo.completed / ojtInfo.required * 100)).toFixed(1)}% complete</p>
+            <p class="text-sm font-semibold text-neutral-900">${formatHoursDisplay(ojtInfo.completed)} / ${formatHoursDisplay(ojtInfo.required)}</p>
+            <p class="text-xs text-neutral-400 mt-0.5">${Math.min(100, (ojtInfo.completed / ojtInfo.required * 100)).toFixed(1)}% complete</p>
           </div>
         ` : ''}
       </div>
@@ -67,7 +68,7 @@ export async function renderProfilePage() {
       <!-- Edit Profile -->
       <div class="lg:col-span-2 space-y-6">
         <div class="card">
-          <h3 class="text-lg font-semibold mb-4">Personal Information</h3>
+          <h3 class="text-base font-bold text-neutral-900 mb-4">Personal Information</h3>
           <form id="profile-form" class="space-y-4">
             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
@@ -109,7 +110,7 @@ export async function renderProfilePage() {
 
         <!-- Change Password -->
         <div class="card">
-          <h3 class="text-lg font-semibold mb-4">Change Password</h3>
+          <h3 class="text-base font-bold text-neutral-900 mb-4">Change Password</h3>
           <form id="password-form" class="space-y-4">
             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>

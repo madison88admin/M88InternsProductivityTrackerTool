@@ -75,9 +75,9 @@ export async function renderTeamAttendancePage() {
   }
 
   renderLayout(`
-    <div class="mb-6">
-      <h1 class="text-2xl font-bold text-neutral-800">Team Attendance</h1>
-      <p class="text-neutral-500 mt-1">Week of ${formatDate(weekStart)} – ${formatDate(weekEnd)}</p>
+    <div class="page-header animate-fade-in-up">
+      <h1 class="page-title">Team Attendance</h1>
+      <p class="page-subtitle">Week of ${formatDate(weekStart)} – ${formatDate(weekEnd)}</p>
     </div>
 
     <!-- Filters -->

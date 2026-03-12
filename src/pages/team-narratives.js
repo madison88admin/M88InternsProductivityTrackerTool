@@ -53,7 +53,7 @@ export async function renderTeamNarrativesPage() {
       <div class="border border-neutral-200 rounded-lg p-4 hover:bg-neutral-50 cursor-pointer narrative-card" data-id="${n.id}">
         <div class="flex items-center justify-between mb-2">
           <div class="flex items-center gap-3">
-            <span class="font-medium text-neutral-800">${n.intern?.full_name || '—'}</span>
+            <span class="font-medium text-neutral-900">${n.intern?.full_name || '—'}</span>
             <span class="text-sm text-neutral-400">${formatDate(n.date)}</span>
           </div>
           <span class="badge-${n.status === 'approved' ? 'success' : n.status === 'rejected' ? 'danger' : 'pending'}">${n.status}</span>
@@ -91,9 +91,9 @@ export async function renderTeamNarrativesPage() {
   }
 
   renderLayout(`
-    <div class="mb-6">
-      <h1 class="text-2xl font-bold text-neutral-800">Team Narratives</h1>
-      <p class="text-neutral-500 mt-1">Daily narratives from your interns</p>
+    <div class="page-header animate-fade-in-up">
+      <h1 class="page-title">Team Narratives</h1>
+      <p class="page-subtitle">Daily narratives from your interns</p>
     </div>
 
     <div class="card mb-6">

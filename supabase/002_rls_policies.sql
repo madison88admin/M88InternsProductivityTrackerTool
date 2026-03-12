@@ -62,10 +62,10 @@ CREATE POLICY locations_select ON locations FOR SELECT
   USING (true);
 
 CREATE POLICY locations_insert ON locations FOR INSERT
-  WITH CHECK (get_user_role() IN ('admin', 'hr'));
+  WITH CHECK (get_user_role() = 'admin');
 
 CREATE POLICY locations_update ON locations FOR UPDATE
-  USING (get_user_role() IN ('admin', 'hr'));
+  USING (get_user_role() = 'admin');
 
 CREATE POLICY locations_delete ON locations FOR DELETE
   USING (get_user_role() = 'admin');
@@ -78,10 +78,10 @@ CREATE POLICY departments_select ON departments FOR SELECT
   USING (true);
 
 CREATE POLICY departments_insert ON departments FOR INSERT
-  WITH CHECK (get_user_role() IN ('admin', 'hr'));
+  WITH CHECK (get_user_role() = 'admin');
 
 CREATE POLICY departments_update ON departments FOR UPDATE
-  USING (get_user_role() IN ('admin', 'hr'));
+  USING (get_user_role() = 'admin');
 
 CREATE POLICY departments_delete ON departments FOR DELETE
   USING (get_user_role() = 'admin');
@@ -90,12 +90,12 @@ CREATE POLICY departments_delete ON departments FOR DELETE
 -- ATTENDANCE RECORDS POLICIES
 -- ============================================================
 
--- Interns see their own; supervisors see their team; HR/admin see all (within location)
+-- Interns see their own; supervisors see their team; admin sees all (within location)
 CREATE POLICY attendance_select ON attendance_records FOR SELECT
   USING (
     intern_id = auth.uid()
     OR supervisor_id = auth.uid()
-    OR get_user_role() IN ('admin', 'hr')
+    OR get_user_role() = 'admin'
   );
 
 -- Interns can insert their own attendance
@@ -118,7 +118,7 @@ CREATE POLICY corrections_select ON attendance_corrections FOR SELECT
   USING (
     intern_id = auth.uid()
     OR reviewed_by = auth.uid()
-    OR get_user_role() IN ('admin', 'hr')
+    OR get_user_role() = 'admin'
   );
 
 CREATE POLICY corrections_insert ON attendance_corrections FOR INSERT
@@ -138,7 +138,7 @@ CREATE POLICY tasks_select ON tasks FOR SELECT
   USING (
     assigned_to = auth.uid()
     OR created_by = auth.uid()
-    OR get_user_role() IN ('admin', 'hr')
+    OR get_user_role() = 'admin'
   );
 
 CREATE POLICY tasks_insert ON tasks FOR INSERT
@@ -159,7 +159,7 @@ CREATE POLICY narratives_select ON narratives FOR SELECT
   USING (
     intern_id = auth.uid()
     OR supervisor_id = auth.uid()
-    OR get_user_role() IN ('admin', 'hr')
+    OR get_user_role() = 'admin'
   );
 
 CREATE POLICY narratives_insert ON narratives FOR INSERT
@@ -180,7 +180,7 @@ CREATE POLICY approvals_select ON approvals FOR SELECT
   USING (
     intern_id = auth.uid()
     OR supervisor_id = auth.uid()
-    OR get_user_role() IN ('admin', 'hr')
+    OR get_user_role() = 'admin'
   );
 
 CREATE POLICY approvals_insert ON approvals FOR INSERT
@@ -203,10 +203,10 @@ CREATE POLICY allowance_config_select ON allowance_config FOR SELECT
   USING (true);
 
 CREATE POLICY allowance_config_insert ON allowance_config FOR INSERT
-  WITH CHECK (get_user_role() IN ('admin', 'hr'));
+  WITH CHECK (get_user_role() = 'admin');
 
 CREATE POLICY allowance_config_update ON allowance_config FOR UPDATE
-  USING (get_user_role() IN ('admin', 'hr'));
+  USING (get_user_role() = 'admin');
 
 -- ============================================================
 -- ALLOWANCE PERIODS POLICIES
@@ -215,14 +215,14 @@ CREATE POLICY allowance_config_update ON allowance_config FOR UPDATE
 CREATE POLICY allowance_periods_select ON allowance_periods FOR SELECT
   USING (
     intern_id = auth.uid()
-    OR get_user_role() IN ('admin', 'hr')
+    OR get_user_role() = 'admin'
   );
 
 CREATE POLICY allowance_periods_insert ON allowance_periods FOR INSERT
-  WITH CHECK (get_user_role() IN ('admin', 'hr'));
+  WITH CHECK (get_user_role() = 'admin');
 
 CREATE POLICY allowance_periods_update ON allowance_periods FOR UPDATE
-  USING (get_user_role() IN ('admin', 'hr'));
+  USING (get_user_role() = 'admin');
 
 -- ============================================================
 -- NOTIFICATIONS POLICIES
@@ -242,7 +242,7 @@ CREATE POLICY notifications_update ON notifications FOR UPDATE
 -- ============================================================
 
 CREATE POLICY audit_logs_select ON audit_logs FOR SELECT
-  USING (get_user_role() IN ('admin', 'hr'));
+  USING (get_user_role() = 'admin');
 
 CREATE POLICY audit_logs_insert ON audit_logs FOR INSERT
   WITH CHECK (true);

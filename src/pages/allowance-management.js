@@ -33,10 +33,10 @@ export async function renderAllowanceManagementPage() {
   const approvedPeriods = (periods || []).filter(p => p.status === 'approved');
 
   renderLayout(`
-    <div class="flex items-center justify-between mb-6">
+    <div class="flex items-center justify-between page-header animate-fade-in-up">
       <div>
-        <h1 class="text-2xl font-bold text-neutral-800">Allowance Management</h1>
-        <p class="text-neutral-500 mt-1">Configure rates and manage intern allowances</p>
+        <h1 class="page-title">Allowance Management</h1>
+        <p class="page-subtitle">Configure rates and manage intern allowances</p>
       </div>
       <div class="flex gap-2">
         <button id="set-rate-btn" class="btn-secondary">
@@ -64,7 +64,7 @@ export async function renderAllowanceManagementPage() {
 
     <!-- Pending Review -->
     <div class="card mb-6">
-      <h3 class="text-lg font-semibold mb-4">Pending Review (${pendingPeriods.length})</h3>
+      <h3 class="text-base font-bold text-neutral-900 mb-4">Pending Review (${pendingPeriods.length})</h3>
       ${pendingPeriods.length > 0 ? `
         <div class="mb-4">
           <button id="approve-all-btn" class="btn-sm btn-success">Approve All</button>
@@ -111,7 +111,7 @@ export async function renderAllowanceManagementPage() {
 
     <!-- Approved History -->
     <div class="card">
-      <h3 class="text-lg font-semibold mb-4">Approved Allowances</h3>
+      <h3 class="text-base font-bold text-neutral-900 mb-4">Approved Allowances</h3>
       <div class="overflow-x-auto">
         <table class="data-table">
           <thead>
@@ -231,7 +231,7 @@ function openSetRateModal(currentRate, profile) {
     <form id="set-rate-form" class="space-y-4">
       <div>
         <label class="form-label">Current Rate</label>
-        <p class="text-lg font-bold text-neutral-800">₱${currentRate?.hourly_rate?.toFixed(2) || '0.00'}</p>
+        <p class="text-lg font-bold text-neutral-900">₱${currentRate?.hourly_rate?.toFixed(2) || '0.00'}</p>
       </div>
       <div>
         <label class="form-label">New Hourly Rate (₱) <span class="text-danger-500">*</span></label>

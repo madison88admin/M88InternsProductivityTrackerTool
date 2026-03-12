@@ -27,9 +27,9 @@ export async function renderMyAllowancePage() {
   };
 
   renderLayout(`
-    <div class="mb-6">
-      <h1 class="text-2xl font-bold text-neutral-800">My Allowance</h1>
-      <p class="text-neutral-500 mt-1">Track your weekly allowance records</p>
+    <div class="page-header animate-fade-in-up">
+      <h1 class="page-title">My Allowance</h1>
+      <p class="page-subtitle">Track your weekly allowance records</p>
     </div>
 
     <!-- Summary Cards -->
@@ -44,13 +44,13 @@ export async function renderMyAllowancePage() {
       </div>
       <div class="card text-center">
         <p class="text-sm text-neutral-500">Weeks Paid</p>
-        <p class="text-3xl font-bold text-neutral-800">${approved.length}</p>
+        <p class="text-3xl font-bold text-neutral-900">${approved.length}</p>
       </div>
     </div>
 
     <!-- Weekly Records -->
     <div class="card">
-      <h3 class="text-lg font-semibold mb-4">Weekly Records</h3>
+      <h3 class="text-base font-bold text-neutral-900 mb-4">Weekly Records</h3>
       <div class="overflow-x-auto">
         <table class="data-table">
           <thead>

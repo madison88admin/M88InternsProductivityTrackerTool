@@ -21,7 +21,7 @@ export async function renderAttendancePage() {
     .select('*')
     .eq('intern_id', profile.id)
     .eq('date', today)
-    .single();
+    .maybeSingle();
 
   // Fetch recent records
   const { data: recentRecords } = await supabase
@@ -34,15 +34,15 @@ export async function renderAttendancePage() {
   const nextPunch = getNextPunch(todayRecord);
 
   renderLayout(`
-    <div class="mb-6">
-      <h1 class="text-2xl font-bold text-neutral-800">Attendance</h1>
-      <p class="text-neutral-500 mt-1">Log your daily time-in and time-out</p>
+    <div class="page-header animate-fade-in-up">
+      <h1 class="page-title">Attendance</h1>
+      <p class="page-subtitle">Log your daily time-in and time-out</p>
     </div>
 
     <!-- Today's Punch Card -->
     <div class="card mb-6">
       <div class="flex items-center justify-between mb-4">
-        <h3 class="text-lg font-semibold">Today — ${formatDate(new Date(), { weekday: 'long', month: 'long', day: 'numeric' })}</h3>
+        <h3 class="text-base font-bold text-neutral-900">Today — ${formatDate(new Date(), { weekday: 'long', month: 'long', day: 'numeric' })}</h3>
         ${todayRecord?.status ? `<span class="badge-${todayRecord.status === 'approved' ? 'approved' : todayRecord.status === 'rejected' ? 'rejected' : 'pending'}">${todayRecord.status}</span>` : ''}
       </div>
 
@@ -84,7 +84,7 @@ export async function renderAttendancePage() {
     <!-- Recent Attendance -->
     <div class="card">
       <div class="flex items-center justify-between mb-4">
-        <h3 class="text-lg font-semibold">Recent Attendance</h3>
+        <h3 class="text-base font-bold text-neutral-900">Recent Attendance</h3>
       </div>
 
       <div class="overflow-x-auto">
@@ -228,9 +228,9 @@ export async function renderAttendancePage() {
 
 function renderPunchSlot(label, timestamp, type) {
   return `
-    <div class="text-center p-3 bg-neutral-50 rounded-lg">
-      <p class="text-xs text-neutral-500 mb-1">${label}</p>
-      <p class="text-lg font-semibold ${timestamp ? 'text-neutral-800' : 'text-neutral-300'}">
+    <div class="text-center p-4 rounded-xl ${timestamp ? 'bg-primary-50' : 'bg-neutral-100'}" style="border: 1px solid ${timestamp ? 'rgba(99,102,241,0.15)' : 'var(--color-neutral-200)'};">
+      <p class="text-xs font-semibold uppercase tracking-wider ${timestamp ? 'text-primary-600' : 'text-neutral-400'} mb-2">${label}</p>
+      <p class="text-lg font-bold ${timestamp ? 'text-neutral-900' : 'text-neutral-300'}">
         ${timestamp ? formatTime(timestamp) : '--:--'}
       </p>
     </div>

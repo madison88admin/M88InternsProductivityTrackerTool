@@ -40,10 +40,10 @@ export async function renderNarrativesPage() {
     .limit(20);
 
   renderLayout(`
-    <div class="flex items-center justify-between mb-6">
+    <div class="flex items-center justify-between page-header animate-fade-in-up">
       <div>
-        <h1 class="text-2xl font-bold text-neutral-800">Daily Narratives</h1>
-        <p class="text-neutral-500 mt-1">Document your daily activities</p>
+        <h1 class="page-title">Daily Narratives</h1>
+        <p class="page-subtitle">Document your daily activities</p>
       </div>
       <button id="add-narrative-btn" class="btn-primary" ${(!tasks || tasks.length === 0) ? 'disabled title="No active tasks available"' : ''}>
         ${icons.plus}
@@ -62,7 +62,7 @@ export async function renderNarrativesPage() {
 
     <!-- Today's Narratives -->
     <div class="card mb-6">
-      <h3 class="text-lg font-semibold mb-4">Today's Narratives</h3>
+      <h3 class="text-base font-bold text-neutral-900 mb-4">Today's Narratives</h3>
       ${(todayNarratives && todayNarratives.length > 0) ? `
         <div class="space-y-4">
           ${todayNarratives.map(n => renderNarrativeCard(n, true)).join('')}
@@ -76,7 +76,7 @@ export async function renderNarrativesPage() {
 
     <!-- Past Narratives -->
     <div class="card">
-      <h3 class="text-lg font-semibold mb-4">Previous Narratives</h3>
+      <h3 class="text-base font-bold text-neutral-900 mb-4">Previous Narratives</h3>
       ${(recentNarratives && recentNarratives.length > 0) ? `
         <div class="space-y-4">
           ${recentNarratives.map(n => renderNarrativeCard(n, false)).join('')}

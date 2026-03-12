@@ -36,10 +36,10 @@ export async function renderTaskManagementPage() {
   const { data: tasks } = await tasksQuery;
 
   renderLayout(`
-    <div class="flex items-center justify-between mb-6">
+    <div class="flex items-center justify-between page-header animate-fade-in-up">
       <div>
-        <h1 class="text-2xl font-bold text-neutral-800">Task Management</h1>
-        <p class="text-neutral-500 mt-1">Create and manage intern tasks</p>
+        <h1 class="page-title">Task Management</h1>
+        <p class="page-subtitle">Create and manage intern tasks</p>
       </div>
       <button id="create-task-btn" class="btn-primary" ${(!interns || interns.length === 0) ? 'disabled title="No interns available"' : ''}>
         ${icons.plus}

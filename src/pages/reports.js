@@ -22,9 +22,9 @@ export async function renderReportsPage() {
   ]);
 
   renderLayout(`
-    <div class="mb-6">
-      <h1 class="text-2xl font-bold text-neutral-800">Reports</h1>
-      <p class="text-neutral-500 mt-1">Generate and export reports</p>
+    <div class="page-header animate-fade-in-up">
+      <h1 class="page-title">Reports</h1>
+      <p class="page-subtitle">Generate and export reports</p>
     </div>
 
     <!-- Report Type Selection -->

@@ -16,10 +16,10 @@ export async function renderLocationsPage() {
     .order('name');
 
   renderLayout(`
-    <div class="flex items-center justify-between mb-6">
+    <div class="flex items-center justify-between page-header animate-fade-in-up">
       <div>
-        <h1 class="text-2xl font-bold text-neutral-800">Locations</h1>
-        <p class="text-neutral-500 mt-1">Manage office locations and IP ranges</p>
+        <h1 class="page-title">Locations</h1>
+        <p class="page-subtitle">Manage office locations and IP ranges</p>
       </div>
       <button id="add-location-btn" class="btn-primary">
         ${icons.plus}

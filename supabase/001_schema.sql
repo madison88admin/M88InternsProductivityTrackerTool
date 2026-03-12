@@ -16,7 +16,7 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 -- ENUM TYPES
 -- ============================================================
 
-CREATE TYPE user_role AS ENUM ('admin', 'hr', 'supervisor', 'intern');
+CREATE TYPE user_role AS ENUM ('admin', 'supervisor', 'intern');
 CREATE TYPE attendance_status AS ENUM ('pending', 'approved', 'rejected');
 CREATE TYPE punch_type AS ENUM ('time_in_1', 'time_out_1', 'time_in_2', 'time_out_2');
 CREATE TYPE task_status AS ENUM ('not_started', 'in_progress', 'completed');
@@ -458,7 +458,7 @@ BEGIN
   
   RETURN NEW;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
 
 CREATE TRIGGER tr_update_intern_hours
   AFTER UPDATE ON attendance_records

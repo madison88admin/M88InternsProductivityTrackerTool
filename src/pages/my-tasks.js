@@ -26,23 +26,23 @@ export async function renderMyTasksPage() {
   };
 
   renderLayout(`
-    <div class="mb-6">
-      <h1 class="text-2xl font-bold text-neutral-800">My Tasks</h1>
-      <p class="text-neutral-500 mt-1">View and manage your assigned tasks</p>
+    <div class="page-header animate-fade-in-up">
+      <h1 class="page-title">My Tasks</h1>
+      <p class="page-subtitle">View and manage your assigned tasks</p>
     </div>
 
     <!-- Status Tabs -->
-    <div class="flex gap-2 mb-6">
-      <button class="btn-secondary task-tab active" data-status="all">
+    <div class="filter-tabs mb-6">
+      <button class="filter-tab active task-tab" data-status="all">
         All (${tasks?.length || 0})
       </button>
-      <button class="btn-secondary task-tab" data-status="not_started">
+      <button class="filter-tab task-tab" data-status="not_started">
         Not Started (${statusGroups.not_started.length})
       </button>
-      <button class="btn-secondary task-tab" data-status="in_progress">
+      <button class="filter-tab task-tab" data-status="in_progress">
         In Progress (${statusGroups.in_progress.length})
       </button>
-      <button class="btn-secondary task-tab" data-status="completed">
+      <button class="filter-tab task-tab" data-status="completed">
         Completed (${statusGroups.completed.length})
       </button>
     </div>
@@ -62,8 +62,8 @@ export async function renderMyTasksPage() {
     // Status filter tabs
     el.querySelectorAll('.task-tab').forEach(tab => {
       tab.addEventListener('click', () => {
-        el.querySelectorAll('.task-tab').forEach(t => t.classList.remove('active', 'bg-primary-600', 'text-white'));
-        tab.classList.add('active', 'bg-primary-600', 'text-white');
+        el.querySelectorAll('.task-tab').forEach(t => t.classList.remove('active'));
+        tab.classList.add('active');
 
         const status = tab.dataset.status;
         el.querySelectorAll('.task-card').forEach(card => {
@@ -144,7 +144,7 @@ function renderTaskCard(task) {
       <div class="flex items-start justify-between">
         <div class="flex-1">
           <div class="flex items-center gap-2 mb-2">
-            <h4 class="font-semibold text-neutral-800">${task.title}</h4>
+            <h4 class="font-semibold text-neutral-900">${task.title}</h4>
             <span class="badge bg-${color}-50 text-${color}-600">${task.status.replace('_', ' ')}</span>
             ${task.pending_status ? `<span class="badge-pending">Pending: ${task.pending_status.replace('_', ' ')}</span>` : ''}
           </div>

@@ -23,10 +23,10 @@ export async function renderDepartmentsPage() {
     .order('name');
 
   renderLayout(`
-    <div class="flex items-center justify-between mb-6">
+    <div class="flex items-center justify-between page-header animate-fade-in-up">
       <div>
-        <h1 class="text-2xl font-bold text-neutral-800">Departments</h1>
-        <p class="text-neutral-500 mt-1">Manage organizational departments</p>
+        <h1 class="page-title">Departments</h1>
+        <p class="page-subtitle">Manage organizational departments</p>
       </div>
       <button id="add-dept-btn" class="btn-primary">
         ${icons.plus}

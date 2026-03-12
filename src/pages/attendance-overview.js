@@ -55,9 +55,9 @@ export async function renderAttendanceOverviewPage() {
     const totalHours = records.reduce((s, r) => s + (r.total_hours || 0), 0);
 
     renderLayout(`
-      <div class="mb-6">
-        <h1 class="text-2xl font-bold text-neutral-800">Attendance Overview</h1>
-        <p class="text-neutral-500 mt-1">Cross-team attendance monitoring</p>
+      <div class="page-header animate-fade-in-up">
+        <h1 class="page-title">Attendance Overview</h1>
+        <p class="page-subtitle">Cross-team attendance monitoring</p>
       </div>
 
       <!-- Filters -->

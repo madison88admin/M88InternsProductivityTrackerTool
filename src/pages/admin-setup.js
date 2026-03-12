@@ -9,18 +9,18 @@ import { navigateTo } from '../lib/router.js';
 
 export function renderAdminSetupPage() {
   renderPage(`
-    <div class="min-h-screen flex items-center justify-center bg-linear-to-br from-primary-700 to-primary-900 px-4">
+    <div class="min-h-screen flex items-center justify-center px-4 py-12" style="background: linear-gradient(135deg, #4338ca 0%, #4f46e5 50%, #6366f1 100%);">
       <div class="w-full max-w-md">
         <div class="text-center mb-8">
-          <div class="inline-flex items-center justify-center w-16 h-16 rounded-2xl shadow-lg mb-4" style="background: white;">
-            <span class="text-2xl font-bold text-primary-600">M88</span>
+          <div class="inline-flex items-center justify-center w-16 h-16 rounded-2xl mb-4 bg-white/20 backdrop-blur-sm" style="box-shadow: 0 8px 32px rgba(0,0,0,0.1);">
+            <span class="text-2xl font-extrabold text-white">M88</span>
           </div>
           <h1 class="text-2xl font-bold text-white">Admin Setup</h1>
-          <p class="text-neutral-400 mt-1">Create the initial administrator account</p>
+          <p class="text-white/60 mt-1">Create the initial administrator account</p>
         </div>
 
-        <div class="card">
-          <div class="bg-warning-50 border border-warning-500/30 rounded-lg p-3 mb-6">
+        <div class="bg-white rounded-2xl shadow-2xl p-8" style="border: 1px solid rgba(255,255,255,0.2);">
+          <div class="bg-warning-50 rounded-xl p-4 mb-6" style="border: 1px solid rgba(245,158,11,0.2);">
             <p class="text-sm text-warning-600">
               <strong>Important:</strong> This creates a Super Admin account with full system access.
               You need the secret key provided during system deployment.
@@ -101,7 +101,13 @@ export function renderAdminSetupPage() {
         showToast('Admin account created! Please check your email to verify, then login.', 'success');
         navigateTo('/login');
       } catch (err) {
-        showToast(err.message || 'Failed to create admin account', 'error');
+        // A 500 from Supabase usually means the handle_new_user database trigger
+        // failed. Run supabase/004_fix_handle_new_user_trigger.sql in the
+        // Supabase SQL Editor to resolve it.
+        const msg = err.status === 500
+          ? 'Server error creating account. Run the 004_fix_handle_new_user_trigger.sql migration in your Supabase SQL Editor, then try again.'
+          : (err.message || 'Failed to create admin account');
+        showToast(msg, 'error');
         btn.disabled = false;
         text.textContent = 'Create Admin Account';
         spinner.classList.add('hidden');

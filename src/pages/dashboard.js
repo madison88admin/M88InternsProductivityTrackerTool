@@ -21,9 +21,6 @@ export async function renderDashboard() {
     case 'supervisor':
       content = await buildSupervisorDashboard(profile);
       break;
-    case 'hr':
-      content = await buildHRDashboard(profile);
-      break;
     case 'admin':
       content = await buildAdminDashboard(profile);
       break;
@@ -49,7 +46,7 @@ async function buildInternDashboard(profile) {
     .select('*')
     .eq('intern_id', profile.id)
     .eq('date', today)
-    .single();
+    .maybeSingle();
 
   // Fetch pending tasks count
   const { count: pendingTasks } = await supabase
@@ -76,57 +73,61 @@ async function buildInternDashboard(profile) {
   const hoursRequired = profile.hours_required || 0;
   const progress = hoursRequired > 0 ? Math.min(100, (hoursRendered / hoursRequired) * 100) : 0;
 
+  const attendanceStatus = todayAttendance ? (todayAttendance.time_out_2 ? 'Complete' : 'Logged In') : 'Not Logged';
+  const attendanceColor = todayAttendance ? (todayAttendance.time_out_2 ? 'text-success-600' : 'text-primary-600') : 'text-neutral-400';
+
   return `
-    <div class="mb-6">
-      <h1 class="text-2xl font-bold text-neutral-800">Welcome back, ${profile.full_name?.split(' ')[0] || 'Intern'}!</h1>
-      <p class="text-neutral-500 mt-1">${formatDate(new Date(), { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</p>
+    <div class="page-header animate-fade-in-up">
+      <p class="text-sm font-medium text-primary-600 mb-1">${formatDate(new Date(), { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</p>
+      <h1 class="page-title">Welcome back, ${profile.full_name?.split(' ')[0] || 'Intern'}! 👋</h1>
+      <p class="page-subtitle">Here's an overview of your OJT progress and activities today.</p>
     </div>
 
     <!-- Stats Cards -->
-    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-      <div class="card">
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5 mb-8 stagger-children">
+      <div class="stat-card">
         <div class="flex items-center justify-between">
           <div>
-            <p class="text-sm text-neutral-500">Today's Status</p>
-            <p class="text-2xl font-bold mt-1">${todayAttendance ? (todayAttendance.time_out_2 ? 'Complete' : 'Logged In') : 'Not Logged'}</p>
+            <p class="text-xs font-semibold text-neutral-400 uppercase tracking-wider">Today's Status</p>
+            <p class="text-xl font-bold mt-2 ${attendanceColor}">${attendanceStatus}</p>
           </div>
-          <div class="w-10 h-10 bg-primary-100 rounded-lg flex items-center justify-center text-primary-600">
+          <div class="action-icon bg-primary-50 text-primary-600">
             ${icons.clock}
           </div>
         </div>
       </div>
 
-      <div class="card">
+      <div class="stat-card" style="--tw-gradient-from: #f59e0b;">
         <div class="flex items-center justify-between">
           <div>
-            <p class="text-sm text-neutral-500">Active Tasks</p>
-            <p class="text-2xl font-bold mt-1">${pendingTasks || 0}</p>
+            <p class="text-xs font-semibold text-neutral-400 uppercase tracking-wider">Active Tasks</p>
+            <p class="text-xl font-bold mt-2 text-neutral-900">${pendingTasks || 0}</p>
           </div>
-          <div class="w-10 h-10 bg-warning-50 rounded-lg flex items-center justify-center text-warning-600">
+          <div class="action-icon bg-warning-50 text-warning-600">
             ${icons.tasks}
           </div>
         </div>
       </div>
 
-      <div class="card">
+      <div class="stat-card">
         <div class="flex items-center justify-between">
           <div>
-            <p class="text-sm text-neutral-500">Pending Narratives</p>
-            <p class="text-2xl font-bold mt-1">${pendingNarratives || 0}</p>
+            <p class="text-xs font-semibold text-neutral-400 uppercase tracking-wider">Pending Narratives</p>
+            <p class="text-xl font-bold mt-2 text-neutral-900">${pendingNarratives || 0}</p>
           </div>
-          <div class="w-10 h-10 bg-success-50 rounded-lg flex items-center justify-center text-success-600">
+          <div class="action-icon bg-success-50 text-success-600">
             ${icons.narrative}
           </div>
         </div>
       </div>
 
-      <div class="card">
+      <div class="stat-card">
         <div class="flex items-center justify-between">
           <div>
-            <p class="text-sm text-neutral-500">Notifications</p>
-            <p class="text-2xl font-bold mt-1">${unreadNotifs || 0}</p>
+            <p class="text-xs font-semibold text-neutral-400 uppercase tracking-wider">Notifications</p>
+            <p class="text-xl font-bold mt-2 text-neutral-900">${unreadNotifs || 0}</p>
           </div>
-          <div class="w-10 h-10 bg-danger-50 rounded-lg flex items-center justify-center text-danger-600">
+          <div class="action-icon bg-danger-50 text-danger-600">
             ${icons.bell}
           </div>
         </div>
@@ -134,66 +135,62 @@ async function buildInternDashboard(profile) {
     </div>
 
     <!-- OJT Progress -->
-    <div class="card mb-6">
-      <h3 class="text-lg font-semibold mb-4">OJT Progress</h3>
-      <div class="flex items-center gap-4 mb-2">
-        <div class="flex-1">
-          <div class="w-full bg-neutral-200 rounded-full h-3">
-            <div class="bg-primary-600 h-3 rounded-full transition-all duration-500" style="width: ${progress.toFixed(1)}%"></div>
-          </div>
+    <div class="card mb-8 animate-fade-in-up" style="animation-delay: 200ms;">
+      <div class="flex items-center justify-between mb-5">
+        <div>
+          <h3 class="text-base font-bold text-neutral-900">OJT Progress</h3>
+          <p class="text-sm text-neutral-500 mt-0.5">Track your on-the-job training completion</p>
         </div>
-        <span class="text-sm font-medium text-neutral-600">${progress.toFixed(1)}%</span>
+        <span class="text-2xl font-bold text-primary-600">${progress.toFixed(1)}%</span>
       </div>
-      <div class="flex justify-between text-sm text-neutral-500">
-        <span>Hours Rendered: ${formatHoursDisplay(hoursRendered)}</span>
-        <span>Hours Required: ${formatHoursDisplay(hoursRequired)}</span>
+      <div class="progress-bar-track mb-4">
+        <div class="progress-bar-fill" style="width: ${progress.toFixed(1)}%"></div>
       </div>
-      ${profile.ojt_end_date ? `<p class="text-sm text-neutral-500 mt-2">Estimated completion: ${formatDate(profile.ojt_end_date)}</p>` : ''}
+      <div class="flex justify-between text-sm">
+        <span class="text-neutral-500"><span class="font-semibold text-neutral-700">${formatHoursDisplay(hoursRendered)}</span> rendered</span>
+        <span class="text-neutral-500"><span class="font-semibold text-neutral-700">${formatHoursDisplay(hoursRequired)}</span> required</span>
+      </div>
+      ${profile.ojt_end_date ? `<p class="text-xs text-neutral-400 mt-3">Estimated completion: ${formatDate(profile.ojt_end_date)}</p>` : ''}
     </div>
 
     <!-- Quick Actions -->
-    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-      <a href="#/attendance" class="card hover:shadow-md transition-shadow cursor-pointer">
-        <div class="flex items-center gap-3">
-          <div class="w-10 h-10 bg-primary-100 rounded-lg flex items-center justify-center text-primary-600">
-            ${icons.clock}
-          </div>
-          <div>
-            <p class="font-medium">Log Attendance</p>
-            <p class="text-sm text-neutral-500">Record time-in / time-out</p>
-          </div>
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-5 mb-8 stagger-children" style="animation-delay: 300ms;">
+      <a href="#/attendance" class="action-card">
+        <div class="action-icon bg-primary-50 text-primary-600">
+          ${icons.clock}
+        </div>
+        <div>
+          <p class="font-semibold text-neutral-900">Log Attendance</p>
+          <p class="text-sm text-neutral-500 mt-0.5">Record time-in / time-out</p>
         </div>
       </a>
 
-      <a href="#/my-tasks" class="card hover:shadow-md transition-shadow cursor-pointer">
-        <div class="flex items-center gap-3">
-          <div class="w-10 h-10 bg-warning-50 rounded-lg flex items-center justify-center text-warning-600">
-            ${icons.tasks}
-          </div>
-          <div>
-            <p class="font-medium">View Tasks</p>
-            <p class="text-sm text-neutral-500">Check your assignments</p>
-          </div>
+      <a href="#/my-tasks" class="action-card">
+        <div class="action-icon bg-warning-50 text-warning-600">
+          ${icons.tasks}
+        </div>
+        <div>
+          <p class="font-semibold text-neutral-900">View Tasks</p>
+          <p class="text-sm text-neutral-500 mt-0.5">Check your assignments</p>
         </div>
       </a>
 
-      <a href="#/narratives" class="card hover:shadow-md transition-shadow cursor-pointer">
-        <div class="flex items-center gap-3">
-          <div class="w-10 h-10 bg-success-50 rounded-lg flex items-center justify-center text-success-600">
-            ${icons.narrative}
-          </div>
-          <div>
-            <p class="font-medium">Submit Narrative</p>
-            <p class="text-sm text-neutral-500">Write daily activity report</p>
-          </div>
+      <a href="#/narratives" class="action-card">
+        <div class="action-icon bg-success-50 text-success-600">
+          ${icons.narrative}
+        </div>
+        <div>
+          <p class="font-semibold text-neutral-900">Submit Narrative</p>
+          <p class="text-sm text-neutral-500 mt-0.5">Write daily activity report</p>
         </div>
       </a>
     </div>
 
     <!-- Weekly Hours Chart -->
-    <div class="card">
-      <h3 class="text-lg font-semibold mb-4">This Week's Hours</h3>
-      <div style="position: relative; height: 200px;">
+    <div class="card animate-fade-in-up" style="animation-delay: 400ms;">
+      <h3 class="text-base font-bold text-neutral-900 mb-1">This Week's Hours</h3>
+      <p class="text-sm text-neutral-500 mb-4">Your daily attendance log for the current week</p>
+      <div style="position: relative; height: 220px;">
         <canvas id="weekly-hours-chart"></canvas>
       </div>
     </div>
@@ -224,159 +221,74 @@ async function buildSupervisorDashboard(profile) {
     .in('status', ['not_started', 'in_progress']);
 
   return `
-    <div class="mb-6">
-      <h1 class="text-2xl font-bold text-neutral-800">Supervisor Dashboard</h1>
-      <p class="text-neutral-500 mt-1">${formatDate(new Date(), { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</p>
+    <div class="page-header animate-fade-in-up">
+      <p class="text-sm font-medium text-primary-600 mb-1">${formatDate(new Date(), { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</p>
+      <h1 class="page-title">Supervisor Dashboard</h1>
+      <p class="page-subtitle">Manage your team's performance and approvals</p>
     </div>
 
-    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-      <div class="card">
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5 mb-8 stagger-children">
+      <div class="stat-card">
         <div class="flex items-center justify-between">
           <div>
-            <p class="text-sm text-neutral-500">Pending Approvals</p>
-            <p class="text-2xl font-bold mt-1 ${(pendingApprovals || 0) > 0 ? 'text-warning-600' : ''}">${pendingApprovals || 0}</p>
+            <p class="text-xs font-semibold text-neutral-400 uppercase tracking-wider">Pending Approvals</p>
+            <p class="text-xl font-bold mt-2 ${(pendingApprovals || 0) > 0 ? 'text-warning-600' : 'text-neutral-900'}">${pendingApprovals || 0}</p>
           </div>
-          <div class="w-10 h-10 bg-warning-50 rounded-lg flex items-center justify-center text-warning-600">
+          <div class="action-icon bg-warning-50 text-warning-600">
             ${icons.approval}
           </div>
         </div>
       </div>
 
-      <div class="card">
+      <div class="stat-card">
         <div class="flex items-center justify-between">
           <div>
-            <p class="text-sm text-neutral-500">Team Size</p>
-            <p class="text-2xl font-bold mt-1">${teamSize || 0}</p>
+            <p class="text-xs font-semibold text-neutral-400 uppercase tracking-wider">Team Size</p>
+            <p class="text-xl font-bold mt-2 text-neutral-900">${teamSize || 0}</p>
           </div>
-          <div class="w-10 h-10 bg-primary-100 rounded-lg flex items-center justify-center text-primary-600">
+          <div class="action-icon bg-primary-50 text-primary-600">
             ${icons.users}
           </div>
         </div>
       </div>
 
-      <div class="card">
+      <div class="stat-card">
         <div class="flex items-center justify-between">
           <div>
-            <p class="text-sm text-neutral-500">Active Tasks</p>
-            <p class="text-2xl font-bold mt-1">${activeTasks || 0}</p>
+            <p class="text-xs font-semibold text-neutral-400 uppercase tracking-wider">Active Tasks</p>
+            <p class="text-xl font-bold mt-2 text-neutral-900">${activeTasks || 0}</p>
           </div>
-          <div class="w-10 h-10 bg-success-50 rounded-lg flex items-center justify-center text-success-600">
+          <div class="action-icon bg-success-50 text-success-600">
             ${icons.tasks}
           </div>
         </div>
       </div>
 
-      <a href="#/approvals" class="card hover:shadow-md transition-shadow">
-        <div class="flex items-center gap-3">
-          <div class="w-10 h-10 bg-primary-100 rounded-lg flex items-center justify-center text-primary-600">
-            ${icons.approval}
-          </div>
-          <div>
-            <p class="font-medium">Review Approvals</p>
-            <p class="text-sm text-neutral-500">Go to approvals →</p>
-          </div>
+      <a href="#/approvals" class="action-card">
+        <div class="action-icon bg-primary-50 text-primary-600">
+          ${icons.approval}
+        </div>
+        <div>
+          <p class="font-semibold text-neutral-900">Review Approvals</p>
+          <p class="text-sm text-neutral-500">Go to approvals →</p>
         </div>
       </a>
     </div>
 
-    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 stagger-children" style="animation-delay: 200ms;">
       <div class="card">
-        <h3 class="text-lg font-semibold mb-4">Team Attendance Today</h3>
-        <div style="position: relative; height: 200px;">
+        <h3 class="text-base font-bold text-neutral-900 mb-1">Team Attendance Today</h3>
+        <p class="text-sm text-neutral-500 mb-4">Overview of your team's check-in status</p>
+        <div style="position: relative; height: 220px;">
           <canvas id="team-attendance-chart"></canvas>
         </div>
       </div>
 
       <div class="card">
-        <h3 class="text-lg font-semibold mb-4">Task Status Overview</h3>
-        <div style="position: relative; height: 200px;">
+        <h3 class="text-base font-bold text-neutral-900 mb-1">Task Status Overview</h3>
+        <p class="text-sm text-neutral-500 mb-4">Distribution of tasks by current status</p>
+        <div style="position: relative; height: 220px;">
           <canvas id="task-status-chart"></canvas>
-        </div>
-      </div>
-    </div>
-  `;
-}
-
-async function buildHRDashboard(profile) {
-  const { count: totalInterns } = await supabase
-    .from('profiles')
-    .select('*', { count: 'exact', head: true })
-    .eq('role', 'intern')
-    .eq('is_active', true);
-
-  const { count: pendingAllowances } = await supabase
-    .from('allowance_periods')
-    .select('*', { count: 'exact', head: true })
-    .in('status', ['computed', 'under_review']);
-
-  return `
-    <div class="mb-6">
-      <h1 class="text-2xl font-bold text-neutral-800">HR Dashboard</h1>
-      <p class="text-neutral-500 mt-1">${formatDate(new Date(), { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</p>
-    </div>
-
-    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-      <div class="card">
-        <div class="flex items-center justify-between">
-          <div>
-            <p class="text-sm text-neutral-500">Active Interns</p>
-            <p class="text-2xl font-bold mt-1">${totalInterns || 0}</p>
-          </div>
-          <div class="w-10 h-10 bg-primary-100 rounded-lg flex items-center justify-center text-primary-600">
-            ${icons.users}
-          </div>
-        </div>
-      </div>
-
-      <div class="card">
-        <div class="flex items-center justify-between">
-          <div>
-            <p class="text-sm text-neutral-500">Pending Allowances</p>
-            <p class="text-2xl font-bold mt-1 ${(pendingAllowances || 0) > 0 ? 'text-warning-600' : ''}">${pendingAllowances || 0}</p>
-          </div>
-          <div class="w-10 h-10 bg-warning-50 rounded-lg flex items-center justify-center text-warning-600">
-            ${icons.money}
-          </div>
-        </div>
-      </div>
-
-      <a href="#/allowance-management" class="card hover:shadow-md transition-shadow">
-        <div class="flex items-center gap-3">
-          <div class="w-10 h-10 bg-success-50 rounded-lg flex items-center justify-center text-success-600">
-            ${icons.money}
-          </div>
-          <div>
-            <p class="font-medium">Manage Allowances</p>
-            <p class="text-sm text-neutral-500">Review & approve →</p>
-          </div>
-        </div>
-      </a>
-
-      <a href="#/reports" class="card hover:shadow-md transition-shadow">
-        <div class="flex items-center gap-3">
-          <div class="w-10 h-10 bg-primary-100 rounded-lg flex items-center justify-center text-primary-600">
-            ${icons.reports}
-          </div>
-          <div>
-            <p class="font-medium">Generate Reports</p>
-            <p class="text-sm text-neutral-500">View reports →</p>
-          </div>
-        </div>
-      </a>
-    </div>
-
-    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-      <div class="card">
-        <h3 class="text-lg font-semibold mb-4">Weekly Attendance Overview</h3>
-        <div style="position: relative; height: 200px;">
-          <canvas id="attendance-overview-chart"></canvas>
-        </div>
-      </div>
-
-      <div class="card">
-        <h3 class="text-lg font-semibold mb-4">Allowance Summary</h3>
-        <div style="position: relative; height: 200px;">
-          <canvas id="allowance-summary-chart"></canvas>
         </div>
       </div>
     </div>
@@ -405,55 +317,56 @@ async function buildAdminDashboard(profile) {
     .eq('status', 'pending');
 
   return `
-    <div class="mb-6">
-      <h1 class="text-2xl font-bold text-neutral-800">System Administration</h1>
-      <p class="text-neutral-500 mt-1">${formatDate(new Date(), { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</p>
+    <div class="page-header animate-fade-in-up">
+      <p class="text-sm font-medium text-primary-600 mb-1">${formatDate(new Date(), { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</p>
+      <h1 class="page-title">System Administration</h1>
+      <p class="page-subtitle">Overview of all users, locations, and system activity</p>
     </div>
 
-    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-      <div class="card">
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5 mb-8 stagger-children">
+      <div class="stat-card">
         <div class="flex items-center justify-between">
           <div>
-            <p class="text-sm text-neutral-500">Total Users</p>
-            <p class="text-2xl font-bold mt-1">${totalUsers || 0}</p>
+            <p class="text-xs font-semibold text-neutral-400 uppercase tracking-wider">Total Users</p>
+            <p class="text-xl font-bold mt-2 text-neutral-900">${totalUsers || 0}</p>
           </div>
-          <div class="w-10 h-10 bg-primary-100 rounded-lg flex items-center justify-center text-primary-600">
+          <div class="action-icon bg-primary-50 text-primary-600">
             ${icons.users}
           </div>
         </div>
       </div>
 
-      <div class="card">
+      <div class="stat-card">
         <div class="flex items-center justify-between">
           <div>
-            <p class="text-sm text-neutral-500">Locations</p>
-            <p class="text-2xl font-bold mt-1">${totalLocations || 0}</p>
+            <p class="text-xs font-semibold text-neutral-400 uppercase tracking-wider">Locations</p>
+            <p class="text-xl font-bold mt-2 text-neutral-900">${totalLocations || 0}</p>
           </div>
-          <div class="w-10 h-10 bg-success-50 rounded-lg flex items-center justify-center text-success-600">
+          <div class="action-icon bg-success-50 text-success-600">
             ${icons.location}
           </div>
         </div>
       </div>
 
-      <div class="card">
+      <div class="stat-card">
         <div class="flex items-center justify-between">
           <div>
-            <p class="text-sm text-neutral-500">Departments</p>
-            <p class="text-2xl font-bold mt-1">${totalDepartments || 0}</p>
+            <p class="text-xs font-semibold text-neutral-400 uppercase tracking-wider">Departments</p>
+            <p class="text-xl font-bold mt-2 text-neutral-900">${totalDepartments || 0}</p>
           </div>
-          <div class="w-10 h-10 bg-warning-50 rounded-lg flex items-center justify-center text-warning-600">
+          <div class="action-icon bg-warning-50 text-warning-600">
             ${icons.building}
           </div>
         </div>
       </div>
 
-      <div class="card">
+      <div class="stat-card">
         <div class="flex items-center justify-between">
           <div>
-            <p class="text-sm text-neutral-500">Pending Approvals</p>
-            <p class="text-2xl font-bold mt-1 ${(pendingApprovals || 0) > 0 ? 'text-warning-600' : ''}">${pendingApprovals || 0}</p>
+            <p class="text-xs font-semibold text-neutral-400 uppercase tracking-wider">Pending Approvals</p>
+            <p class="text-xl font-bold mt-2 ${(pendingApprovals || 0) > 0 ? 'text-warning-600' : 'text-neutral-900'}">${pendingApprovals || 0}</p>
           </div>
-          <div class="w-10 h-10 bg-danger-50 rounded-lg flex items-center justify-center text-danger-600">
+          <div class="action-icon bg-danger-50 text-danger-600">
             ${icons.approval}
           </div>
         </div>
@@ -461,49 +374,45 @@ async function buildAdminDashboard(profile) {
     </div>
 
     <!-- Quick Admin Links -->
-    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-      <a href="#/user-management" class="card hover:shadow-md transition-shadow">
-        <div class="flex items-center gap-3">
-          <div class="w-10 h-10 bg-primary-100 rounded-lg flex items-center justify-center text-primary-600">${icons.users}</div>
-          <div>
-            <p class="font-medium">User Management</p>
-            <p class="text-sm text-neutral-500">Manage all accounts</p>
-          </div>
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-5 mb-8 stagger-children" style="animation-delay: 200ms;">
+      <a href="#/user-management" class="action-card">
+        <div class="action-icon bg-primary-50 text-primary-600">${icons.users}</div>
+        <div>
+          <p class="font-semibold text-neutral-900">User Management</p>
+          <p class="text-sm text-neutral-500 mt-0.5">Manage all accounts</p>
         </div>
       </a>
 
-      <a href="#/audit-logs" class="card hover:shadow-md transition-shadow">
-        <div class="flex items-center gap-3">
-          <div class="w-10 h-10 bg-neutral-100 rounded-lg flex items-center justify-center text-neutral-600">${icons.audit}</div>
-          <div>
-            <p class="font-medium">Audit Logs</p>
-            <p class="text-sm text-neutral-500">View system activity</p>
-          </div>
+      <a href="#/audit-logs" class="action-card">
+        <div class="action-icon bg-neutral-100 text-neutral-600">${icons.audit}</div>
+        <div>
+          <p class="font-semibold text-neutral-900">Audit Logs</p>
+          <p class="text-sm text-neutral-500 mt-0.5">View system activity</p>
         </div>
       </a>
 
-      <a href="#/system-settings" class="card hover:shadow-md transition-shadow">
-        <div class="flex items-center gap-3">
-          <div class="w-10 h-10 bg-neutral-100 rounded-lg flex items-center justify-center text-neutral-600">${icons.settings}</div>
-          <div>
-            <p class="font-medium">System Settings</p>
-            <p class="text-sm text-neutral-500">Configure the system</p>
-          </div>
+      <a href="#/system-settings" class="action-card">
+        <div class="action-icon bg-neutral-100 text-neutral-600">${icons.settings}</div>
+        <div>
+          <p class="font-semibold text-neutral-900">System Settings</p>
+          <p class="text-sm text-neutral-500 mt-0.5">Configure the system</p>
         </div>
       </a>
     </div>
 
-    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 stagger-children" style="animation-delay: 300ms;">
       <div class="card">
-        <h3 class="text-lg font-semibold mb-4">Users by Role</h3>
-        <div style="position: relative; height: 200px;">
+        <h3 class="text-base font-bold text-neutral-900 mb-1">Users by Role</h3>
+        <p class="text-sm text-neutral-500 mb-4">Distribution of active users across roles</p>
+        <div style="position: relative; height: 220px;">
           <canvas id="users-by-role-chart"></canvas>
         </div>
       </div>
 
       <div class="card">
-        <h3 class="text-lg font-semibold mb-4">System Activity (Last 7 Days)</h3>
-        <div style="position: relative; height: 200px;">
+        <h3 class="text-base font-bold text-neutral-900 mb-1">System Activity (Last 7 Days)</h3>
+        <p class="text-sm text-neutral-500 mb-4">Recent audit log activity trends</p>
+        <div style="position: relative; height: 220px;">
           <canvas id="system-activity-chart"></canvas>
         </div>
       </div>
@@ -545,7 +454,12 @@ async function initDashboardCharts(role, container) {
   const defaultOptions = {
     responsive: true,
     maintainAspectRatio: false,
-    plugins: { legend: { position: 'bottom' } },
+    plugins: {
+      legend: {
+        position: 'bottom',
+        labels: { padding: 16, usePointStyle: true, pointStyle: 'circle', font: { family: 'Inter', size: 12 } },
+      },
+    },
   };
 
   if (role === 'intern') {
@@ -579,8 +493,10 @@ async function initDashboardCharts(role, container) {
           datasets: [{
             label: 'Hours Logged',
             data: hours,
-            backgroundColor: '#3b82f6',
-            borderRadius: 6,
+            backgroundColor: 'rgba(99, 102, 241, 0.8)',
+            hoverBackgroundColor: '#4f46e5',
+            borderRadius: 8,
+            borderSkipped: false,
           }],
         },
         options: { ...defaultOptions, scales: { y: { beginAtZero: true, max: 10 } } },
@@ -606,7 +522,8 @@ async function initDashboardCharts(role, container) {
           labels: ['Not Started', 'In Progress', 'Completed'],
           datasets: [{
             data: [counts.not_started, counts.in_progress, counts.completed],
-            backgroundColor: ['#94a3b8', '#f59e0b', '#22c55e'],
+            backgroundColor: ['#cbd5e1', '#fbbf24', '#34d399'],
+            borderWidth: 0,
           }],
         },
         options: defaultOptions,
@@ -622,16 +539,17 @@ async function initDashboardCharts(role, container) {
         .select('role')
         .eq('is_active', true);
 
-      const roleCounts = { admin: 0, hr: 0, supervisor: 0, intern: 0 };
+      const roleCounts = { admin: 0, supervisor: 0, intern: 0 };
       users?.forEach(u => { roleCounts[u.role] = (roleCounts[u.role] || 0) + 1; });
 
       createChart(roleCanvas, {
         type: 'doughnut',
         data: {
-          labels: ['Admin', 'HR', 'Supervisor', 'Intern'],
+          labels: ['Admin', 'Supervisor', 'Intern'],
           datasets: [{
-            data: [roleCounts.admin, roleCounts.hr, roleCounts.supervisor, roleCounts.intern],
-            backgroundColor: ['#1e40af', '#16a34a', '#d97706', '#3b82f6'],
+            data: [roleCounts.admin, roleCounts.supervisor, roleCounts.intern],
+            backgroundColor: ['#4f46e5', '#f59e0b', '#818cf8'],
+            borderWidth: 0,
           }],
         },
         options: defaultOptions,

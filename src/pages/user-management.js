@@ -24,10 +24,10 @@ export async function renderUserManagementPage() {
   const { data: supervisors } = await supabase.from('profiles').select('id, full_name').eq('role', 'supervisor').eq('is_active', true);
 
   renderLayout(`
-    <div class="flex items-center justify-between mb-6">
+    <div class="flex items-center justify-between page-header animate-fade-in-up">
       <div>
-        <h1 class="text-2xl font-bold text-neutral-800">User Management</h1>
-        <p class="text-neutral-500 mt-1">Manage system users and accounts</p>
+        <h1 class="page-title">User Management</h1>
+        <p class="page-subtitle">Manage system users and accounts</p>
       </div>
       <button id="invite-user-btn" class="btn-primary">
         ${icons.plus}
@@ -40,7 +40,6 @@ export async function renderUserManagementPage() {
       <select id="filter-role" class="form-input w-auto">
         <option value="">All Roles</option>
         <option value="admin">Admin</option>
-        <option value="hr">HR</option>
         <option value="supervisor">Supervisor</option>
         <option value="intern">Intern</option>
       </select>
@@ -72,7 +71,7 @@ export async function renderUserManagementPage() {
               <tr data-role="${user.role}" data-active="${user.is_active}" data-name="${(user.full_name || '').toLowerCase()}" data-email="${(user.email || '').toLowerCase()}">
                 <td>
                   <div class="flex items-center gap-3">
-                    <div class="w-8 h-8 rounded-full bg-primary-100 flex items-center justify-center text-primary-600 text-sm font-medium">
+                    <div class="w-8 h-8 rounded-full bg-gradient-to-br from-primary-500 to-primary-700 flex items-center justify-center text-white text-sm font-medium">
                       ${(user.full_name || 'U').charAt(0).toUpperCase()}
                     </div>
                     <div>
@@ -187,7 +186,6 @@ function openInviteModal(departments, locations, supervisors) {
           <option value="">Select role...</option>
           <option value="intern">Intern</option>
           <option value="supervisor">Supervisor</option>
-          <option value="hr">HR</option>
           <option value="admin">Admin</option>
         </select>
       </div>
@@ -286,7 +284,6 @@ function openEditUserModal(user, departments, locations, supervisors) {
         <select id="edit-role" class="form-input">
           <option value="intern" ${user.role === 'intern' ? 'selected' : ''}>Intern</option>
           <option value="supervisor" ${user.role === 'supervisor' ? 'selected' : ''}>Supervisor</option>
-          <option value="hr" ${user.role === 'hr' ? 'selected' : ''}>HR</option>
           <option value="admin" ${user.role === 'admin' ? 'selected' : ''}>Admin</option>
         </select>
       </div>

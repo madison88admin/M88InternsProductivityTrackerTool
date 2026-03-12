@@ -34,9 +34,9 @@ export async function renderAuditLogsPage() {
     const totalPages = Math.ceil((count || 0) / PAGE_SIZE);
 
     renderLayout(`
-      <div class="mb-6">
-        <h1 class="text-2xl font-bold text-neutral-800">Audit Logs</h1>
-        <p class="text-neutral-500 mt-1">System activity trail</p>
+      <div class="page-header animate-fade-in-up">
+        <h1 class="page-title">Audit Logs</h1>
+        <p class="page-subtitle">System activity trail</p>
       </div>
 
       <!-- Filters -->
