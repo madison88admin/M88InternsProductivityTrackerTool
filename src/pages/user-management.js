@@ -127,24 +127,90 @@ export async function renderUserManagementPage() {
 
     // Toggle active
     el.querySelectorAll('.toggle-user-btn').forEach(btn => {
-      btn.addEventListener('click', () => {
+      btn.addEventListener('click', async () => {
         const userId = btn.dataset.userId;
         const isActive = btn.dataset.active === 'true';
         const user = users.find(u => u.id === userId);
-        confirmDialog(
-          `Are you sure you want to ${isActive ? 'deactivate' : 'activate'} ${user?.full_name}?`,
-          async () => {
-            try {
-              await supabase.from('profiles').update({ is_active: !isActive }).eq('id', userId);
-              await logAudit(isActive ? 'user.deactivated' : 'user.activated', 'user', userId);
-              showToast(`User ${isActive ? 'deactivated' : 'activated'}`, 'success');
-              renderUserManagementPage();
-            } catch (err) {
-              showToast('Failed to update user', 'error');
+
+        // If activating, proceed directly
+        if (!isActive) {
+          confirmDialog(
+            `Are you sure you want to activate ${user?.full_name}?`,
+            async () => {
+              try {
+                await supabase.from('profiles').update({ is_active: true }).eq('id', userId);
+                await logAudit('user.activated', 'user', userId);
+                showToast(`User activated`, 'success');
+                renderUserManagementPage();
+              } catch (err) {
+                showToast('Failed to update user', 'error');
+              }
+            },
+            'Activate'
+          );
+          return;
+        }
+
+        // If deactivating, validate based on role
+        try {
+          if (user.role === 'supervisor') {
+            // Check for assigned interns
+            const { data: assignedInterns, error: internError } = await supabase
+              .from('profiles')
+              .select('id, full_name')
+              .eq('supervisor_id', userId)
+              .eq('is_active', true);
+
+            if (internError) throw internError;
+
+            if (assignedInterns && assignedInterns.length > 0) {
+              const internNames = assignedInterns.map(i => i.full_name).join(', ');
+              showToast(
+                `Cannot deactivate supervisor. The following interns are still assigned: ${internNames}`,
+                'error'
+              );
+              return;
             }
-          },
-          isActive ? 'Deactivate' : 'Activate'
-        );
+          } else if (user.role === 'intern') {
+            // Check for assigned or in-progress tasks
+            const { data: activeTasks, error: taskError } = await supabase
+              .from('tasks')
+              .select('id, title, status')
+              .eq('assigned_to', userId)
+              .in('status', ['not_started', 'in_progress']);
+
+            if (taskError) throw taskError;
+
+            if (activeTasks && activeTasks.length > 0) {
+              const taskSummary = activeTasks
+                .map(t => `${t.title} (${t.status})`)
+                .join(', ');
+              showToast(
+                `Cannot deactivate intern. The following tasks are still assigned or in progress: ${taskSummary}`,
+                'error'
+              );
+              return;
+            }
+          }
+
+          // Validation passed, proceed with deactivation
+          confirmDialog(
+            `Are you sure you want to deactivate ${user?.full_name}?`,
+            async () => {
+              try {
+                await supabase.from('profiles').update({ is_active: false }).eq('id', userId);
+                await logAudit('user.deactivated', 'user', userId);
+                showToast(`User deactivated`, 'success');
+                renderUserManagementPage();
+              } catch (err) {
+                showToast('Failed to update user', 'error');
+              }
+            },
+            'Deactivate'
+          );
+        } catch (err) {
+          showToast('Failed to validate deactivation', 'error');
+        }
       });
     });
 
@@ -368,66 +434,82 @@ function openInviteModal(departments, locations, supervisors) {
 function openEditUserModal(user, departments, locations, supervisors) {
   createModal('Edit User', `
     <form id="edit-user-form" class="space-y-4">
+      <!-- Base fields (always visible) -->
       <div>
-        <label class="form-label">Full Name</label>
+        <label class="form-label">Email</label>
+        <input type="email" id="edit-email" class="form-input" value="${user.email || ''}" disabled />
+      </div>
+      <div>
+        <label class="form-label">Full Name <span class="text-danger-500">*</span></label>
         <input type="text" id="edit-name" class="form-input" value="${user.full_name || ''}" required />
       </div>
       <div>
-        <label class="form-label">Role</label>
-        <select id="edit-role" class="form-input">
+        <label class="form-label">Role <span class="text-danger-500">*</span></label>
+        <select id="edit-role" class="form-input" required>
+          <option value="">Select role...</option>
           <option value="intern" ${user.role === 'intern' ? 'selected' : ''}>Intern</option>
           <option value="supervisor" ${user.role === 'supervisor' ? 'selected' : ''}>Supervisor</option>
           <option value="admin" ${user.role === 'admin' ? 'selected' : ''}>Admin</option>
         </select>
       </div>
-      <div>
-        <label class="form-label">Location</label>
-        <select id="edit-location" class="form-input">
-          <option value="">None</option>
-          ${(locations || []).map(l => `<option value="${l.id}" ${l.id === user.location_id ? 'selected' : ''}>${l.name}</option>`).join('')}
-        </select>
-      </div>
-      <div>
-        <label class="form-label">Department</label>
-        <select id="edit-department" class="form-input">
-          <option value="">None</option>
-          ${(departments || []).map(d => `<option value="${d.id}" ${d.id === user.department_id ? 'selected' : ''}>${d.name}</option>`).join('')}
-        </select>
-      </div>
-      <div>
-        <label class="form-label">Supervisor</label>
-        <select id="edit-supervisor" class="form-input">
-          <option value="">None</option>
-          ${(supervisors || []).map(s => `<option value="${s.id}" ${s.id === user.supervisor_id ? 'selected' : ''}>${s.full_name}</option>`).join('')}
-        </select>
-      </div>
-      <div>
-        <label class="form-label">Phone</label>
-        <input type="tel" id="edit-phone" class="form-input" value="${user.phone || ''}" />
-      </div>
 
-      ${user.role === 'intern' ? `
-        <div class="grid grid-cols-2 gap-4">
+      <!-- Role-specific sections (shown after role is selected) -->
+      <div id="role-fields" class="${user.role ? '' : 'hidden'} space-y-4">
+
+        <!-- Common fields for all roles -->
+        <div id="common-fields" class="space-y-4">
           <div>
-            <label class="form-label">School</label>
-            <input type="text" id="edit-school" class="form-input" value="${user.school || ''}" />
+            <label class="form-label">Phone</label>
+            <input type="tel" id="edit-phone" class="form-input" value="${user.phone || ''}" placeholder="Phone number" />
           </div>
           <div>
-            <label class="form-label">Course</label>
-            <input type="text" id="edit-course" class="form-input" value="${user.course || ''}" />
+            <label class="form-label">Location</label>
+            <select id="edit-location" class="form-input">
+              <option value="">Select location...</option>
+              ${(locations || []).map(l => `<option value="${l.id}" ${l.id === user.location_id ? 'selected' : ''}>${l.name}</option>`).join('')}
+            </select>
+          </div>
+          <div>
+            <label class="form-label">Department</label>
+            <select id="edit-department" class="form-input">
+              <option value="">Select department...</option>
+              ${(departments || []).map(d => `<option value="${d.id}" ${d.id === user.department_id ? 'selected' : ''}>${d.name}</option>`).join('')}
+            </select>
           </div>
         </div>
-        <div class="grid grid-cols-2 gap-4">
+
+        <!-- Intern-only fields -->
+        <div id="intern-fields" class="${user.role === 'intern' ? '' : 'hidden'} space-y-4">
           <div>
-            <label class="form-label">Hours Required</label>
-            <input type="number" id="edit-hours" class="form-input" value="${user.hours_required || ''}" step="0.5" />
+            <label class="form-label">Supervisor</label>
+            <select id="edit-supervisor" class="form-input">
+              <option value="">Select supervisor...</option>
+              ${(supervisors || []).map(s => `<option value="${s.id}" ${s.id === user.supervisor_id ? 'selected' : ''}>${s.full_name}</option>`).join('')}
+            </select>
           </div>
-          <div>
-            <label class="form-label">OJT Start Date</label>
-            <input type="date" id="edit-start" class="form-input" value="${user.ojt_start_date || ''}" />
+          <div class="grid grid-cols-2 gap-4">
+            <div>
+              <label class="form-label">School</label>
+              <input type="text" id="edit-school" class="form-input" value="${user.school || ''}" placeholder="School name" />
+            </div>
+            <div>
+              <label class="form-label">Course</label>
+              <input type="text" id="edit-course" class="form-input" value="${user.course || ''}" placeholder="Course / Program" />
+            </div>
+          </div>
+          <div class="grid grid-cols-2 gap-4">
+            <div>
+              <label class="form-label">Hours Required</label>
+              <input type="number" id="edit-hours" class="form-input" value="${user.hours_required || ''}" placeholder="e.g. 480" step="0.5" min="0" />
+            </div>
+            <div>
+              <label class="form-label">OJT Start Date</label>
+              <input type="date" id="edit-start" class="form-input" value="${user.ojt_start_date || ''}" />
+            </div>
           </div>
         </div>
-      ` : ''}
+
+      </div>
 
       <div class="flex justify-end gap-3 pt-2">
         <button type="button" id="edit-cancel" class="btn-secondary">Cancel</button>
@@ -437,17 +519,31 @@ function openEditUserModal(user, departments, locations, supervisors) {
   `, (el, close) => {
     el.querySelector('#edit-cancel').addEventListener('click', close);
 
-    // Auto-populate supervisor when department changes
-    const editDeptSelect = el.querySelector('#edit-department');
-    const editSupervisorSelect = el.querySelector('#edit-supervisor');
+    // Show/hide role-specific fields based on selected role
+    el.querySelector('#edit-role').addEventListener('change', (e) => {
+      const role = e.target.value;
+      const roleFields = el.querySelector('#role-fields');
+      const internFields = el.querySelector('#intern-fields');
 
-    editDeptSelect.addEventListener('change', (e) => {
-      applyDeptSupervisor(e.target.value, supervisors, editSupervisorSelect, null, 'None');
+      roleFields.classList.toggle('hidden', !role);
+      internFields.classList.toggle('hidden', role !== 'intern');
+
+      // When switching to intern, apply dept→supervisor logic if a dept is already chosen
+      if (role === 'intern') {
+        const deptId = el.querySelector('#edit-department').value;
+        applyDeptSupervisor(deptId, supervisors, el.querySelector('#edit-supervisor'), null, 'Select supervisor...');
+      }
+    });
+
+    // Auto-populate supervisor when department changes (intern role only)
+    el.querySelector('#edit-department').addEventListener('change', (e) => {
+      if (el.querySelector('#edit-role').value !== 'intern') return;
+      applyDeptSupervisor(e.target.value, supervisors, el.querySelector('#edit-supervisor'), null, 'Select supervisor...');
     });
 
     // On initial load for interns with a department, filter & auto-select supervisor
     if (user.role === 'intern' && user.department_id) {
-      applyDeptSupervisor(user.department_id, supervisors, editSupervisorSelect, user.supervisor_id, 'None');
+      applyDeptSupervisor(user.department_id, supervisors, el.querySelector('#edit-supervisor'), user.supervisor_id, 'Select supervisor...');
     }
 
     el.querySelector('#edit-user-form').addEventListener('submit', async (e) => {
@@ -456,20 +552,23 @@ function openEditUserModal(user, departments, locations, supervisors) {
       submitBtn.disabled = true;
       submitBtn.textContent = 'Saving...';
 
+      const role = el.querySelector('#edit-role').value;
       const updates = {
         full_name: el.querySelector('#edit-name').value.trim(),
-        role: el.querySelector('#edit-role').value,
+        role,
         location_id: el.querySelector('#edit-location').value || null,
         department_id: el.querySelector('#edit-department').value || null,
-        supervisor_id: el.querySelector('#edit-supervisor').value || null,
         phone: el.querySelector('#edit-phone').value || null,
       };
 
-      if (user.role === 'intern') {
-        updates.school = el.querySelector('#edit-school')?.value || null;
-        updates.course = el.querySelector('#edit-course')?.value || null;
-        updates.hours_required = el.querySelector('#edit-hours')?.value ? parseFloat(el.querySelector('#edit-hours').value) : null;
-        updates.ojt_start_date = el.querySelector('#edit-start')?.value || null;
+      if (role === 'intern') {
+        updates.supervisor_id = el.querySelector('#edit-supervisor').value || null;
+        updates.school = el.querySelector('#edit-school').value || null;
+        updates.course = el.querySelector('#edit-course').value || null;
+        updates.hours_required = el.querySelector('#edit-hours').value ? parseFloat(el.querySelector('#edit-hours').value) : null;
+        updates.ojt_start_date = el.querySelector('#edit-start').value || null;
+      } else {
+        updates.supervisor_id = null;
       }
 
       try {

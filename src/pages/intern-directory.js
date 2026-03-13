@@ -1,5 +1,5 @@
 /**
- * Intern Directory Page (HR)
+ * Intern Directory Page (Admin)
  * View and search all interns with OJT progress.
  */
 import { renderLayout } from '../components/layout.js';
@@ -89,7 +89,7 @@ export async function renderInternDirectoryPage() {
             ${i.department?.name ? `<p>Dept: ${i.department.name}</p>` : ''}
             ${i.location?.name ? `<p>${icons.location} ${i.location.name}</p>` : ''}
             ${supervisorMap[i.supervisor_id] ? `<p>Supervisor: ${supervisorMap[i.supervisor_id]}</p>` : ''}
-            ${i.ojt_start_date ? `<p>${icons.calendar} ${formatDate(i.ojt_start_date)} – ${formatDate(i.ojt_end_date)}</p>` : ''}
+            ${i.ojt_start_date ? `<p>${icons.calendar} ${formatDate(i.ojt_start_date)}${estEnd ? ` – ${formatDate(estEnd)}` : ''}</p>` : ''}
           </div>
           <div class="mt-3 pt-3 border-t border-neutral-200">
             <div class="flex justify-between text-xs mb-1">
@@ -120,7 +120,7 @@ export async function renderInternDirectoryPage() {
         <div class="flex-1 min-w-50">
           <div class="relative">
             <span class="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400">${icons.search}</span>
-            <input type="text" id="search-intern" class="form-input pl-10" placeholder="Search by name, email, school..." />
+            <input type="text" id="search-intern" class="form-input pl-10!" placeholder="Search by name, email, school..." />
           </div>
         </div>
         <select id="filter-status" class="form-input w-auto">

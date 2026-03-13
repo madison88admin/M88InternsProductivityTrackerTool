@@ -8,25 +8,32 @@ import { supabase } from '../lib/supabase.js';
 import { showToast } from '../lib/toast.js';
 import { logAudit } from '../lib/audit.js';
 import { icons } from '../lib/icons.js';
-import { formatDate } from '../lib/utils.js';
+import { formatDate, renderAvatar } from '../lib/utils.js';
 import { createModal } from '../lib/component.js';
 
 export async function renderTaskManagementPage() {
   const profile = getProfile();
   const role = getUserRole();
   const isAdmin = role === 'admin';
+  // Admin with a department can create/manage tasks for their department's interns
+  const isDeptAdmin = isAdmin && !!profile.department_id;
+  const canManageTasks = !isAdmin || isDeptAdmin;
 
-  // Fetch team interns
-  let internsQuery = supabase.from('profiles').select('id, full_name').eq('role', 'intern').eq('is_active', true);
-  if (!isAdmin) {
+  // Fetch assignable interns based on role
+  let internsQuery = supabase.from('profiles').select('id, full_name, avatar_url').eq('role', 'intern').eq('is_active', true);
+  if (isDeptAdmin) {
+    internsQuery = internsQuery.eq('department_id', profile.department_id);
+  } else if (!isAdmin) {
+    // supervisor: own interns only
     internsQuery = internsQuery.eq('supervisor_id', profile.id);
   }
-  const { data: interns } = await internsQuery;
+  const { data: interns } = canManageTasks ? await internsQuery : { data: [] };
 
-  // Fetch tasks
+  // Fetch tasks — supervisors see only their own; admins see all
   let tasksQuery = supabase
     .from('tasks')
     .select('*, assigned_profile:profiles!tasks_assigned_to_fkey(full_name), creator_profile:profiles!tasks_created_by_fkey(full_name)')
+    .eq('is_archived', false)
     .order('created_at', { ascending: false });
 
   if (!isAdmin) {
@@ -39,13 +46,19 @@ export async function renderTaskManagementPage() {
     <div class="flex items-center justify-between page-header animate-fade-in-up">
       <div>
         <h1 class="page-title">Task Management</h1>
-        <p class="page-subtitle">${isAdmin ? 'View and track intern tasks' : 'Create and manage intern tasks'}</p>
+        <p class="page-subtitle">${canManageTasks ? 'Create and manage intern tasks' : 'View and track intern tasks'}</p>
       </div>
-      ${!isAdmin ? `
-      <button id="create-task-btn" class="btn-primary" ${(!interns || interns.length === 0) ? 'disabled title="No interns available"' : ''}>
-        ${icons.plus}
-        <span class="ml-2">Create Task</span>
-      </button>` : ''}
+      <div class="flex gap-2">
+        <button id="view-archive-btn" class="btn-secondary">
+          ${icons.archive}
+          <span class="ml-2">View Archive</span>
+        </button>
+        ${canManageTasks ? `
+        <button id="create-task-btn" class="btn-primary" ${(!interns || interns.length === 0) ? 'disabled title="No interns available in your department"' : ''}>
+          ${icons.plus}
+          <span class="ml-2">Create Task</span>
+        </button>` : ''}
+      </div>
     </div>
 
     <!-- Filters -->
@@ -74,7 +87,7 @@ export async function renderTaskManagementPage() {
               <th>Est. Hours</th>
               <th>Due Date</th>
               <th>Created</th>
-              ${!isAdmin ? '<th>Actions</th>' : ''}
+              ${canManageTasks ? '<th>Actions</th>' : ''}
             </tr>
           </thead>
           <tbody>
@@ -96,53 +109,55 @@ export async function renderTaskManagementPage() {
                 <td>${task.estimated_hours || '—'}</td>
                 <td>${task.due_date ? formatDate(task.due_date) : '—'}</td>
                 <td>${formatDate(task.created_at)}</td>
-                ${!isAdmin ? `
+                ${canManageTasks ? `
                 <td>
+                  ${task.created_by === profile.id ? `
                   <div class="flex gap-1">
                     <button class="btn-sm btn-secondary edit-task-btn" data-task-id="${task.id}" title="Edit">
                       ${icons.edit}
                     </button>
                     <button
-                      class="btn-sm btn-danger delete-task-btn"
+                      class="btn-sm btn-warning archive-task-btn"
                       data-task-id="${task.id}"
-                      title="${task.status !== 'not_started' ? 'Cannot delete a task that has already been started' : 'Delete task'}"
-                      ${task.status !== 'not_started' ? 'disabled' : ''}>
-                      ${icons.trash}
+                      title="${task.status === 'completed' ? 'Archive task' : 'Only completed tasks can be archived'}"
+                      ${task.status !== 'completed' ? 'disabled' : ''}>
+                      ${icons.archive}
                     </button>
-                  </div>
+                  </div>` : '<span class="text-xs text-neutral-400">—</span>'}
                 </td>` : ''}
               </tr>
             `).join('')}
-            ${(!tasks || tasks.length === 0) ? `<tr><td colspan="${isAdmin ? 6 : 7}" class="text-center text-neutral-400 py-8">No tasks found</td></tr>` : ''}
+            ${(!tasks || tasks.length === 0) ? `<tr><td colspan="${canManageTasks ? 7 : 6}" class="text-center text-neutral-400 py-8">No tasks found</td></tr>` : ''}
           </tbody>
         </table>
       </div>
     </div>
   `, (el) => {
-    // Create task button (supervisor only)
-    if (!isAdmin) {
+    if (canManageTasks) {
       el.querySelector('#create-task-btn')?.addEventListener('click', () => {
         openCreateTaskModal(interns, profile);
       });
 
-      // Edit task buttons
+      // Edit task buttons (only rendered for tasks created by this user)
       el.querySelectorAll('.edit-task-btn').forEach(btn => {
         btn.addEventListener('click', () => {
-          const taskId = btn.dataset.taskId;
-          const task = tasks.find(t => t.id === taskId);
+          const task = tasks.find(t => t.id === btn.dataset.taskId);
           if (task) openEditTaskModal(task, interns, profile);
         });
       });
 
-      // Delete task buttons
-      el.querySelectorAll('.delete-task-btn').forEach(btn => {
+      // Archive task buttons
+      el.querySelectorAll('.archive-task-btn').forEach(btn => {
         btn.addEventListener('click', () => {
-          const taskId = btn.dataset.taskId;
-          const task = tasks.find(t => t.id === taskId);
-          if (task) confirmDeleteTask(task);
+          const task = tasks.find(t => t.id === btn.dataset.taskId);
+          if (task) confirmArchiveTask(task);
         });
       });
     }
+
+    el.querySelector('#view-archive-btn').addEventListener('click', () => {
+      openArchivedTasksModal(profile, isAdmin, canManageTasks);
+    });
 
     // Filters
     const filterStatus = el.querySelector('#filter-status');
@@ -163,6 +178,70 @@ export async function renderTaskManagementPage() {
   }, '/task-management');
 }
 
+function internPickerHtml(interns, selectedId = '') {
+  const selected = selectedId ? interns.find(i => i.id === selectedId) : null;
+  return `
+    <div class="relative" id="intern-picker">
+      <button type="button" id="intern-picker-btn"
+        class="form-input items-center w-full text-left"
+        style="display:flex; justify-content:space-between; align-items:center;">
+        <span class="flex items-center gap-2 min-w-0">
+          <span id="intern-picker-avatar" class="shrink-0">
+            ${selected ? renderAvatar(selected, 'w-6 h-6', 'text-xs') : ''}
+          </span>
+          <span id="intern-picker-name" class="truncate ${selected ? 'text-neutral-900' : 'text-neutral-400'}">
+            ${selected ? selected.full_name : 'Select an intern...'}
+          </span>
+        </span>
+        <span class="shrink-0 text-neutral-400 pointer-events-none">${icons.chevronDown}</span>
+      </button>
+      <div id="intern-picker-list"
+        class="hidden absolute z-50 w-full bg-white border border-neutral-200 rounded-xl shadow-lg mt-1 max-h-48 overflow-y-auto">
+        ${(interns || []).map(i => `
+          <div class="intern-option flex items-center gap-2 px-3 py-2 hover:bg-neutral-50 cursor-pointer ${i.id === selectedId ? 'bg-primary-50' : ''}"
+            data-value="${i.id}">
+            ${renderAvatar(i, 'w-7 h-7', 'text-xs')}
+            <span class="text-sm">${i.full_name}</span>
+          </div>
+        `).join('')}
+      </div>
+      <input type="hidden" id="task-intern" value="${selectedId}" />
+    </div>
+  `;
+}
+
+function initInternPicker(el, interns) {
+  const list = el.querySelector('#intern-picker-list');
+  const hidden = el.querySelector('#task-intern');
+  const avatarSlot = el.querySelector('#intern-picker-avatar');
+  const nameSlot = el.querySelector('#intern-picker-name');
+
+  el.querySelector('#intern-picker-btn').addEventListener('click', (e) => {
+    e.stopPropagation();
+    list.classList.toggle('hidden');
+  });
+
+  el.querySelectorAll('.intern-option').forEach(opt => {
+    opt.addEventListener('click', () => {
+      const intern = interns.find(i => i.id === opt.dataset.value);
+      if (!intern) return;
+      hidden.value = intern.id;
+      avatarSlot.innerHTML = renderAvatar(intern, 'w-6 h-6', 'text-xs');
+      nameSlot.textContent = intern.full_name;
+      nameSlot.className = 'truncate text-neutral-900';
+      el.querySelectorAll('.intern-option').forEach(o => o.classList.remove('bg-primary-50'));
+      opt.classList.add('bg-primary-50');
+      list.classList.add('hidden');
+    });
+  });
+
+  const closeOutside = (e) => {
+    if (!el.isConnected) { document.removeEventListener('click', closeOutside); return; }
+    if (!el.querySelector('#intern-picker').contains(e.target)) list.classList.add('hidden');
+  };
+  document.addEventListener('click', closeOutside);
+}
+
 function openCreateTaskModal(interns, profile) {
   createModal('Create Task', `
     <form id="create-task-form" class="space-y-4">
@@ -178,10 +257,7 @@ function openCreateTaskModal(interns, profile) {
 
       <div>
         <label class="form-label">Assign To <span class="text-danger-500">*</span></label>
-        <select id="task-intern" class="form-input" required>
-          <option value="">Select an intern...</option>
-          ${(interns || []).map(i => `<option value="${i.id}">${i.full_name}</option>`).join('')}
-        </select>
+        ${internPickerHtml(interns)}
       </div>
 
       <div class="grid grid-cols-2 gap-4">
@@ -202,12 +278,14 @@ function openCreateTaskModal(interns, profile) {
     </form>
   `, (el, close) => {
     el.querySelector('#task-cancel').addEventListener('click', close);
+    initInternPicker(el, interns);
 
     el.querySelector('#create-task-form').addEventListener('submit', async (e) => {
       e.preventDefault();
       const title = el.querySelector('#task-title').value.trim();
       const description = el.querySelector('#task-description').value.trim();
       const assignedTo = el.querySelector('#task-intern').value;
+      if (!assignedTo) { showToast('Please select an intern', 'error'); return; }
       const estimatedHours = el.querySelector('#task-hours').value || null;
       const dueDate = el.querySelector('#task-due').value || null;
 
@@ -270,9 +348,7 @@ function openEditTaskModal(task, interns, profile) {
 
       <div>
         <label class="form-label">Assigned To</label>
-        <select id="task-intern" class="form-input">
-          ${(interns || []).map(i => `<option value="${i.id}" ${i.id === task.assigned_to ? 'selected' : ''}>${i.full_name}</option>`).join('')}
-        </select>
+        ${internPickerHtml(interns, task.assigned_to)}
       </div>
 
       <div class="grid grid-cols-2 gap-4">
@@ -293,6 +369,7 @@ function openEditTaskModal(task, interns, profile) {
     </form>
   `, (el, close) => {
     el.querySelector('#edit-cancel').addEventListener('click', close);
+    initInternPicker(el, interns);
 
     el.querySelector('#edit-task-form').addEventListener('submit', async (e) => {
       e.preventDefault();
@@ -328,43 +405,114 @@ function openEditTaskModal(task, interns, profile) {
   });
 }
 
-function confirmDeleteTask(task) {
-  createModal('Delete Task', `
+function confirmArchiveTask(task) {
+  createModal('Archive Task', `
     <div class="space-y-4">
       <p class="text-sm text-neutral-600">
-        Are you sure you want to delete the task <strong>"${task.title}"</strong>?
-        This action cannot be undone.
+        Archive the task <strong>"${task.title}"</strong>? It will be hidden from the task list and can be found in the archive.
       </p>
       <div class="flex justify-end gap-3 pt-2">
-        <button type="button" id="delete-cancel" class="btn-secondary">Cancel</button>
-        <button type="button" id="delete-confirm" class="btn-danger">Delete Task</button>
+        <button type="button" id="archive-cancel" class="btn-secondary">Cancel</button>
+        <button type="button" id="archive-confirm" class="btn-warning">Archive Task</button>
       </div>
     </div>
   `, (el, close) => {
-    el.querySelector('#delete-cancel').addEventListener('click', close);
+    el.querySelector('#archive-cancel').addEventListener('click', close);
 
-    el.querySelector('#delete-confirm').addEventListener('click', async () => {
-      const confirmBtn = el.querySelector('#delete-confirm');
+    el.querySelector('#archive-confirm').addEventListener('click', async () => {
+      const confirmBtn = el.querySelector('#archive-confirm');
       confirmBtn.disabled = true;
-      confirmBtn.textContent = 'Deleting...';
+      confirmBtn.textContent = 'Archiving...';
 
       try {
-        const { error } = await supabase
-          .from('tasks')
-          .delete()
-          .eq('id', task.id);
-
+        const { error } = await supabase.from('tasks').update({ is_archived: true }).eq('id', task.id);
         if (error) throw error;
 
-        await logAudit('task.deleted', 'task', task.id, { title: task.title });
-        showToast('Task deleted successfully', 'success');
+        await logAudit('task.archived', 'task', task.id, { title: task.title });
+        showToast('Task archived', 'success');
         close();
         renderTaskManagementPage();
       } catch (err) {
-        showToast(err.message || 'Failed to delete task', 'error');
+        showToast(err.message || 'Failed to archive task', 'error');
         confirmBtn.disabled = false;
-        confirmBtn.textContent = 'Delete Task';
+        confirmBtn.textContent = 'Archive Task';
       }
+    });
+  });
+}
+
+async function openArchivedTasksModal(profile, isAdmin, canManageTasks) {
+  let query = supabase
+    .from('tasks')
+    .select('*, assigned_profile:profiles!tasks_assigned_to_fkey(full_name), creator_profile:profiles!tasks_created_by_fkey(full_name)')
+    .eq('is_archived', true)
+    .order('updated_at', { ascending: false });
+
+  if (!isAdmin) {
+    query = query.eq('created_by', profile.id);
+  }
+
+  const { data: archived } = await query;
+
+  createModal('Archived Tasks', `
+    <div class="space-y-4">
+      ${!archived || archived.length === 0
+        ? '<p class="text-sm text-neutral-400 text-center py-6">No archived tasks.</p>'
+        : `<div class="overflow-x-auto">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Title</th>
+                  <th>Assigned To</th>
+                  <th>Created By</th>
+                  ${canManageTasks ? '<th>Action</th>' : ''}
+                </tr>
+              </thead>
+              <tbody>
+                ${archived.map(task => `
+                  <tr>
+                    <td>
+                      <p class="font-medium">${task.title}</p>
+                      ${task.description ? `<p class="text-xs text-neutral-400 truncate max-w-xs">${task.description}</p>` : ''}
+                    </td>
+                    <td>${task.assigned_profile?.full_name || '—'}</td>
+                    <td>${task.creator_profile?.full_name || '—'}</td>
+                    ${canManageTasks ? `
+                    <td>
+                      ${task.created_by === profile.id ? `
+                        <button class="btn-sm btn-secondary unarchive-btn" data-task-id="${task.id}" title="Restore task">
+                          ${icons.unarchive}
+                        </button>
+                      ` : '<span class="text-xs text-neutral-400">—</span>'}
+                    </td>` : ''}
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+          </div>`
+      }
+      <div class="flex justify-end pt-2">
+        <button type="button" id="archive-close" class="btn-secondary">Close</button>
+      </div>
+    </div>
+  `, (el, close) => {
+    el.querySelector('#archive-close').addEventListener('click', close);
+
+    el.querySelectorAll('.unarchive-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        btn.disabled = true;
+        try {
+          const { error } = await supabase.from('tasks').update({ is_archived: false }).eq('id', btn.dataset.taskId);
+          if (error) throw error;
+          await logAudit('task.unarchived', 'task', btn.dataset.taskId);
+          showToast('Task restored', 'success');
+          close();
+          renderTaskManagementPage();
+        } catch (err) {
+          showToast(err.message || 'Failed to restore task', 'error');
+          btn.disabled = false;
+        }
+      });
     });
   });
 }

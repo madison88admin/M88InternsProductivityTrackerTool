@@ -34,7 +34,7 @@ export async function renderDashboard() {
 }
 
 async function buildInternDashboard(profile) {
-  // Refresh profile so hours_rendered reflects latest approved attendance
+  // Refresh profile to get latest profile data (name, required hours, etc.)
   await refreshProfile();
   profile = getProfile();
 
@@ -69,14 +69,15 @@ async function buildInternDashboard(profile) {
     .eq('user_id', profile.id)
     .eq('is_read', false);
 
-  // Fetch distinct days worked for estimated end date
-  const { count: daysWorked } = await supabase
+  // Fetch approved attendance to compute hours directly (same as profile page)
+  const { data: approvedAttendance } = await supabase
     .from('attendance_records')
-    .select('*', { count: 'exact', head: true })
+    .select('total_hours')
     .eq('intern_id', profile.id)
     .eq('status', 'approved');
 
-  const hoursRendered = profile.hours_rendered || 0;
+  const hoursRendered = (approvedAttendance || []).reduce((s, r) => s + (r.total_hours || 0), 0);
+  const daysWorked = (approvedAttendance || []).length;
   const hoursRequired = profile.hours_required || 0;
   const progress = hoursRequired > 0 ? Math.min(100, (hoursRendered / hoursRequired) * 100) : 0;
   const estimatedEnd = computeEstimatedEndDate(hoursRequired, hoursRendered, daysWorked || 0);

@@ -14,7 +14,8 @@ DECLARE
   v_current_date   DATE;
   v_added          INTEGER;
 BEGIN
-  IF NEW.status = 'approved' AND (OLD IS NULL OR OLD.status != 'approved') THEN
+  IF (NEW.status = 'approved' AND (OLD IS NULL OR OLD.status != 'approved'))
+     OR (NEW.status = 'approved' AND OLD.status = 'approved' AND NEW.total_hours IS DISTINCT FROM OLD.total_hours) THEN
     -- Recompute total rendered hours
     UPDATE profiles
     SET hours_rendered = (

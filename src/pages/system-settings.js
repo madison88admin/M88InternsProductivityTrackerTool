@@ -82,9 +82,9 @@ export async function renderSystemSettingsPage() {
       <div class="card">
         <h3 class="text-base font-bold text-neutral-900 mb-4 flex items-center gap-2">${icons.alert} Approval Escalation</h3>
         <div>
-          <label class="form-label">Escalate to HR after (hours)</label>
+          <label class="form-label">Escalate to Admin after (hours)</label>
           <input type="number" id="escalation-hours" class="form-input" min="1" max="168" value="${escalationHours}" />
-          <p class="text-xs text-neutral-400 mt-1">Pending approvals older than this will trigger HR notification</p>
+          <p class="text-xs text-neutral-400 mt-1">Pending approvals older than this will trigger an Admin notification</p>
         </div>
       </div>
 

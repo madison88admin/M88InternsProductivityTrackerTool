@@ -20,7 +20,7 @@ export async function renderAllowanceManagementPage() {
     .select('*')
     .order('effective_from', { ascending: false })
     .limit(1)
-    .single();
+    .maybeSingle();
 
   // Get allowance periods
   const { data: periods } = await supabase
@@ -31,6 +31,15 @@ export async function renderAllowanceManagementPage() {
 
   const pendingPeriods = (periods || []).filter(p => p.status === 'computed' || p.status === 'under_review');
   const approvedPeriods = (periods || []).filter(p => p.status === 'approved');
+
+  // Get per-intern rate overrides
+  const { data: internRatesSetting } = await supabase
+    .from('system_settings')
+    .select('value')
+    .eq('key', 'intern_hourly_rates')
+    .maybeSingle();
+  const internRates = internRatesSetting?.value || {};
+  const customRateCount = Object.keys(internRates).length;
 
   renderLayout(`
     <div class="flex items-center justify-between page-header animate-fade-in-up">
@@ -54,9 +63,10 @@ export async function renderAllowanceManagementPage() {
     <div class="card mb-6">
       <div class="flex items-center justify-between">
         <div>
-          <p class="text-sm text-white">Current Hourly Rate</p>
+          <p class="text-sm text-white">Global Hourly Rate</p>
           <p class="text-3xl font-bold text-white">₱${currentRate?.hourly_rate?.toFixed(2) || '0.00'}</p>
           ${currentRate ? `<p class="text-xs text-white mt-1">Effective from ${formatDate(currentRate.effective_from)}</p>` : ''}
+          ${customRateCount > 0 ? `<p class="text-xs text-white mt-1 opacity-80">${customRateCount} intern${customRateCount !== 1 ? 's' : ''} have individual rate overrides</p>` : ''}
         </div>
         ${currentRate?.notes ? `<p class="text-sm text-white max-w-xs">${currentRate.notes}</p>` : ''}
       </div>
@@ -142,10 +152,10 @@ export async function renderAllowanceManagementPage() {
     </div>
   `, (el) => {
     // Set rate button
-    el.querySelector('#set-rate-btn')?.addEventListener('click', () => openSetRateModal(currentRate, profile));
+    el.querySelector('#set-rate-btn')?.addEventListener('click', () => openSetRateModal(currentRate, internRates, profile));
 
     // Compute weekly button
-    el.querySelector('#compute-btn')?.addEventListener('click', () => computeWeeklyAllowances(currentRate, profile));
+    el.querySelector('#compute-btn')?.addEventListener('click', () => computeWeeklyAllowances(currentRate, internRates, profile));
 
     // Approve individual
     el.querySelectorAll('.approve-period-btn').forEach(btn => {
@@ -226,32 +236,79 @@ export async function renderAllowanceManagementPage() {
   }, '/allowance-management');
 }
 
-function openSetRateModal(currentRate, profile) {
+function openSetRateModal(currentRate, internRates, profile) {
   createModal('Set Hourly Rate', `
-    <form id="set-rate-form" class="space-y-4">
-      <div>
-        <label class="form-label">Current Rate</label>
-        <p class="text-lg font-bold text-neutral-900">₱${currentRate?.hourly_rate?.toFixed(2) || '0.00'}</p>
+    <div class="space-y-4">
+      <!-- Tabs -->
+      <div class="flex rounded-lg overflow-hidden border border-neutral-200">
+        <button id="tab-global" class="flex-1 px-4 py-2 text-sm font-medium bg-primary-600 text-white transition-colors">Global Rate</button>
+        <button id="tab-individual" class="flex-1 px-4 py-2 text-sm font-medium bg-white text-neutral-600 hover:bg-neutral-50 transition-colors">Per-Intern Rates</button>
       </div>
-      <div>
-        <label class="form-label">New Hourly Rate (₱) <span class="text-danger-500">*</span></label>
-        <input type="number" id="new-rate" class="form-input" step="0.01" min="0" required placeholder="e.g., 75.00" />
+
+      <!-- Global Rate Panel -->
+      <div id="panel-global">
+        <form id="set-rate-form" class="space-y-4">
+          <div>
+            <label class="form-label">Current Rate</label>
+            <p class="text-lg font-bold text-neutral-900">₱${currentRate?.hourly_rate?.toFixed(2) || '0.00'}</p>
+          </div>
+          <div>
+            <label class="form-label">New Hourly Rate (₱) <span class="text-danger-500">*</span></label>
+            <input type="number" id="new-rate" class="form-input" step="0.01" min="0" required placeholder="e.g., 75.00" />
+          </div>
+          <div>
+            <label class="form-label">Effective From <span class="text-danger-500">*</span></label>
+            <input type="date" id="rate-effective" class="form-input" required />
+          </div>
+          <div>
+            <label class="form-label">Notes</label>
+            <textarea id="rate-notes" class="form-input" rows="2" placeholder="Reason for rate change (optional)"></textarea>
+          </div>
+          <div class="flex justify-end gap-3 pt-2">
+            <button type="button" id="rate-cancel" class="btn-secondary">Cancel</button>
+            <button type="submit" class="btn-primary">Save Rate</button>
+          </div>
+        </form>
       </div>
-      <div>
-        <label class="form-label">Effective From <span class="text-danger-500">*</span></label>
-        <input type="date" id="rate-effective" class="form-input" required />
+
+      <!-- Per-Intern Rates Panel -->
+      <div id="panel-individual" class="hidden space-y-3">
+        <p class="text-sm text-neutral-500">
+          Set a custom hourly rate per intern. Leave blank to use the global rate
+          (₱${currentRate?.hourly_rate?.toFixed(2) || '0.00'}/hr).
+        </p>
+        <div id="intern-rates-list" class="space-y-1 max-h-72 overflow-y-auto pr-1">
+          <p class="text-neutral-400 text-sm text-center py-4">Loading interns…</p>
+        </div>
+        <div class="flex justify-end gap-3 pt-2">
+          <button type="button" id="individual-cancel" class="btn-secondary">Cancel</button>
+          <button id="individual-save" class="btn-primary">Save Individual Rates</button>
+        </div>
       </div>
-      <div>
-        <label class="form-label">Notes</label>
-        <textarea id="rate-notes" class="form-input" rows="2" placeholder="Reason for rate change (optional)"></textarea>
-      </div>
-      <div class="flex justify-end gap-3 pt-2">
-        <button type="button" id="rate-cancel" class="btn-secondary">Cancel</button>
-        <button type="submit" class="btn-primary">Save Rate</button>
-      </div>
-    </form>
-  `, (el, close) => {
+    </div>
+  `, async (el, close) => {
+    const tabGlobal = el.querySelector('#tab-global');
+    const tabIndividual = el.querySelector('#tab-individual');
+    const panelGlobal = el.querySelector('#panel-global');
+    const panelIndividual = el.querySelector('#panel-individual');
+
+    tabGlobal.addEventListener('click', () => {
+      tabGlobal.className = 'flex-1 px-4 py-2 text-sm font-medium bg-primary-600 text-white transition-colors';
+      tabIndividual.className = 'flex-1 px-4 py-2 text-sm font-medium bg-white text-neutral-600 hover:bg-neutral-50 transition-colors';
+      panelGlobal.classList.remove('hidden');
+      panelIndividual.classList.add('hidden');
+    });
+
+    tabIndividual.addEventListener('click', async () => {
+      tabIndividual.className = 'flex-1 px-4 py-2 text-sm font-medium bg-primary-600 text-white transition-colors';
+      tabGlobal.className = 'flex-1 px-4 py-2 text-sm font-medium bg-white text-neutral-600 hover:bg-neutral-50 transition-colors';
+      panelIndividual.classList.remove('hidden');
+      panelGlobal.classList.add('hidden');
+      await loadInternRates(el, currentRate, internRates);
+    });
+
     el.querySelector('#rate-cancel').addEventListener('click', close);
+    el.querySelector('#individual-cancel').addEventListener('click', close);
 
     el.querySelector('#set-rate-form').addEventListener('submit', async (e) => {
       e.preventDefault();
@@ -262,12 +319,8 @@ function openSetRateModal(currentRate, profile) {
           set_by: profile.id,
           notes: el.querySelector('#rate-notes').value || null,
         });
-
         if (error) throw error;
-        await logAudit('allowance.rate_set', 'allowance_config', null, {
-          rate: el.querySelector('#new-rate').value,
-        });
-
+        await logAudit('allowance.rate_set', 'allowance_config', null, { rate: el.querySelector('#new-rate').value });
         showToast('Hourly rate updated', 'success');
         close();
         renderAllowanceManagementPage();
@@ -275,19 +328,77 @@ function openSetRateModal(currentRate, profile) {
         showToast(err.message || 'Failed to set rate', 'error');
       }
     });
+
+    el.querySelector('#individual-save').addEventListener('click', async () => {
+      try {
+        const inputs = el.querySelectorAll('.intern-rate-input');
+        const rates = {};
+        inputs.forEach(input => {
+          const val = parseFloat(input.value);
+          if (!isNaN(val) && val >= 0) rates[input.dataset.internId] = val;
+        });
+        await supabase
+          .from('system_settings')
+          .upsert({ key: 'intern_hourly_rates', value: rates, updated_by: profile.id }, { onConflict: 'key' });
+        await logAudit('allowance.individual_rates_set', 'system_settings', null, { count: Object.keys(rates).length });
+        showToast('Individual rates saved', 'success');
+        close();
+        renderAllowanceManagementPage();
+      } catch (err) {
+        showToast(err.message || 'Failed to save rates', 'error');
+      }
+    });
   });
 }
 
-async function computeWeeklyAllowances(currentRate, profile) {
-  if (!currentRate) {
+async function loadInternRates(el, currentRate, existingRates) {
+  const listEl = el.querySelector('#intern-rates-list');
+  const { data: interns } = await supabase
+    .from('profiles')
+    .select('id, full_name, email')
+    .eq('role', 'intern')
+    .eq('is_active', true)
+    .order('full_name');
+
+  if (!interns || interns.length === 0) {
+    listEl.innerHTML = '<p class="text-neutral-400 text-sm text-center py-4">No active interns found</p>';
+    return;
+  }
+
+  listEl.innerHTML = interns.map(intern => `
+    <div class="flex items-center gap-3 py-2 border-b border-neutral-100 last:border-0">
+      <div class="flex-1 min-w-0">
+        <p class="text-sm font-medium text-neutral-900 truncate">${intern.full_name}</p>
+        <p class="text-xs text-neutral-400 truncate">${intern.email}</p>
+      </div>
+      <div class="flex items-center gap-1 shrink-0">
+        <span class="text-xs text-neutral-400">₱</span>
+        <input
+          type="number"
+          class="form-input intern-rate-input w-28 text-sm py-1"
+          step="0.01" min="0"
+          data-intern-id="${intern.id}"
+          placeholder="${currentRate?.hourly_rate?.toFixed(2) || '0.00'}"
+          value="${existingRates[intern.id] !== undefined ? existingRates[intern.id] : ''}"
+        />
+        <span class="text-xs text-neutral-400">/hr</span>
+      </div>
+    </div>
+  `).join('');
+}
+
+async function computeWeeklyAllowances(currentRate, internRates, profile) {
+  if (!currentRate && Object.keys(internRates).length === 0) {
     showToast('Please set an hourly rate first', 'error');
     return;
   }
 
+  const customRateCount = Object.keys(internRates).length;
+
   // Default to the current week's Monday
   const now = new Date();
   const thisMonday = getMonday(now);
-  const defaultWeekStart = thisMonday.toISOString().slice(0, 10);
+  const defaultWeekStart = thisMonday.toLocaleDateString('en-CA');
 
   createModal('Compute Weekly Allowances', `
     <div class="space-y-4">
@@ -297,7 +408,11 @@ async function computeWeeklyAllowances(currentRate, profile) {
         <p class="text-xs text-neutral-400 mt-1">The Friday of the selected week will be the end date.</p>
       </div>
       <p class="text-sm text-neutral-500">
-        Current rate: <strong>₱${currentRate.hourly_rate.toFixed(2)}/hour</strong>. Only approved attendance records will be counted.
+        Global rate: <strong>${currentRate ? `₱${currentRate.hourly_rate.toFixed(2)}/hour` : 'Not set'}</strong>.
+        ${customRateCount > 0
+          ? `<span class="text-primary-600 font-medium">${customRateCount} intern${customRateCount !== 1 ? 's' : ''} will use their individual rate.</span>`
+          : 'All interns will use the global rate.'}
+        Only approved attendance records will be counted.
       </p>
       <p id="compute-week-label" class="text-sm text-neutral-600"></p>
       <div class="flex justify-end gap-3">
@@ -329,8 +444,8 @@ async function computeWeeklyAllowances(currentRate, profile) {
         const picked = new Date(weekStartInput.value + 'T00:00:00');
         const monday = getMonday(picked);
         const friday = getFriday(monday);
-        const weekStart = monday.toISOString().slice(0, 10);
-        const weekEnd = friday.toISOString().slice(0, 10);
+        const weekStart = monday.toLocaleDateString('en-CA');
+        const weekEnd = friday.toLocaleDateString('en-CA');
 
         // Get all active interns
         const { data: interns } = await supabase
@@ -364,13 +479,20 @@ async function computeWeeklyAllowances(currentRate, profile) {
           const totalHours = (attendance || []).reduce((sum, r) => sum + (r.total_hours || 0), 0);
 
           if (totalHours > 0) {
+            // Use individual rate override if set, otherwise fall back to global rate
+            const rate = internRates[intern.id] !== undefined
+              ? internRates[intern.id]
+              : currentRate?.hourly_rate;
+
+            if (rate == null) continue; // no rate available for this intern
+
             await supabase.from('allowance_periods').insert({
               intern_id: intern.id,
               week_start: weekStart,
               week_end: weekEnd,
               total_hours: totalHours,
-              hourly_rate: currentRate.hourly_rate,
-              total_amount: Math.round(totalHours * currentRate.hourly_rate * 100) / 100,
+              hourly_rate: rate,
+              total_amount: Math.round(totalHours * rate * 100) / 100,
               status: 'computed',
             });
             computed++;

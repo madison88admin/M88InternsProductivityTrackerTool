@@ -74,7 +74,21 @@ export async function renderLocationsPage() {
     });
 
     el.querySelectorAll('.delete-loc').forEach(btn => {
-      btn.addEventListener('click', () => {
+      btn.addEventListener('click', async () => {
+        const { data: assignedUsers } = await supabase
+          .from('profiles')
+          .select('id, full_name')
+          .eq('location_id', btn.dataset.id)
+          .eq('is_active', true);
+
+        if (assignedUsers && assignedUsers.length > 0) {
+          showToast(
+            `Cannot delete location. Active users are still assigned: ${assignedUsers.map(u => u.full_name).join(', ')}`,
+            'error'
+          );
+          return;
+        }
+
         confirmDialog(`Delete location "${btn.dataset.name}"?`, async () => {
           try {
             await supabase.from('locations').delete().eq('id', btn.dataset.id);
@@ -144,7 +158,26 @@ function openLocationModal(loc) {
       };
 
       if (isEdit) {
-        payload.is_active = el.querySelector('#loc-active').checked;
+        const newIsActive = el.querySelector('#loc-active').checked;
+        payload.is_active = newIsActive;
+
+        // Block deactivation if active users are still assigned to this location
+        if (loc.is_active && !newIsActive) {
+          const { data: assignedUsers } = await supabase
+            .from('profiles')
+            .select('id, full_name')
+            .eq('location_id', loc.id)
+            .eq('is_active', true);
+
+          if (assignedUsers && assignedUsers.length > 0) {
+            showToast(
+              `Cannot deactivate location. The following users are still assigned: ${assignedUsers.map(u => u.full_name).join(', ')}`,
+              'error'
+            );
+            return;
+          }
+        }
+
         const { error } = await supabase.from('locations').update(payload).eq('id', loc.id);
         if (error) { showToast(error.message || 'Failed to update', 'error'); return; }
         await logAudit('location.updated', 'location', loc.id);

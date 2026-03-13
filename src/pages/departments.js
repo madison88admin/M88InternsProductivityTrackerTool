@@ -81,7 +81,21 @@ export async function renderDepartmentsPage() {
     });
 
     el.querySelectorAll('.delete-dept').forEach(btn => {
-      btn.addEventListener('click', () => {
+      btn.addEventListener('click', async () => {
+        const { data: assignedUsers } = await supabase
+          .from('profiles')
+          .select('id, full_name')
+          .eq('department_id', btn.dataset.id)
+          .eq('is_active', true);
+
+        if (assignedUsers && assignedUsers.length > 0) {
+          showToast(
+            `Cannot delete department. Active users are still assigned: ${assignedUsers.map(u => u.full_name).join(', ')}`,
+            'error'
+          );
+          return;
+        }
+
         confirmDialog(`Delete department "${btn.dataset.name}"?`, async () => {
           try {
             await supabase.from('departments').delete().eq('id', btn.dataset.id);
@@ -137,7 +151,26 @@ function openDeptModal(dept, locations) {
         location_id: locationId,
       };
       if (isEdit) {
-        payload.is_active = el.querySelector('#dept-active').checked;
+        const newIsActive = el.querySelector('#dept-active').checked;
+        payload.is_active = newIsActive;
+
+        // Block deactivation if active users are still assigned to this department
+        if (dept.is_active && !newIsActive) {
+          const { data: assignedUsers } = await supabase
+            .from('profiles')
+            .select('id, full_name')
+            .eq('department_id', dept.id)
+            .eq('is_active', true);
+
+          if (assignedUsers && assignedUsers.length > 0) {
+            showToast(
+              `Cannot deactivate department. The following users are still assigned: ${assignedUsers.map(u => u.full_name).join(', ')}`,
+              'error'
+            );
+            return;
+          }
+        }
+
         const { error } = await supabase.from('departments').update(payload).eq('id', dept.id);
         if (error) {
           showToast(error.code === '23505' ? 'A department with that name already exists in this location' : (error.message || 'Failed to update'), 'error');

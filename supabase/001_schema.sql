@@ -64,6 +64,7 @@ CREATE TABLE profiles (
   full_name VARCHAR(255) NOT NULL,
   role user_role NOT NULL DEFAULT 'intern',
   avatar_url TEXT,
+  signature_url TEXT,
   phone VARCHAR(50),
   school VARCHAR(255),
   course VARCHAR(255),
@@ -429,7 +430,8 @@ $$ LANGUAGE plpgsql;
 CREATE OR REPLACE FUNCTION update_intern_hours()
 RETURNS TRIGGER AS $$
 BEGIN
-  IF NEW.status = 'approved' AND (OLD IS NULL OR OLD.status != 'approved') THEN
+  IF (NEW.status = 'approved' AND (OLD IS NULL OR OLD.status != 'approved'))
+     OR (NEW.status = 'approved' AND OLD.status = 'approved' AND NEW.total_hours IS DISTINCT FROM OLD.total_hours) THEN
     UPDATE profiles
     SET hours_rendered = (
       SELECT COALESCE(SUM(total_hours), 0)

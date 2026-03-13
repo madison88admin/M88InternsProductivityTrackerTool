@@ -1,13 +1,14 @@
 /**
  * Reports Page (HR/Admin)
  * Generate and export attendance, task, allowance reports with charts.
+ * Includes Daily Activity Report (DAR) PDF generation.
  */
 import { getProfile, getUserRole } from '../lib/auth.js';
 import { renderLayout } from '../components/layout.js';
 import { supabase } from '../lib/supabase.js';
 import { showToast } from '../lib/toast.js';
 import { icons } from '../lib/icons.js';
-import { formatDate, formatHoursDisplay, getMonday, getFriday } from '../lib/utils.js';
+import { formatDate, formatTime, formatHoursDisplay, getMonday, getFriday } from '../lib/utils.js';
 
 let chartInstance = null;
 
@@ -29,7 +30,7 @@ export async function renderReportsPage() {
 
     <!-- Report Type Selection -->
     <div class="card mb-6">
-      <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+      <div class="grid grid-cols-1 md:grid-cols-4 gap-4" id="standard-filters">
         <div>
           <label class="form-label">Report Type</label>
           <select id="report-type" class="form-input">
@@ -37,17 +38,18 @@ export async function renderReportsPage() {
             <option value="hours">Hours Logged</option>
             <option value="tasks">Task Status</option>
             <option value="allowance">Allowance Summary</option>
+            <option value="dar">Daily Activity Report</option>
           </select>
         </div>
-        <div>
+        <div id="date-from-group">
           <label class="form-label">Date From</label>
           <input type="date" id="date-from" class="form-input" />
         </div>
-        <div>
+        <div id="date-to-group">
           <label class="form-label">Date To</label>
           <input type="date" id="date-to" class="form-input" />
         </div>
-        <div>
+        <div id="location-group">
           <label class="form-label">Location</label>
           <select id="filter-location" class="form-input">
             <option value="">All Locations</option>
@@ -55,6 +57,31 @@ export async function renderReportsPage() {
           </select>
         </div>
       </div>
+
+      <!-- DAR-specific controls -->
+      <div id="dar-controls" class="mt-4 grid grid-cols-1 md:grid-cols-3 gap-4" style="display:none;">
+        <div>
+          <label class="form-label">Intern(s)</label>
+          <select id="dar-intern" class="form-input" multiple size="5">
+          </select>
+          <p class="text-xs text-neutral-400 mt-1">Hold Ctrl/Cmd to select multiple</p>
+        </div>
+        <div>
+          <label class="form-label">Week</label>
+          <select id="dar-week" class="form-input">
+            <option value="">Select an intern first</option>
+          </select>
+        </div>
+        <div>
+          <label class="form-label">Download Mode</label>
+          <select id="dar-bulk-mode" class="form-input">
+            <option value="single">Individual PDF(s)</option>
+            <option value="zip">Individual PDFs in ZIP</option>
+            <option value="combined">Combined PDF</option>
+          </select>
+        </div>
+      </div>
+
       <div class="mt-4 flex gap-3">
         <button id="generate-btn" class="btn-primary">
           ${icons.filter}
@@ -89,8 +116,32 @@ export async function renderReportsPage() {
 
     let reportData = null;
 
+    // Toggle DAR controls visibility
+    el.querySelector('#report-type').addEventListener('change', (e) => {
+      const isDar = e.target.value === 'dar';
+      el.querySelector('#dar-controls').style.display = isDar ? '' : 'none';
+      el.querySelector('#date-from-group').style.display = isDar ? 'none' : '';
+      el.querySelector('#date-to-group').style.display = isDar ? 'none' : '';
+      el.querySelector('#location-group').style.display = isDar ? 'none' : '';
+      el.querySelector('#export-xlsx-btn').style.display = isDar ? 'none' : '';
+      el.querySelector('#export-pdf-btn').style.display = isDar ? 'none' : '';
+      el.querySelector('#chart-section').style.display = 'none';
+      el.querySelector('#table-section').style.display = 'none';
+
+      if (isDar) {
+        populateDarInterns(el);
+      }
+    });
+
     el.querySelector('#generate-btn').addEventListener('click', async () => {
       const type = el.querySelector('#report-type').value;
+
+      // DAR branch
+      if (type === 'dar') {
+        await handleDarGeneration(el);
+        return;
+      }
+
       const dateFrom = el.querySelector('#date-from').value;
       const dateTo = el.querySelector('#date-to').value;
       const locationId = el.querySelector('#filter-location').value;
@@ -130,6 +181,511 @@ export async function renderReportsPage() {
     });
   }, '/reports');
 }
+
+// ─── DAR: Populate intern multi-select ──────────────────────────────────────
+
+async function populateDarInterns(el) {
+  const { data: interns } = await supabase
+    .from('profiles')
+    .select('id, full_name, department_id, course, school, ojt_start_date, supervisor_id, signature_url')
+    .eq('role', 'intern')
+    .eq('is_active', true)
+    .order('full_name');
+
+  const select = el.querySelector('#dar-intern');
+  select.innerHTML = (interns || []).map(i =>
+    `<option value="${i.id}">${i.full_name}</option>`
+  ).join('');
+
+  // Store interns data for later use
+  select._internsData = interns || [];
+
+  // Remove existing listener if any, then add new one
+  const handler = () => populateDarWeeks(el);
+  select.removeEventListener('change', select._weekHandler);
+  select._weekHandler = handler;
+  select.addEventListener('change', handler);
+}
+
+// ─── DAR: Local date string helper (avoids UTC shift from toISOString) ──────
+
+function toLocalDateStr(d) {
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function formatDateMMDDYYYY(dateStr) {
+  const d = new Date(dateStr + 'T00:00:00');
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${mm}/${dd}/${d.getFullYear()}`;
+}
+
+// ─── DAR: Auto-detect weeks from attendance records ─────────────────────────
+
+async function populateDarWeeks(el) {
+  const internSelect = el.querySelector('#dar-intern');
+  const selectedIds = Array.from(internSelect.selectedOptions).map(o => o.value);
+
+  if (selectedIds.length === 0) {
+    el.querySelector('#dar-week').innerHTML = '<option value="">Select an intern first</option>';
+    return;
+  }
+
+  const firstInternId = selectedIds[0];
+  const intern = internSelect._internsData.find(i => i.id === firstInternId);
+
+  const { data: records } = await supabase
+    .from('attendance_records')
+    .select('date')
+    .eq('intern_id', firstInternId)
+    .order('date', { ascending: true });
+
+  if (!records || records.length === 0) {
+    el.querySelector('#dar-week').innerHTML = '<option value="">No attendance records found</option>';
+    return;
+  }
+
+  // Group dates into Mon-Fri weeks
+  const weeks = new Map();
+  const ojtStart = intern?.ojt_start_date ? new Date(intern.ojt_start_date + 'T00:00:00') : null;
+
+  records.forEach(r => {
+    const date = new Date(r.date + 'T00:00:00');
+    const monday = getMonday(date);
+    const friday = getFriday(date);
+    const key = toLocalDateStr(monday);
+
+    if (!weeks.has(key)) {
+      let weekNum = 1;
+      if (ojtStart) {
+        const ojtMonday = getMonday(ojtStart);
+        const diffMs = monday - ojtMonday;
+        weekNum = Math.floor(diffMs / (7 * 24 * 60 * 60 * 1000)) + 1;
+        if (weekNum < 1) weekNum = 1;
+      }
+      weeks.set(key, {
+        monday: key,
+        friday: toLocalDateStr(friday),
+        weekNum,
+      });
+    }
+  });
+
+  const weekSelect = el.querySelector('#dar-week');
+  const weeksArr = Array.from(weeks.values()).sort((a, b) => b.monday.localeCompare(a.monday));
+  weekSelect.innerHTML = weeksArr.map(w =>
+    `<option value="${w.monday}|${w.friday}|${w.weekNum}">Week ${w.weekNum} (${formatDateMMDDYYYY(w.monday)} – ${formatDateMMDDYYYY(w.friday)})</option>`
+  ).join('');
+}
+
+// ─── DAR: Fetch all data for one intern's weekly report ─────────────────────
+
+async function fetchDarData(internId, mondayDate, fridayDate) {
+  const [
+    { data: intern },
+    { data: attendance },
+    { data: narratives },
+    { data: allowancePeriod },
+    { data: allowanceConfig },
+  ] = await Promise.all([
+    supabase
+      .from('profiles')
+      .select('id, full_name, course, school, ojt_start_date, signature_url, supervisor_id, department_id, departments(name)')
+      .eq('id', internId)
+      .single(),
+    supabase
+      .from('attendance_records')
+      .select('*')
+      .eq('intern_id', internId)
+      .gte('date', mondayDate)
+      .lte('date', fridayDate)
+      .order('date', { ascending: true }),
+    supabase
+      .from('narratives')
+      .select('*, task:tasks(title)')
+      .eq('intern_id', internId)
+      .gte('date', mondayDate)
+      .lte('date', fridayDate)
+      .order('date', { ascending: true }),
+    supabase
+      .from('allowance_periods')
+      .select('total_amount, total_hours, hourly_rate, status')
+      .eq('intern_id', internId)
+      .eq('week_start', mondayDate)
+      .maybeSingle(),
+    supabase
+      .from('allowance_config')
+      .select('hourly_rate')
+      .order('effective_from', { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+  ]);
+
+  // Fetch supervisor profile for signature
+  let supervisor = null;
+  if (intern?.supervisor_id) {
+    const { data } = await supabase
+      .from('profiles')
+      .select('id, full_name, signature_url')
+      .eq('id', intern.supervisor_id)
+      .single();
+    supervisor = data;
+  }
+
+  return {
+    intern,
+    attendance: attendance || [],
+    narratives: narratives || [],
+    supervisor,
+    allowancePeriod,
+    hourlyRate: allowanceConfig?.hourly_rate ?? null,
+  };
+}
+
+// ─── DAR: Helper utilities ──────────────────────────────────────────────────
+
+function stripHtml(html) {
+  if (!html) return '';
+  const div = document.createElement('div');
+  div.innerHTML = html;
+  return div.textContent || div.innerText || '';
+}
+
+async function loadImageAsDataUrl(url) {
+  try {
+    const response = await fetch(url);
+    const blob = await response.blob();
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+  } catch {
+    return null;
+  }
+}
+
+function calcSessionHours(timeIn, timeOut) {
+  if (!timeIn || !timeOut) return 0;
+  const ms = new Date(timeOut) - new Date(timeIn);
+  return Math.max(0, ms / (1000 * 60 * 60));
+}
+
+// ─── DAR: PDF generation ────────────────────────────────────────────────────
+
+async function generateDarPdf(darData, weekNum, mondayDate, existingDoc) {
+  const { default: jsPDF } = await import('jspdf');
+  const { default: autoTable } = await import('jspdf-autotable');
+
+  const { intern, attendance, narratives, supervisor, allowancePeriod, hourlyRate } = darData;
+
+  const doc = existingDoc || new jsPDF({
+    orientation: 'portrait',
+    unit: 'mm',
+    format: 'a4',
+  });
+
+  const pageWidth = doc.internal.pageSize.getWidth();  // 210
+  const margin = 10;
+
+  // Pre-load images
+  const logoDataUrl = await loadImageAsDataUrl('/logo.png');
+
+  let internSigDataUrl = null;
+  if (intern?.signature_url) {
+    const sigUrl = supabase.storage.from('signatures').getPublicUrl(intern.signature_url).data.publicUrl;
+    internSigDataUrl = await loadImageAsDataUrl(sigUrl);
+  }
+
+  let supervisorSigDataUrl = null;
+  if (supervisor?.signature_url) {
+    const sigUrl = supabase.storage.from('signatures').getPublicUrl(supervisor.signature_url).data.publicUrl;
+    supervisorSigDataUrl = await loadImageAsDataUrl(sigUrl);
+  }
+
+  // Logo at top left
+  let y = margin;
+  if (logoDataUrl) {
+    doc.addImage(logoDataUrl, 'PNG', margin, y, 65, 13);
+  }
+  y += 17;
+
+  // Title centered below logo
+  doc.setFontSize(12);
+  doc.setFont(undefined, 'bold');
+  doc.text('DAILY ACTIVITY REPORT — INTERNSHIP', pageWidth / 2, y, { align: 'center' });
+  y += 8;
+
+  // Info fields — fixed column positions so labels and values align
+  doc.setFontSize(11);
+  const departmentName = intern?.departments?.name || '—';
+  const courseName = intern?.course || '—';
+
+  const leftLabelX = margin;
+  const leftValueX = margin + 36;
+  const rightLabelX = pageWidth / 2 + 5;
+  const rightValueX = pageWidth / 2 + 32;
+
+  // Row 1: NAME (left) | COURSE (right)
+  doc.setFont(undefined, 'bold');
+  doc.text('NAME', leftLabelX, y);
+  doc.setFont(undefined, 'normal');
+  doc.text(intern?.full_name || '—', leftValueX, y);
+
+  doc.setFont(undefined, 'bold');
+  doc.text('COURSE', rightLabelX, y);
+  doc.setFont(undefined, 'normal');
+  doc.text(courseName, rightValueX, y);
+
+  y += 5.5;
+
+  // Row 2: DEPARTMENT (left) | WEEK (right)
+  doc.setFont(undefined, 'bold');
+  doc.text('DEPARTMENT', leftLabelX, y);
+  doc.setFont(undefined, 'normal');
+  doc.text(departmentName, leftValueX, y);
+
+  doc.setFont(undefined, 'bold');
+  doc.text('WEEK', rightLabelX, y);
+  doc.setFont(undefined, 'normal');
+  doc.text(String(weekNum), rightValueX, y);
+
+  y += 6;
+
+  // Build 5 weekdays (Mon-Fri) using local date strings
+  const monday = new Date(mondayDate + 'T00:00:00');
+  const weekdays = [];
+  for (let i = 0; i < 5; i++) {
+    const d = new Date(monday);
+    d.setDate(d.getDate() + i);
+    weekdays.push(toLocalDateStr(d));
+  }
+
+  // Build table body (10 rows: 2 per day)
+  const tableBody = [];
+  let totalHours = 0;
+  const signatureCells = [];
+
+  weekdays.forEach((dateStr, dayIdx) => {
+    const att = attendance.find(a => a.date === dateStr);
+    const morningNarr = narratives.find(n => n.date === dateStr && n.session === 'morning');
+    const afternoonNarr = narratives.find(n => n.date === dateStr && n.session === 'afternoon');
+    const isApproved = att?.status === 'approved';
+
+    // Morning row
+    const mHours = calcSessionHours(att?.time_in_1, att?.time_out_1);
+    const mTask = morningNarr?.task?.title || '';
+    const mContent = stripHtml(morningNarr?.content);
+    let mAccomplished = mTask ? `${mTask}${mContent ? ': ' + mContent : ''}` : mContent;
+    if (mAccomplished.length > 200) mAccomplished = mAccomplished.slice(0, 200) + '...';
+
+    tableBody.push([
+      formatDateMMDDYYYY(dateStr),
+      att?.time_in_1 ? formatTime(att.time_in_1) : '',
+      att?.time_out_1 ? formatTime(att.time_out_1) : '',
+      mAccomplished,
+      mHours > 0 ? mHours.toFixed(2) : '',
+      '',
+      '',
+    ]);
+
+    const mRowIdx = dayIdx * 2;
+    if (isApproved && internSigDataUrl) {
+      signatureCells.push({ row: mRowIdx, col: 5, dataUrl: internSigDataUrl });
+    }
+    if (isApproved && supervisorSigDataUrl) {
+      signatureCells.push({ row: mRowIdx, col: 6, dataUrl: supervisorSigDataUrl });
+    }
+
+    // Afternoon row
+    const aHours = calcSessionHours(att?.time_in_2, att?.time_out_2);
+    const aTask = afternoonNarr?.task?.title || '';
+    const aContent = stripHtml(afternoonNarr?.content);
+    let aAccomplished = aTask ? `${aTask}${aContent ? ': ' + aContent : ''}` : aContent;
+    if (aAccomplished.length > 200) aAccomplished = aAccomplished.slice(0, 200) + '...';
+
+    tableBody.push([
+      formatDateMMDDYYYY(dateStr),
+      att?.time_in_2 ? formatTime(att.time_in_2) : '',
+      att?.time_out_2 ? formatTime(att.time_out_2) : '',
+      aAccomplished,
+      aHours > 0 ? aHours.toFixed(2) : '',
+      '',
+      '',
+    ]);
+
+    const aRowIdx = dayIdx * 2 + 1;
+    if (isApproved && internSigDataUrl) {
+      signatureCells.push({ row: aRowIdx, col: 5, dataUrl: internSigDataUrl });
+    }
+    if (isApproved && supervisorSigDataUrl) {
+      signatureCells.push({ row: aRowIdx, col: 6, dataUrl: supervisorSigDataUrl });
+    }
+
+    totalHours += mHours + aHours;
+  });
+
+  // Calculate row height to fill the entire page
+  const pageHeight = doc.internal.pageSize.getHeight();
+  const approxHeaderRowH = 14;
+  const footerSpace = 18;
+  const bodyRowH = (pageHeight - y - margin - footerSpace - approxHeaderRowH) / 10;
+
+  // Render table
+  autoTable(doc, {
+    startY: y,
+    head: [['DATE', 'TIME IN', 'TIME OUT', 'TASK ACCOMPLISHED', 'NO. OF HOURS', 'Signature of Intern', 'Signature of Supervisor']],
+    body: tableBody,
+    theme: 'grid',
+    styles: {
+      fontSize: 8,
+      cellPadding: 1,
+      valign: 'middle',
+      textColor: [15, 23, 42],
+      lineWidth: 0.2,
+      lineColor: [0, 0, 0],
+      minCellHeight: bodyRowH,
+    },
+    headStyles: {
+      fillColor: [41, 65, 148],
+      textColor: [255, 255, 255],
+      fontStyle: 'bold',
+      halign: 'center',
+      fontSize: 10,
+    },
+    columnStyles: {
+      0: { cellWidth: 22, halign: 'center' },
+      1: { cellWidth: 18, halign: 'center' },
+      2: { cellWidth: 18, halign: 'center' },
+      3: { cellWidth: 'auto' },
+      4: { cellWidth: 16, halign: 'center' },
+      5: { cellWidth: 24, halign: 'center' },
+      6: { cellWidth: 24, halign: 'center' },
+    },
+    didDrawCell: (data) => {
+      if (data.section === 'body') {
+        const match = signatureCells.find(s => s.row === data.row.index && s.col === data.column.index);
+        if (match && match.dataUrl) {
+          const imgWidth = Math.min(data.cell.width - 4, 20);
+          const imgHeight = Math.min(data.cell.height - 4, 14);
+          const cx = data.cell.x + (data.cell.width - imgWidth) / 2;
+          const cy = data.cell.y + (data.cell.height - imgHeight) / 2;
+          doc.addImage(match.dataUrl, 'PNG', cx, cy, imgWidth, imgHeight);
+        }
+      }
+    },
+  });
+
+  // Footer: total hours + total allowance on the same line
+  const finalY = doc.lastAutoTable.finalY + 6;
+  doc.setFontSize(10);
+  doc.setFont(undefined, 'bold');
+  doc.text(`TOTAL NUMBER OF HOURS: ${totalHours.toFixed(2)} hours`, margin, finalY);
+
+  const appliedHourlyRate = allowancePeriod?.hourly_rate ?? hourlyRate ?? 0;
+  const computedAllowance = totalHours * appliedHourlyRate;
+  const allowanceTotal = Number.isFinite(allowancePeriod?.total_amount)
+    ? allowancePeriod.total_amount
+    : (Number.isFinite(computedAllowance) ? computedAllowance : 0);
+  doc.text(`TOTAL ALLOWANCE FOR THIS WEEK: ${allowanceTotal.toFixed(2)}`, pageWidth - margin, finalY, { align: 'right' });
+
+  return doc;
+}
+
+// ─── DAR: Generation handler ────────────────────────────────────────────────
+
+async function handleDarGeneration(el) {
+  const internSelect = el.querySelector('#dar-intern');
+  const weekSelect = el.querySelector('#dar-week');
+  const bulkMode = el.querySelector('#dar-bulk-mode').value;
+
+  const selectedInternIds = Array.from(internSelect.selectedOptions).map(o => o.value);
+  const weekValue = weekSelect.value;
+
+  if (selectedInternIds.length === 0) {
+    showToast('Please select at least one intern', 'error');
+    return;
+  }
+  if (!weekValue) {
+    showToast('Please select a week', 'error');
+    return;
+  }
+
+  const [mondayDate, fridayDate, weekNumStr] = weekValue.split('|');
+  const weekNum = parseInt(weekNumStr, 10);
+
+  const btn = el.querySelector('#generate-btn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Generating DAR...';
+
+  try {
+    if (selectedInternIds.length === 1 || bulkMode === 'single') {
+      // Individual PDFs — download each one
+      for (const internId of selectedInternIds) {
+        const darData = await fetchDarData(internId, mondayDate, fridayDate);
+        const doc = await generateDarPdf(darData, weekNum, mondayDate);
+        const fileName = `DAR_${darData.intern?.full_name?.replace(/\s+/g, '_') || 'intern'}_Week${weekNum}.pdf`;
+        doc.save(fileName);
+      }
+      showToast(`${selectedInternIds.length} DAR PDF(s) generated`, 'success');
+
+    } else if (bulkMode === 'zip') {
+      // Individual PDFs packaged in a ZIP
+      const JSZip = (await import('jszip')).default;
+      const zip = new JSZip();
+
+      for (const internId of selectedInternIds) {
+        const darData = await fetchDarData(internId, mondayDate, fridayDate);
+        const doc = await generateDarPdf(darData, weekNum, mondayDate);
+        const fileName = `DAR_${darData.intern?.full_name?.replace(/\s+/g, '_') || 'intern'}_Week${weekNum}.pdf`;
+        const pdfBlob = doc.output('blob');
+        zip.file(fileName, pdfBlob);
+      }
+
+      const zipBlob = await zip.generateAsync({ type: 'blob' });
+      const url = URL.createObjectURL(zipBlob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `DAR_Week${weekNum}_${new Date().toISOString().slice(0, 10)}.zip`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      showToast('DAR ZIP downloaded', 'success');
+
+    } else if (bulkMode === 'combined') {
+      // All interns in one PDF, each on a new page
+      let doc = null;
+
+      for (let i = 0; i < selectedInternIds.length; i++) {
+        const darData = await fetchDarData(selectedInternIds[i], mondayDate, fridayDate);
+        if (i === 0) {
+          doc = await generateDarPdf(darData, weekNum, mondayDate);
+        } else {
+          doc.addPage('a4', 'portrait');
+          await generateDarPdf(darData, weekNum, mondayDate, doc);
+        }
+      }
+
+      if (doc) {
+        doc.save(`DAR_Combined_Week${weekNum}_${new Date().toISOString().slice(0, 10)}.pdf`);
+        showToast('Combined DAR PDF generated', 'success');
+      }
+    }
+  } catch (err) {
+    console.error('DAR generation error:', err);
+    showToast('Failed to generate DAR', 'error');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = `${icons.filter}<span class="ml-2">Generate</span>`;
+  }
+}
+
+// ─── Standard report functions (unchanged) ──────────────────────────────────
 
 async function fetchReportData(type, dateFrom, dateTo, locationId) {
   switch (type) {

@@ -35,6 +35,10 @@ export async function renderProfilePage() {
     ? supabase.storage.from('avatars').getPublicUrl(profile.avatar_url).data.publicUrl
     : null;
 
+  const signatureUrl = profile.signature_url
+    ? supabase.storage.from('signatures').getPublicUrl(profile.signature_url).data.publicUrl
+    : null;
+
   renderLayout(`
     <div class="page-header animate-fade-in-up">
       <h1 class="page-title">My Profile</h1>
@@ -103,10 +107,12 @@ export async function renderProfilePage() {
                   <label class="form-label">OJT Start Date</label>
                   <input type="date" class="form-input bg-neutral-50" value="${profile.ojt_start_date || ''}" disabled />
                 </div>
+                <!--
                 <div>
                   <label class="form-label">OJT End Date</label>
                   <input type="date" class="form-input bg-neutral-50" value="${profile.ojt_end_date || ''}" disabled />
                 </div>
+                -->
               ` : ''}
             </div>
             <div class="flex justify-end">
@@ -115,7 +121,7 @@ export async function renderProfilePage() {
           </form>
         </div>
 
-        <!-- Change Password -->
+        <!-- Change Password
         <div class="card">
           <h3 class="text-base font-bold text-neutral-900 mb-4">Change Password</h3>
           <form id="password-form" class="space-y-4">
@@ -133,6 +139,25 @@ export async function renderProfilePage() {
               <button type="submit" class="btn-secondary">Update Password</button>
             </div>
           </form>
+        </div>
+        -->
+
+        <!-- E-Signature -->
+        <div class="card">
+          <h3 class="text-base font-bold text-neutral-900 mb-1">E-Signature</h3>
+          <p class="text-sm text-neutral-400 mb-4">Used for documentation and PDF reports</p>
+          <div id="signature-preview" class="w-full rounded-lg flex items-center justify-center mb-4 overflow-hidden" style="height: 8rem; border: 2px dashed var(--color-neutral-200); background: #fafafa;">
+            ${signatureUrl
+              ? `<img src="${signatureUrl}" class="max-h-full max-w-full object-contain" alt="E-Signature" />`
+              : `<span class="text-sm select-none" style="color: var(--color-neutral-300);">No signature uploaded</span>`}
+          </div>
+          <div class="flex gap-2">
+            <label class="btn-primary cursor-pointer">
+              Upload Signature
+              <input type="file" id="signature-input" class="hidden" accept="image/png,image/jpeg,image/webp" />
+            </label>
+            ${signatureUrl ? `<button type="button" id="remove-signature-btn" class="btn-secondary" style="color: var(--color-error-600);">Remove</button>` : ''}
+          </div>
         </div>
       </div>
     </div>
@@ -187,7 +212,7 @@ export async function renderProfilePage() {
     });
 
     // Password form
-    el.querySelector('#password-form').addEventListener('submit', async (e) => {
+    el.querySelector('#password-form')?.addEventListener('submit', async (e) => {
       e.preventDefault();
       const newPwd = el.querySelector('#new-password').value;
       const confirmPwd = el.querySelector('#confirm-password').value;
@@ -200,9 +225,52 @@ export async function renderProfilePage() {
       try {
         await updatePassword(newPwd);
         showToast('Password updated', 'success');
-        el.querySelector('#password-form').reset();
+        el.querySelector('#password-form')?.reset();
       } catch (err) {
         showToast(err.message || 'Failed to update password', 'error');
+      }
+    });
+
+    // Signature upload
+    el.querySelector('#signature-input').addEventListener('change', async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+
+      if (file.size > 2 * 1024 * 1024) {
+        showToast('Image must be under 2MB', 'error');
+        return;
+      }
+
+      try {
+        const ext = file.name.split('.').pop();
+        const fileName = `${profile.id}.${ext}`;
+        const { error: uploadErr } = await supabase.storage.from('signatures').upload(fileName, file, { upsert: true });
+        if (uploadErr) throw uploadErr;
+
+        const { error: updateErr } = await supabase.from('profiles').update({ signature_url: fileName }).eq('id', profile.id);
+        if (updateErr) throw updateErr;
+
+        await refreshProfile();
+        showToast('Signature uploaded', 'success');
+        renderProfilePage();
+      } catch (err) {
+        showToast(err.message || 'Failed to upload signature', 'error');
+      }
+    });
+
+    // Signature removal
+    el.querySelector('#remove-signature-btn')?.addEventListener('click', async () => {
+      if (!confirm('Remove your e-signature?')) return;
+      try {
+        await supabase.storage.from('signatures').remove([profile.signature_url]);
+        const { error } = await supabase.from('profiles').update({ signature_url: null }).eq('id', profile.id);
+        if (error) throw error;
+
+        await refreshProfile();
+        showToast('Signature removed', 'success');
+        renderProfilePage();
+      } catch (err) {
+        showToast(err.message || 'Failed to remove signature', 'error');
       }
     });
   }, '/profile');
