@@ -48,8 +48,13 @@ export function createModal(title, bodyHtml, init) {
   const close = () => backdrop.remove();
 
   backdrop.querySelector('#modal-close').addEventListener('click', close);
+
+  let mouseDownOnBackdrop = false;
+  backdrop.addEventListener('mousedown', (e) => {
+    mouseDownOnBackdrop = e.target === backdrop;
+  });
   backdrop.addEventListener('click', (e) => {
-    if (e.target === backdrop) close();
+    if (e.target === backdrop && mouseDownOnBackdrop) close();
   });
 
   if (init) {

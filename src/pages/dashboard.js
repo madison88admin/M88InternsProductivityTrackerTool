@@ -6,7 +6,7 @@ import { getUserRole, getProfile, refreshProfile } from '../lib/auth.js';
 import { renderLayout } from '../components/layout.js';
 import { supabase } from '../lib/supabase.js';
 import { icons } from '../lib/icons.js';
-import { formatDate, formatHoursDisplay, getTodayDate, computeEstimatedEndDate } from '../lib/utils.js';
+import { formatDate, formatHoursDisplay, getTodayDate, computeEstimatedEndDate, renderAvatar, getMonday } from '../lib/utils.js';
 
 export async function renderDashboard() {
   const role = getUserRole();
@@ -33,65 +33,130 @@ export async function renderDashboard() {
   }, '/dashboard');
 }
 
+/** Cached intern KPI data — populated by buildAdminDashboard, consumed by initDashboardCharts */
+let _internKPIData = [];
+
 async function buildInternDashboard(profile) {
-  // Refresh profile to get latest profile data (name, required hours, etc.)
   await refreshProfile();
   profile = getProfile();
 
   const today = getTodayDate();
 
-  // Fetch today's attendance
-  const { data: todayAttendance } = await supabase
-    .from('attendance_records')
-    .select('*')
-    .eq('intern_id', profile.id)
-    .eq('date', today)
-    .maybeSingle();
+  // ── Parallel data fetch ───────────────────────────────────────────────────
+  const [attTodayRes, allAttRes, allTasksRes, allNarrativesRes, notifsRes] = await Promise.all([
+    supabase.from('attendance_records').select('*').eq('intern_id', profile.id).eq('date', today).maybeSingle(),
+    supabase.from('attendance_records').select('total_hours, is_late, status, date').eq('intern_id', profile.id),
+    supabase.from('tasks').select('status, due_date, is_archived').eq('assigned_to', profile.id),
+    supabase.from('narratives').select('status, date').eq('intern_id', profile.id),
+    supabase.from('notifications').select('*', { count: 'exact', head: true }).eq('user_id', profile.id).eq('is_read', false),
+  ]);
 
-  // Fetch pending tasks count
-  const { count: pendingTasks } = await supabase
-    .from('tasks')
-    .select('*', { count: 'exact', head: true })
-    .eq('assigned_to', profile.id)
-    .in('status', ['not_started', 'in_progress']);
+  const todayAttendance = attTodayRes.data;
+  const allAttendance   = allAttRes.data || [];
+  const allTasks        = (allTasksRes.data || []).filter(t => !t.is_archived);
+  const allNarratives   = allNarrativesRes.data || [];
+  const unreadNotifs    = notifsRes.count || 0;
 
-  // Fetch pending narratives
-  const { count: pendingNarratives } = await supabase
-    .from('narratives')
-    .select('*', { count: 'exact', head: true })
-    .eq('intern_id', profile.id)
-    .eq('status', 'pending');
-
-  // Fetch unread notifications
-  const { count: unreadNotifs } = await supabase
-    .from('notifications')
-    .select('*', { count: 'exact', head: true })
-    .eq('user_id', profile.id)
-    .eq('is_read', false);
-
-  // Fetch approved attendance to compute hours directly (same as profile page)
-  const { data: approvedAttendance } = await supabase
-    .from('attendance_records')
-    .select('total_hours')
-    .eq('intern_id', profile.id)
-    .eq('status', 'approved');
-
-  const hoursRendered = (approvedAttendance || []).reduce((s, r) => s + (r.total_hours || 0), 0);
-  const daysWorked = (approvedAttendance || []).length;
+  // ── OJT progress ──────────────────────────────────────────────────────────
+  const approvedAtt   = allAttendance.filter(r => r.status === 'approved');
+  const hoursRendered = approvedAtt.reduce((s, r) => s + (r.total_hours || 0), 0);
+  const daysWorked    = approvedAtt.length;
   const hoursRequired = profile.hours_required || 0;
-  const progress = hoursRequired > 0 ? Math.min(100, (hoursRendered / hoursRequired) * 100) : 0;
-  const estimatedEnd = computeEstimatedEndDate(hoursRequired, hoursRendered, daysWorked || 0);
-  const avgDailyHours = (daysWorked || 0) > 0 ? hoursRendered / daysWorked : 8;
-  const remainingHours = Math.max(0, hoursRequired - hoursRendered);
+  const progress      = hoursRequired > 0 ? Math.min(100, (hoursRendered / hoursRequired) * 100) : 0;
+  const estimatedEnd  = computeEstimatedEndDate(hoursRequired, hoursRendered, daysWorked);
+  const avgDailyHours = daysWorked > 0 ? hoursRendered / daysWorked : 8;
+  const remainingHours   = Math.max(0, hoursRequired - hoursRendered);
   const weekdaysRemaining = avgDailyHours > 0 ? Math.ceil(remainingHours / avgDailyHours) : 0;
 
-  const attendanceStatus = todayAttendance ? (todayAttendance.time_out_2 ? 'Complete' : 'Logged In') : 'Not Logged';
-  const attendanceColor = todayAttendance ? (todayAttendance.time_out_2 ? 'text-success-600' : 'text-primary-600') : 'text-neutral-400';
+  // ── Attendance KPIs ───────────────────────────────────────────────────────
+  const lateCount      = approvedAtt.filter(r => r.is_late).length;
+  const onTimeCount    = daysWorked - lateCount;
+  const onTimeRate     = daysWorked > 0 ? Math.round((onTimeCount / daysWorked) * 100) : null;
+  const pendingAttCount  = allAttendance.filter(r => r.status === 'pending').length;
+  const rejectedAttCount = allAttendance.filter(r => r.status === 'rejected').length;
+
+  // This-week day status dots
+  const monday = getMonday(new Date());
+  const weekLabels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'];
+  const thisWeekDotsHtml = weekLabels.map((label, i) => {
+    const d = new Date(monday);
+    d.setDate(d.getDate() + i);
+    const dateStr = d.toISOString().slice(0, 10);
+    const isFuture = dateStr > today;
+    const isToday  = dateStr === today;
+    const rec = allAttendance.find(r => r.date === dateStr);
+    let dotStyle, symbol;
+    if (isFuture) {
+      dotStyle = 'background:var(--color-neutral-100);color:var(--color-neutral-300);';
+      symbol = '·';
+    } else if (rec?.status === 'approved') {
+      dotStyle = rec.is_late
+        ? 'background:var(--color-warning-100);color:var(--color-warning-700);'
+        : 'background:var(--color-success-100);color:var(--color-success-700);';
+      symbol = rec.is_late ? '!' : '✓';
+    } else if (rec?.status === 'pending') {
+      dotStyle = 'background:var(--color-primary-50);color:var(--color-primary-600);';
+      symbol = '~';
+    } else {
+      dotStyle = 'background:var(--color-danger-50);color:var(--color-danger-400);';
+      symbol = '✗';
+    }
+    return `
+      <div class="flex flex-col items-center gap-1">
+        <div class="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold ${isToday ? 'ring-2 ring-offset-1 ring-primary-400' : ''}" style="${dotStyle}">${symbol}</div>
+        <span class="text-xs font-medium ${isToday ? 'text-primary-600' : 'text-neutral-400'}">${label}</span>
+      </div>`;
+  }).join('');
+
+  // ── Task KPIs ─────────────────────────────────────────────────────────────
+  const completedTasks  = allTasks.filter(t => t.status === 'completed').length;
+  const inProgressTasks = allTasks.filter(t => t.status === 'in_progress').length;
+  const notStartedTasks = allTasks.filter(t => t.status === 'not_started').length;
+  const totalTasks      = allTasks.length;
+  const activeTasks     = inProgressTasks + notStartedTasks;
+  const taskRate        = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : null;
+  const overdueTasks    = allTasks.filter(t => t.due_date && t.due_date < today && t.status !== 'completed').length;
+
+  // ── Narrative KPIs ────────────────────────────────────────────────────────
+  const approvedNarr  = allNarratives.filter(n => n.status === 'approved').length;
+  const pendingNarr   = allNarratives.filter(n => n.status === 'pending').length;
+  const rejectedNarr  = allNarratives.filter(n => n.status === 'rejected').length;
+  const totalNarr     = allNarratives.length;
+  const reviewedNarr  = approvedNarr + rejectedNarr;
+  const narrativeRate = reviewedNarr > 0 ? Math.round((approvedNarr / reviewedNarr) * 100) : null;
+
+  // ── Today's attendance status ─────────────────────────────────────────────
+  const attendanceStatus = todayAttendance
+    ? (todayAttendance.time_out_2 ? 'Complete' : 'Logged In')
+    : 'Not Logged';
+  const attendanceColor = todayAttendance
+    ? (todayAttendance.time_out_2 ? 'text-success-600' : 'text-primary-600')
+    : 'text-neutral-400';
+
+  // ── KPI score helpers ─────────────────────────────────────────────────────
+  // Returns color class + bar hex based on rate value (null = no data)
+  const kpiScore = (rate) => {
+    if (rate === null) return { textClass: 'text-neutral-400', barColor: '#e2e8f0', label: '—' };
+    if (rate >= 90)    return { textClass: 'text-success-600', barColor: '#22c55e', label: rate + '%' };
+    if (rate >= 70)    return { textClass: 'text-warning-600', barColor: '#f59e0b', label: rate + '%' };
+    return               { textClass: 'text-danger-600',  barColor: '#ef4444', label: rate + '%' };
+  };
+
+  const attScore  = kpiScore(onTimeRate);
+  const taskScr   = kpiScore(taskRate);
+  const narrScore = kpiScore(narrativeRate);
+
+  // Stat row helper used inside each KPI card
+  const statRow = (label, value, valueClass = 'text-neutral-800') =>
+    `<div class="flex justify-between items-center py-1.5" style="border-bottom:1px solid var(--color-neutral-50);">
+       <span class="text-xs text-neutral-500">${label}</span>
+       <span class="text-xs font-bold ${valueClass}">${value}</span>
+     </div>`;
 
   return `
     <div class="page-header animate-fade-in-up">
       <p class="text-sm font-medium text-primary-600 mb-1">${formatDate(new Date(), { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</p>
-      <h1 class="page-title">Welcome back, ${profile.full_name?.split(' ')[0] || 'Intern'}! 👋</h1>
+      <h1 class="page-title">Welcome back, ${profile.full_name?.split(' ')[0] || 'Intern'}!</h1>
       <p class="page-subtitle">Here's an overview of your OJT progress and activities today.</p>
     </div>
 
@@ -103,21 +168,17 @@ async function buildInternDashboard(profile) {
             <p class="text-xs font-semibold text-neutral-400 uppercase tracking-wider">Today's Status</p>
             <p class="text-xl font-bold mt-2 ${attendanceColor}">${attendanceStatus}</p>
           </div>
-          <div class="action-icon bg-primary-50 text-primary-600">
-            ${icons.clock}
-          </div>
+          <div class="action-icon bg-primary-50 text-primary-600">${icons.clock}</div>
         </div>
       </div>
 
-      <div class="stat-card" style="--tw-gradient-from: #f59e0b;">
+      <div class="stat-card">
         <div class="flex items-center justify-between">
           <div>
             <p class="text-xs font-semibold text-neutral-400 uppercase tracking-wider">Active Tasks</p>
-            <p class="text-xl font-bold mt-2 text-neutral-900">${pendingTasks || 0}</p>
+            <p class="text-xl font-bold mt-2 ${activeTasks > 0 ? 'text-warning-600' : 'text-neutral-900'}">${activeTasks}</p>
           </div>
-          <div class="action-icon bg-warning-50 text-warning-600">
-            ${icons.tasks}
-          </div>
+          <div class="action-icon bg-warning-50 text-warning-600">${icons.tasks}</div>
         </div>
       </div>
 
@@ -125,11 +186,9 @@ async function buildInternDashboard(profile) {
         <div class="flex items-center justify-between">
           <div>
             <p class="text-xs font-semibold text-neutral-400 uppercase tracking-wider">Pending Narratives</p>
-            <p class="text-xl font-bold mt-2 text-neutral-900">${pendingNarratives || 0}</p>
+            <p class="text-xl font-bold mt-2 ${pendingNarr > 0 ? 'text-primary-600' : 'text-neutral-900'}">${pendingNarr}</p>
           </div>
-          <div class="action-icon bg-success-50 text-success-600">
-            ${icons.narrative}
-          </div>
+          <div class="action-icon bg-success-50 text-success-600">${icons.narrative}</div>
         </div>
       </div>
 
@@ -137,17 +196,203 @@ async function buildInternDashboard(profile) {
         <div class="flex items-center justify-between">
           <div>
             <p class="text-xs font-semibold text-neutral-400 uppercase tracking-wider">Notifications</p>
-            <p class="text-xl font-bold mt-2 text-neutral-900">${unreadNotifs || 0}</p>
+            <p class="text-xl font-bold mt-2 ${unreadNotifs > 0 ? 'text-danger-600' : 'text-neutral-900'}">${unreadNotifs}</p>
           </div>
-          <div class="action-icon bg-danger-50 text-danger-600">
-            ${icons.bell}
-          </div>
+          <div class="action-icon bg-danger-50 text-danger-600">${icons.bell}</div>
         </div>
       </div>
     </div>
 
+    <!-- Quick Actions -->
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-5 mb-8 stagger-children" style="animation-delay: 500ms;">
+      <a href="#/attendance" class="action-card">
+        <div class="action-icon bg-primary-50 text-primary-600">${icons.clock}</div>
+        <div>
+          <p class="font-semibold text-neutral-900">Log Attendance</p>
+          <p class="text-sm text-neutral-500 mt-0.5">Record time-in / time-out</p>
+        </div>
+      </a>
+      <a href="#/my-tasks" class="action-card">
+        <div class="action-icon bg-warning-50 text-warning-600">${icons.tasks}</div>
+        <div>
+          <p class="font-semibold text-neutral-900">View Tasks</p>
+          <p class="text-sm text-neutral-500 mt-0.5">Check your assignments</p>
+        </div>
+      </a>
+      <a href="#/narratives" class="action-card">
+        <div class="action-icon bg-success-50 text-success-600">${icons.narrative}</div>
+        <div>
+          <p class="font-semibold text-neutral-900">Submit Narrative</p>
+          <p class="text-sm text-neutral-500 mt-0.5">Write daily activity report</p>
+        </div>
+      </a>
+    </div>
+
+    <!-- ═══════════════ PERFORMANCE KPI PANEL ═══════════════ -->
+    <div class="card animate-fade-in-up" style="animation-delay: 750ms;">
+      <div class="flex items-start justify-between mb-6">
+        <div>
+          <h3 class="text-base font-bold text-neutral-900">My Performance Overview</h3>
+          <p class="text-sm text-neutral-500 mt-0.5">A breakdown of how you're doing across all areas</p>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-5">
+
+        <!-- ▸ Attendance KPI ─────────────────────────────────────────────── -->
+        <div class="rounded-xl p-4" style="border: 1px solid var(--color-neutral-100);">
+          <!-- Header -->
+          <div class="flex items-center gap-2 mb-4">
+            <div class="w-8 h-8 rounded-lg flex items-center justify-center bg-primary-50 text-primary-600">${icons.clock}</div>
+            <p class="text-sm font-bold text-neutral-800">Attendance</p>
+          </div>
+
+          <!-- Primary rate -->
+          <div class="flex items-end justify-between mb-2">
+            <div>
+              <p class="text-3xl font-bold ${attScore.textClass}">${attScore.label}</p>
+              <p class="text-xs text-neutral-400 mt-0.5">on-time rate</p>
+            </div>
+            ${onTimeRate !== null ? `
+              <div class="text-right">
+                <p class="text-xs font-semibold text-neutral-500">${onTimeCount} on-time</p>
+                <p class="text-xs text-neutral-400">${lateCount} late</p>
+              </div>
+            ` : ''}
+          </div>
+          <div class="h-1.5 rounded-full mb-4 overflow-hidden" style="background: var(--color-neutral-100);">
+            <div class="h-full rounded-full transition-all" style="width: ${onTimeRate ?? 0}%; background: ${attScore.barColor};"></div>
+          </div>
+
+          <!-- This-week tracker -->
+          <p class="text-xs font-semibold text-neutral-400 uppercase tracking-wider mb-2">This Week</p>
+          <div class="flex items-center justify-between mb-4">
+            ${thisWeekDotsHtml}
+          </div>
+
+          <!-- Stat rows -->
+          <div class="space-y-0">
+            ${statRow('Approved Days', daysWorked)}
+            ${statRow('Late Arrivals', lateCount, lateCount > 3 ? 'text-warning-600' : 'text-neutral-800')}
+            ${statRow('Pending Approval', pendingAttCount, pendingAttCount > 0 ? 'text-primary-600' : 'text-neutral-800')}
+            ${statRow('Rejected', rejectedAttCount, rejectedAttCount > 0 ? 'text-danger-600' : 'text-neutral-800')}
+          </div>
+        </div>
+
+        <!-- ▸ Tasks KPI ───────────────────────────────────────────────────── -->
+        <div class="rounded-xl p-4" style="border: 1px solid var(--color-neutral-100);">
+          <!-- Header -->
+          <div class="flex items-center gap-2 mb-4">
+            <div class="w-8 h-8 rounded-lg flex items-center justify-center bg-warning-50 text-warning-600">${icons.tasks}</div>
+            <p class="text-sm font-bold text-neutral-800">Tasks</p>
+          </div>
+
+          <!-- Primary rate -->
+          <div class="flex items-end justify-between mb-2">
+            <div>
+              <p class="text-3xl font-bold ${taskScr.textClass}">${taskScr.label}</p>
+              <p class="text-xs text-neutral-400 mt-0.5">completion rate</p>
+            </div>
+            ${totalTasks > 0 ? `
+              <div class="text-right">
+                <p class="text-xs font-semibold text-neutral-500">${completedTasks}/${totalTasks} done</p>
+                ${overdueTasks > 0 ? `<p class="text-xs font-semibold text-danger-500">${overdueTasks} overdue</p>` : '<p class="text-xs text-neutral-400">0 overdue</p>'}
+              </div>
+            ` : ''}
+          </div>
+          <div class="h-1.5 rounded-full mb-4 overflow-hidden" style="background: var(--color-neutral-100);">
+            <div class="h-full rounded-full transition-all" style="width: ${taskRate ?? 0}%; background: ${taskScr.barColor};"></div>
+          </div>
+
+          <!-- Status breakdown mini bars -->
+          ${totalTasks > 0 ? `
+            <p class="text-xs font-semibold text-neutral-400 uppercase tracking-wider mb-3">Breakdown</p>
+            <div class="space-y-2 mb-4">
+              ${[
+                { label: 'Completed',    count: completedTasks,  color: '#22c55e' },
+                { label: 'In Progress',  count: inProgressTasks, color: '#6366f1' },
+                { label: 'Not Started',  count: notStartedTasks, color: '#94a3b8' },
+              ].map(item => `
+                <div class="flex items-center gap-2">
+                  <span class="text-xs text-neutral-500 w-20 shrink-0">${item.label}</span>
+                  <div class="flex-1 h-1.5 rounded-full overflow-hidden" style="background: var(--color-neutral-100);">
+                    <div class="h-full rounded-full" style="width: ${totalTasks > 0 ? Math.round((item.count / totalTasks) * 100) : 0}%; background: ${item.color};"></div>
+                  </div>
+                  <span class="text-xs font-bold text-neutral-600 w-4 text-right shrink-0">${item.count}</span>
+                </div>
+              `).join('')}
+            </div>
+          ` : `<p class="text-xs text-neutral-400 mb-4">No tasks assigned yet.</p>`}
+
+          <!-- Stat rows -->
+          <div class="space-y-0">
+            ${statRow('Total Tasks', totalTasks)}
+            ${statRow('Active (pending work)', activeTasks, activeTasks > 0 ? 'text-warning-600' : 'text-neutral-800')}
+            ${statRow('Overdue', overdueTasks, overdueTasks > 0 ? 'text-danger-600' : 'text-neutral-800')}
+          </div>
+        </div>
+
+        <!-- ▸ Narratives KPI ─────────────────────────────────────────────── -->
+        <div class="rounded-xl p-4" style="border: 1px solid var(--color-neutral-100);">
+          <!-- Header -->
+          <div class="flex items-center gap-2 mb-4">
+            <div class="w-8 h-8 rounded-lg flex items-center justify-center bg-success-50 text-success-600">${icons.narrative}</div>
+            <p class="text-sm font-bold text-neutral-800">Narratives</p>
+          </div>
+
+          <!-- Primary rate -->
+          <div class="flex items-end justify-between mb-2">
+            <div>
+              <p class="text-3xl font-bold ${narrScore.textClass}">${narrScore.label}</p>
+              <p class="text-xs text-neutral-400 mt-0.5">approval rate</p>
+            </div>
+            ${totalNarr > 0 ? `
+              <div class="text-right">
+                <p class="text-xs font-semibold text-neutral-500">${approvedNarr} approved</p>
+                <p class="text-xs text-neutral-400">${totalNarr} total</p>
+              </div>
+            ` : ''}
+          </div>
+          <div class="h-1.5 rounded-full mb-4 overflow-hidden" style="background: var(--color-neutral-100);">
+            <div class="h-full rounded-full transition-all" style="width: ${narrativeRate ?? 0}%; background: ${narrScore.barColor};"></div>
+          </div>
+
+          <!-- Status breakdown mini bars -->
+          ${totalNarr > 0 ? `
+            <p class="text-xs font-semibold text-neutral-400 uppercase tracking-wider mb-3">Breakdown</p>
+            <div class="space-y-2 mb-4">
+              ${[
+                { label: 'Approved',  count: approvedNarr, color: '#22c55e' },
+                { label: 'Pending',   count: pendingNarr,  color: '#6366f1' },
+                { label: 'Rejected',  count: rejectedNarr, color: '#ef4444' },
+              ].map(item => `
+                <div class="flex items-center gap-2">
+                  <span class="text-xs text-neutral-500 w-20 shrink-0">${item.label}</span>
+                  <div class="flex-1 h-1.5 rounded-full overflow-hidden" style="background: var(--color-neutral-100);">
+                    <div class="h-full rounded-full" style="width: ${totalNarr > 0 ? Math.round((item.count / totalNarr) * 100) : 0}%; background: ${item.color};"></div>
+                  </div>
+                  <span class="text-xs font-bold text-neutral-600 w-4 text-right shrink-0">${item.count}</span>
+                </div>
+              `).join('')}
+            </div>
+          ` : `<p class="text-xs text-neutral-400 mb-4">No narratives submitted yet.</p>`}
+
+          <!-- Stat rows -->
+          <div class="space-y-0">
+            ${statRow('Total Submitted', totalNarr)}
+            ${statRow('Approved', approvedNarr, approvedNarr > 0 ? 'text-success-600' : 'text-neutral-800')}
+            ${statRow('Pending Review', pendingNarr, pendingNarr > 0 ? 'text-primary-600' : 'text-neutral-800')}
+            ${statRow('Rejected', rejectedNarr, rejectedNarr > 0 ? 'text-danger-600' : 'text-neutral-800')}
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <br>
+
     <!-- OJT Progress -->
-    <div class="card mb-8 animate-fade-in-up" style="animation-delay: 200ms;">
+    <div class="card mb-8 animate-fade-in-up" style="animation-delay: 1000ms;">
       <div class="flex items-center justify-between mb-5">
         <div>
           <h3 class="text-base font-bold text-neutral-900">OJT Progress</h3>
@@ -171,45 +416,12 @@ async function buildInternDashboard(profile) {
           <p class="text-sm font-bold text-primary-600">${formatDate(estimatedEnd)}</p>
         </div>
       ` : hoursRendered >= hoursRequired && hoursRequired > 0 ? `
-        <p class="text-sm font-semibold text-success-600 mt-4">✅ OJT Hours Completed!</p>
+        <p class="text-sm font-semibold text-success-600 mt-4">OJT Hours Completed!</p>
       ` : ''}
     </div>
 
-    <!-- Quick Actions -->
-    <div class="grid grid-cols-1 md:grid-cols-3 gap-5 mb-8 stagger-children" style="animation-delay: 300ms;">
-      <a href="#/attendance" class="action-card">
-        <div class="action-icon bg-primary-50 text-primary-600">
-          ${icons.clock}
-        </div>
-        <div>
-          <p class="font-semibold text-neutral-900">Log Attendance</p>
-          <p class="text-sm text-neutral-500 mt-0.5">Record time-in / time-out</p>
-        </div>
-      </a>
-
-      <a href="#/my-tasks" class="action-card">
-        <div class="action-icon bg-warning-50 text-warning-600">
-          ${icons.tasks}
-        </div>
-        <div>
-          <p class="font-semibold text-neutral-900">View Tasks</p>
-          <p class="text-sm text-neutral-500 mt-0.5">Check your assignments</p>
-        </div>
-      </a>
-
-      <a href="#/narratives" class="action-card">
-        <div class="action-icon bg-success-50 text-success-600">
-          ${icons.narrative}
-        </div>
-        <div>
-          <p class="font-semibold text-neutral-900">Submit Narrative</p>
-          <p class="text-sm text-neutral-500 mt-0.5">Write daily activity report</p>
-        </div>
-      </a>
-    </div>
-
     <!-- Weekly Hours Chart -->
-    <div class="card animate-fade-in-up" style="animation-delay: 400ms;">
+    <div class="card mb-6 animate-fade-in-up" style="animation-delay: 1250ms;">
       <h3 class="text-base font-bold text-neutral-900 mb-1">This Week's Hours</h3>
       <p class="text-sm text-neutral-500 mb-4">Your daily attendance log for the current week</p>
       <div style="position: relative; height: 220px;">
@@ -297,7 +509,7 @@ async function buildSupervisorDashboard(profile) {
       </a>
     </div>
 
-    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 stagger-children" style="animation-delay: 200ms;">
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 stagger-children" style="animation-delay: 1000ms;">
       <div class="card">
         <h3 class="text-base font-bold text-neutral-900 mb-1">Team Attendance Today</h3>
         <p class="text-sm text-neutral-500 mb-4">Overview of your team's check-in status</p>
@@ -318,25 +530,157 @@ async function buildSupervisorDashboard(profile) {
 }
 
 async function buildAdminDashboard(profile) {
-  const { count: totalUsers } = await supabase
+  const today = getTodayDate();
+
+  // ── System-level stats ──────────────────────────────────────────────────────
+  const [
+    { count: totalUsers },
+    { count: totalLocations },
+    { count: totalDepartments },
+    { count: pendingApprovals },
+  ] = await Promise.all([
+    supabase.from('profiles').select('*', { count: 'exact', head: true }).eq('is_active', true),
+    supabase.from('locations').select('*', { count: 'exact', head: true }).eq('is_active', true),
+    supabase.from('departments').select('*', { count: 'exact', head: true }).eq('is_active', true),
+    supabase.from('approvals').select('*', { count: 'exact', head: true }).eq('status', 'pending'),
+  ]);
+
+  // ── Intern KPI data ─────────────────────────────────────────────────────────
+  const { data: interns } = await supabase
     .from('profiles')
-    .select('*', { count: 'exact', head: true })
-    .eq('is_active', true);
+    .select('id, full_name, avatar_url, school, hours_required, hours_rendered, ojt_start_date, status, department:departments(name)')
+    .eq('role', 'intern')
+    .eq('is_active', true)
+    .order('full_name');
 
-  const { count: totalLocations } = await supabase
-    .from('locations')
-    .select('*', { count: 'exact', head: true })
-    .eq('is_active', true);
+  const internIds = (interns || []).map(i => i.id);
+  let allAttendance = [];
+  let allTasks = [];
 
-  const { count: totalDepartments } = await supabase
-    .from('departments')
-    .select('*', { count: 'exact', head: true })
-    .eq('is_active', true);
+  if (internIds.length > 0) {
+    const [attRes, taskRes] = await Promise.all([
+      supabase
+        .from('attendance_records')
+        .select('intern_id, total_hours, is_late')
+        .in('intern_id', internIds)
+        .eq('status', 'approved'),
+      supabase
+        .from('tasks')
+        .select('assigned_to, status, due_date, is_archived')
+        .in('assigned_to', internIds),
+    ]);
+    allAttendance = attRes.data || [];
+    allTasks = taskRes.data || [];
+  }
 
-  const { count: pendingApprovals } = await supabase
-    .from('approvals')
-    .select('*', { count: 'exact', head: true })
-    .eq('status', 'pending');
+  // Compute per-intern KPIs and store for chart use
+  _internKPIData = (interns || []).map(intern => {
+    const attendance = allAttendance.filter(a => a.intern_id === intern.id);
+    const tasks = allTasks.filter(t => t.assigned_to === intern.id && !t.is_archived);
+
+    const hoursRendered = intern.hours_rendered || attendance.reduce((s, a) => s + (a.total_hours || 0), 0);
+    const hoursRequired = intern.hours_required || 0;
+    const daysWorked = attendance.length;
+    const lateCount = attendance.filter(a => a.is_late).length;
+    const avgDailyHours = daysWorked > 0 ? hoursRendered / daysWorked : 8;
+    const progress = hoursRequired > 0 ? Math.min(100, (hoursRendered / hoursRequired) * 100) : 0;
+    const estimatedEnd = computeEstimatedEndDate(hoursRequired, hoursRendered, daysWorked);
+
+    const completedTasks = tasks.filter(t => t.status === 'completed').length;
+    const totalTasks = tasks.length;
+    const overdueTasks = tasks.filter(t => t.due_date && t.due_date < today && t.status !== 'completed').length;
+
+    return {
+      ...intern,
+      hoursRendered, hoursRequired, daysWorked, lateCount,
+      avgDailyHours, progress, estimatedEnd,
+      completedTasks, totalTasks, overdueTasks,
+      taskRate: totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : null,
+    };
+  });
+
+  // Aggregate KPI stats
+  const activeCount = _internKPIData.length;
+  const avgProgress = activeCount > 0
+    ? _internKPIData.reduce((s, i) => s + i.progress, 0) / activeCount : 0;
+  const finishingSoon = _internKPIData.filter(i => {
+    if (i.progress >= 100) return false;
+    if (!i.estimatedEnd) return false;
+    const days = Math.ceil((i.estimatedEnd - new Date()) / (1000 * 60 * 60 * 24));
+    return days >= 0 && days <= 30;
+  }).length;
+  const completedCount = _internKPIData.filter(i => i.progress >= 100).length;
+  const workingInterns = _internKPIData.filter(i => i.daysWorked > 0);
+  const avgDailyAll = workingInterns.length > 0
+    ? workingInterns.reduce((s, i) => s + i.avgDailyHours, 0) / workingInterns.length : 0;
+
+  // Sort: soonest estimated finish first, completed last
+  const sortedInterns = [..._internKPIData].sort((a, b) => {
+    if (a.progress >= 100 && b.progress < 100) return 1;
+    if (b.progress >= 100 && a.progress < 100) return -1;
+    if (!a.estimatedEnd && !b.estimatedEnd) return 0;
+    if (!a.estimatedEnd) return 1;
+    if (!b.estimatedEnd) return -1;
+    return a.estimatedEnd - b.estimatedEnd;
+  });
+
+  const progressColor = p => p >= 75 ? '#22c55e' : p >= 50 ? '#6366f1' : p >= 25 ? '#f59e0b' : '#ef4444';
+
+  const estEndDisplay = intern => {
+    if (intern.progress >= 100) {
+      return `<span class="inline-flex items-center gap-1 text-xs font-semibold text-success-600">${icons.check} Completed</span>`;
+    }
+    if (!intern.estimatedEnd) return `<span class="text-xs text-neutral-400">—</span>`;
+    const daysLeft = Math.ceil((intern.estimatedEnd - new Date()) / (1000 * 60 * 60 * 24));
+    const colorClass = daysLeft <= 14 ? 'text-success-600' : daysLeft <= 60 ? 'text-primary-600' : 'text-neutral-600';
+    return `<div><p class="text-xs font-semibold ${colorClass}">${formatDate(intern.estimatedEnd)}</p><p class="text-xs text-neutral-400">${daysLeft}d away</p></div>`;
+  };
+
+  const internRows = sortedInterns.length > 0 ? sortedInterns.map(intern => `
+    <tr class="border-b border-neutral-100 hover:bg-neutral-50 transition-colors">
+      <td class="py-3 pr-4">
+        <div class="flex items-center gap-2.5">
+          ${renderAvatar(intern, 'w-8 h-8', 'text-xs')}
+          <div>
+            <p class="font-semibold text-neutral-900 text-sm leading-tight">${intern.full_name}</p>
+            <p class="text-xs text-neutral-400 mt-0.5">${intern.department?.name || 'No Department'}</p>
+          </div>
+        </div>
+      </td>
+      <td class="py-3 pr-6" style="min-width: 180px;">
+        <div class="flex items-center gap-2">
+          <div class="flex-1 h-1.5 rounded-full overflow-hidden" style="background: var(--color-neutral-100);">
+            <div class="h-full rounded-full transition-all" style="width: ${intern.progress.toFixed(1)}%; background: ${progressColor(intern.progress)};"></div>
+          </div>
+          <span class="text-xs font-bold text-neutral-700 w-9 text-right shrink-0">${intern.progress.toFixed(0)}%</span>
+        </div>
+      </td>
+      <td class="text-right py-3 pr-4">
+        <p class="text-xs font-semibold text-neutral-700">${formatHoursDisplay(intern.hoursRendered)}</p>
+        <p class="text-xs text-neutral-400">of ${formatHoursDisplay(intern.hoursRequired)}</p>
+      </td>
+      <td class="text-center py-3 px-3">
+        <p class="text-xs font-semibold text-neutral-700">${intern.avgDailyHours > 0 ? intern.avgDailyHours.toFixed(1) + 'h' : '—'}</p>
+        <p class="text-xs text-neutral-400">${intern.daysWorked}d worked</p>
+      </td>
+      <td class="text-center py-3 px-3">
+        ${intern.totalTasks > 0 ? `
+          <p class="text-xs font-semibold ${intern.taskRate >= 80 ? 'text-success-600' : intern.taskRate >= 50 ? 'text-warning-600' : 'text-neutral-500'}">${intern.completedTasks}/${intern.totalTasks}</p>
+          ${intern.overdueTasks > 0 ? `<p class="text-xs text-danger-500">${intern.overdueTasks} overdue</p>` : '<p class="text-xs text-neutral-400">&nbsp;</p>'}
+        ` : '<span class="text-xs text-neutral-400">—</span>'}
+      </td>
+      <td class="text-center py-3 px-3">
+        <span class="inline-block px-2 py-0.5 rounded-full text-xs font-semibold ${intern.lateCount > 5 ? 'bg-danger-50 text-danger-600' : intern.lateCount > 0 ? 'bg-warning-50 text-warning-600' : 'bg-success-50 text-success-600'}">${intern.lateCount}x</span>
+      </td>
+      <td class="text-right py-3 pl-3">
+        ${estEndDisplay(intern)}
+      </td>
+    </tr>
+  `).join('') : `
+    <tr>
+      <td colspan="7" class="text-center py-10 text-sm text-neutral-400">No active interns found.</td>
+    </tr>
+  `;
 
   return `
     <div class="page-header animate-fade-in-up">
@@ -396,7 +740,7 @@ async function buildAdminDashboard(profile) {
     </div>
 
     <!-- Quick Admin Links -->
-    <div class="grid grid-cols-1 md:grid-cols-3 gap-5 mb-8 stagger-children" style="animation-delay: 200ms;">
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-5 mb-8 stagger-children" style="animation-delay: 1000ms;">
       <a href="#/user-management" class="action-card">
         <div class="action-icon bg-primary-50 text-primary-600">${icons.users}</div>
         <div>
@@ -438,6 +782,73 @@ async function buildAdminDashboard(profile) {
           <canvas id="system-activity-chart"></canvas>
         </div>
       </div>
+    </div>
+
+    <!-- ═══════════════ INTERN KPI PANEL ═══════════════ -->
+    <div class="card animate-fade-in-up mt-6" style="animation-delay: 400ms;">
+      <!-- Panel header -->
+      <div class="flex items-start justify-between mb-5">
+        <div>
+          <h3 class="text-base font-bold text-neutral-900">Intern Performance Overview</h3>
+          <p class="text-sm text-neutral-500 mt-0.5">Real-time KPIs across all active interns</p>
+        </div>
+        <a href="#/intern-directory" class="text-xs font-semibold text-primary-600 hover:text-primary-700 transition-colors shrink-0 ml-4 mt-1">View directory →</a>
+      </div>
+
+      <!-- Aggregate metric chips -->
+      <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
+        <div class="rounded-xl p-4" style="background: var(--color-primary-50);">
+          <p class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-primary-600);">Active Interns</p>
+          <p class="text-2xl font-bold mt-1" style="color: var(--color-primary-700);">${activeCount}</p>
+          ${completedCount > 0 ? `<p class="text-xs mt-0.5" style="color: var(--color-primary-500);">${completedCount} completed</p>` : ''}
+        </div>
+        <div class="rounded-xl p-4" style="background: var(--color-neutral-100);">
+          <p class="text-xs font-semibold uppercase tracking-wider text-neutral-500">Avg OJT Progress</p>
+          <p class="text-2xl font-bold mt-1 text-neutral-800">${avgProgress.toFixed(1)}%</p>
+          <p class="text-xs text-neutral-400 mt-0.5">across all interns</p>
+        </div>
+        <div class="rounded-xl p-4" style="background: var(--color-success-50);">
+          <p class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-success-600);">Finishing Soon</p>
+          <p class="text-2xl font-bold mt-1" style="color: var(--color-success-600);">${finishingSoon}</p>
+          <p class="text-xs mt-0.5" style="color: var(--color-success-500);">within 30 days</p>
+        </div>
+        <div class="rounded-xl p-4" style="background: var(--color-warning-50);">
+          <p class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-warning-600);">Avg Daily Hours</p>
+          <p class="text-2xl font-bold mt-1" style="color: var(--color-warning-600);">${avgDailyAll > 0 ? avgDailyAll.toFixed(1) + 'h' : '—'}</p>
+          <p class="text-xs mt-0.5" style="color: var(--color-warning-500);">per working day</p>
+        </div>
+      </div>
+
+      <!-- Per-intern KPI table -->
+      <div class="overflow-x-auto -mx-6 px-6">
+        <table class="w-full text-sm" style="min-width: 680px;">
+          <thead>
+            <tr style="border-bottom: 1px solid var(--color-neutral-100);">
+              <th class="text-left text-xs font-semibold text-neutral-400 uppercase tracking-wider pb-3 pr-4">Intern</th>
+              <th class="text-left text-xs font-semibold text-neutral-400 uppercase tracking-wider pb-3 pr-6" style="min-width: 180px;">OJT Progress</th>
+              <th class="text-right text-xs font-semibold text-neutral-400 uppercase tracking-wider pb-3 pr-4">Hours</th>
+              <th class="text-center text-xs font-semibold text-neutral-400 uppercase tracking-wider pb-3 px-3">Avg / Day</th>
+              <th class="text-center text-xs font-semibold text-neutral-400 uppercase tracking-wider pb-3 px-3">Tasks</th>
+              <th class="text-center text-xs font-semibold text-neutral-400 uppercase tracking-wider pb-3 px-3">Late Days</th>
+              <th class="text-right text-xs font-semibold text-neutral-400 uppercase tracking-wider pb-3 pl-3">Est. Finish</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${internRows}
+          </tbody>
+        </table>
+      </div>
+
+      <!-- OJT Timeline Chart -->
+      ${activeCount > 0 ? `
+      <div class="mt-6 pt-6" style="border-top: 1px solid var(--color-neutral-100);">
+        <h4 class="text-sm font-semibold text-neutral-700 mb-1">OJT Completion by Intern</h4>
+        <p class="text-xs text-neutral-400 mb-4">Sorted by progress — colors: <span style="color:#22c55e">■</span> 75–100% <span style="color:#6366f1">■</span> 50–74% <span style="color:#f59e0b">■</span> 25–49% <span style="color:#ef4444">■</span> 0–24%</p>
+        <div style="position: relative; height: ${Math.max(140, activeCount * 36)}px;">
+          <canvas id="intern-progress-chart"></canvas>
+        </div>
+      </div>
+      ` : ''}
     </div>
   `;
 }
@@ -672,6 +1083,65 @@ async function initDashboardCharts(role, container) {
               grid: { color: 'rgba(0,0,0,0.05)' },
             },
             x: {
+              ticks: { font: { family: 'Inter', size: 11 } },
+              grid: { display: false },
+            },
+          },
+        },
+      });
+    }
+
+    // Intern OJT Progress chart
+    const progressCanvas = container.querySelector('#intern-progress-chart');
+    if (progressCanvas && _internKPIData.length > 0) {
+      const sorted = [..._internKPIData].sort((a, b) => a.progress - b.progress);
+      const labels = sorted.map(i => {
+        const parts = i.full_name.split(' ');
+        return parts.length > 1 ? `${parts[0]} ${parts[1][0]}.` : parts[0];
+      });
+      const progressData = sorted.map(i => parseFloat(i.progress.toFixed(1)));
+      const bgColors = sorted.map(i =>
+        i.progress >= 75 ? '#22c55e' : i.progress >= 50 ? '#6366f1' : i.progress >= 25 ? '#f59e0b' : '#ef4444'
+      );
+
+      createChart(progressCanvas, {
+        type: 'bar',
+        data: {
+          labels,
+          datasets: [{
+            label: 'OJT Progress',
+            data: progressData,
+            backgroundColor: bgColors,
+            borderRadius: 6,
+            borderSkipped: false,
+          }],
+        },
+        options: {
+          ...defaultOptions,
+          indexAxis: 'y',
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              callbacks: {
+                label: ctx => {
+                  const intern = sorted[ctx.dataIndex];
+                  return [
+                    ` ${ctx.raw}% complete`,
+                    ` ${formatHoursDisplay(intern.hoursRendered)} / ${formatHoursDisplay(intern.hoursRequired)}`,
+                    intern.estimatedEnd ? ` Est. finish: ${formatDate(intern.estimatedEnd)}` : '',
+                  ].filter(Boolean);
+                },
+              },
+            },
+          },
+          scales: {
+            x: {
+              beginAtZero: true,
+              max: 100,
+              ticks: { callback: v => v + '%', font: { family: 'Inter', size: 11 } },
+              grid: { color: 'rgba(0,0,0,0.04)' },
+            },
+            y: {
               ticks: { font: { family: 'Inter', size: 11 } },
               grid: { display: false },
             },

@@ -74,10 +74,13 @@ export async function renderTeamAttendancePage() {
         <td>${formatHoursDisplay(a.total_hours)}</td>
         <td>
           <span class="badge-${a.status === 'approved' ? 'success' : a.status === 'rejected' ? 'danger' : 'pending'}">${a.status}</span>
-          ${a.is_late ? '<span class="badge-warning ml-1">Late</span>' : ''}
+        </td>
+        <td>
+          ${a.is_late ? '<span class="badge-warning text-xs">Late</span>' : ''}
+          ${a.is_outside_hours ? '<span class="badge-danger text-xs ml-1">Outside</span>' : ''}
         </td>
       </tr>
-    `).join('') || '<tr><td colspan="8" class="text-center text-neutral-400 py-8">No attendance records</td></tr>';
+    `).join('') || '<tr><td colspan="9" class="text-center text-neutral-400 py-8">No attendance records</td></tr>';
 
     el.querySelector('#record-count').textContent = `${filtered.length} record${filtered.length !== 1 ? 's' : ''}`;
   }
@@ -131,6 +134,7 @@ export async function renderTeamAttendancePage() {
               <th>PM Out</th>
               <th>Hours</th>
               <th>Status</th>
+              <th>Flags</th>
             </tr>
           </thead>
           <tbody id="attendance-tbody"></tbody>

@@ -47,24 +47,24 @@ function getNavSections(role, profile) {
         { path: '/dashboard', label: 'Dashboard', icon: icons.dashboard },
         { path: '/notifications', label: 'Notifications', icon: icons.bell },
       ]},
-      { label: 'People', items: [
-        { path: '/user-management', label: 'User Maintenance', icon: icons.users },
-        { path: '/intern-directory', label: 'Intern Directory', icon: icons.users },
-      ]},
-      { label: 'Organization', items: [
-        { path: '/departments', label: 'Departments', icon: icons.building },
-        { path: '/locations', label: 'Locations', icon: icons.location },
-      ]},
-      ...(profile?.department_id ? [{ label: 'Team', items: [
-        { path: '/team-attendance', label: 'Team Attendance', icon: icons.clock },
-        { path: '/team-narratives', label: 'Team Narratives', icon: icons.narrative },
-      ]}] : []),
       { label: 'Operations', items: [
         { path: '/attendance-overview', label: 'Attendance', icon: icons.clock },
         { path: '/allowance-management', label: 'Allowance', icon: icons.php },
         { path: '/task-management', label: 'Tasks', icon: icons.tasks },
         { path: '/approvals', label: 'Approvals', icon: icons.approval },
         { path: '/reports', label: 'Reports', icon: icons.reports },
+      ]},
+      { label: 'People', items: [
+        { path: '/user-management', label: 'User Maintenance', icon: icons.users },
+        { path: '/intern-directory', label: 'Intern Directory', icon: icons.users },
+      ]},
+      ...(profile?.department_id ? [{ label: 'Team', items: [
+        { path: '/team-attendance', label: 'Team Attendance', icon: icons.clock },
+        { path: '/team-narratives', label: 'Team Narratives', icon: icons.narrative },
+      ]}] : []),
+      { label: 'Organization', items: [
+        { path: '/departments', label: 'Departments', icon: icons.building },
+        { path: '/locations', label: 'Locations', icon: icons.location },
       ]},
       { label: 'System', items: [
         { path: '/audit-logs', label: 'Audit Logs', icon: icons.audit },

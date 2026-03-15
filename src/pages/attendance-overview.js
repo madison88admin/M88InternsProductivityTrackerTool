@@ -9,8 +9,8 @@ import { icons } from '../lib/icons.js';
 import { formatDate, formatHoursDisplay, formatTime } from '../lib/utils.js';
 
 export async function renderAttendanceOverviewPage() {
-  const { data: locations } = await supabase
-    .from('locations')
+  const { data: departments } = await supabase
+    .from('departments')
     .select('id, name')
     .eq('is_active', true)
     .order('name');
@@ -20,13 +20,14 @@ export async function renderAttendanceOverviewPage() {
   const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
   let dateFrom = weekAgo.toISOString().slice(0, 10);
   let dateTo = now.toISOString().slice(0, 10);
-  let locationFilter = '';
+  let departmentFilter = '';
   let statusFilter = '';
+  let searchQuery = '';
 
   async function fetchData() {
     let query = supabase
       .from('attendance_records')
-      .select('*, intern:profiles!attendance_records_intern_id_fkey(full_name, location_id, email)')
+      .select('*, intern:profiles!attendance_records_intern_id_fkey(full_name, department_id, email)')
       .gte('date', dateFrom)
       .lte('date', dateTo)
       .order('date', { ascending: false })
@@ -37,8 +38,8 @@ export async function renderAttendanceOverviewPage() {
     const { data } = await query;
     let records = data || [];
 
-    if (locationFilter) {
-      records = records.filter(r => r.intern?.location_id === locationFilter);
+    if (departmentFilter) {
+      records = records.filter(r => r.intern?.department_id === departmentFilter);
     }
 
     return records;
@@ -62,7 +63,7 @@ export async function renderAttendanceOverviewPage() {
 
       <!-- Filters -->
       <div class="card mb-6">
-        <div class="grid grid-cols-1 md:grid-cols-5 gap-4">
+        <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
           <div>
             <label class="form-label">From</label>
             <input type="date" id="date-from" class="form-input" value="${dateFrom}" />
@@ -72,10 +73,10 @@ export async function renderAttendanceOverviewPage() {
             <input type="date" id="date-to" class="form-input" value="${dateTo}" />
           </div>
           <div>
-            <label class="form-label">Location</label>
-            <select id="filter-location" class="form-input">
+            <label class="form-label">Department</label>
+            <select id="filter-department" class="form-input">
               <option value="">All</option>
-              ${(locations || []).map(l => `<option value="${l.id}" ${locationFilter === l.id ? 'selected' : ''}>${l.name}</option>`).join('')}
+              ${(departments || []).map(d => `<option value="${d.id}" ${departmentFilter === d.id ? 'selected' : ''}>${d.name}</option>`).join('')}
             </select>
           </div>
           <div>
@@ -86,9 +87,6 @@ export async function renderAttendanceOverviewPage() {
               <option value="approved" ${statusFilter === 'approved' ? 'selected' : ''}>Approved</option>
               <option value="rejected" ${statusFilter === 'rejected' ? 'selected' : ''}>Rejected</option>
             </select>
-          </div>
-          <div class="flex items-end">
-            <button id="apply-btn" class="btn-primary w-full">Apply</button>
           </div>
         </div>
       </div>
@@ -119,12 +117,26 @@ export async function renderAttendanceOverviewPage() {
 
       <!-- Table -->
       <div class="card">
-        <div class="flex items-center justify-between mb-4">
-          <h3 class="font-semibold">${total} Records</h3>
-          <button id="export-btn" class="btn-sm btn-secondary">
-            ${icons.download}
-            <span class="ml-1">Export</span>
-          </button>
+        <div class="flex items-center justify-between mb-4 gap-3">
+          <div class="relative flex-1 max-w-xs">
+            <span class="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400 pointer-events-none">
+              ${icons.search}
+            </span>
+            <input
+              type="text"
+              id="search-intern"
+              class="form-input pl-10!"
+              placeholder="Search intern..."
+              value="${searchQuery}"
+            />
+          </div>
+          <div class="flex items-center gap-3">
+            <span id="record-count" class="text-sm text-neutral-500">${total} Records</span>
+            <button id="export-btn" class="btn-sm btn-secondary">
+              ${icons.download}
+              <span class="ml-1">Export</span>
+            </button>
+          </div>
         </div>
         <div class="overflow-x-auto">
           <table class="data-table">
@@ -141,35 +153,31 @@ export async function renderAttendanceOverviewPage() {
                 <th>Flags</th>
               </tr>
             </thead>
-            <tbody>
-              ${records.map(r => `
-                <tr>
-                  <td>${r.intern?.full_name || '—'}</td>
-                  <td>${formatDate(r.date)}</td>
-                  <td class="text-sm">${r.time_in_1 ? formatTime(r.time_in_1) : '—'}</td>
-                  <td class="text-sm">${r.time_out_1 ? formatTime(r.time_out_1) : '—'}</td>
-                  <td class="text-sm">${r.time_in_2 ? formatTime(r.time_in_2) : '—'}</td>
-                  <td class="text-sm">${r.time_out_2 ? formatTime(r.time_out_2) : '—'}</td>
-                  <td>${formatHoursDisplay(r.total_hours)}</td>
-                  <td><span class="badge-${r.status === 'approved' ? 'success' : r.status === 'rejected' ? 'danger' : 'pending'}">${r.status}</span></td>
-                  <td>
-                    ${r.is_late ? '<span class="badge-warning text-xs">Late</span>' : ''}
-                    ${r.is_outside_hours ? '<span class="badge-danger text-xs ml-1">Outside</span>' : ''}
-                  </td>
-                </tr>
-              `).join('')}
-              ${records.length === 0 ? '<tr><td colspan="9" class="text-center text-neutral-400 py-8">No records found</td></tr>' : ''}
+            <tbody id="records-tbody">
+              ${renderRows(records, searchQuery)}
             </tbody>
           </table>
         </div>
       </div>
     `, (el) => {
-      el.querySelector('#apply-btn').addEventListener('click', () => {
+      const applyFilters = () => {
         dateFrom = el.querySelector('#date-from').value;
         dateTo = el.querySelector('#date-to').value;
-        locationFilter = el.querySelector('#filter-location').value;
+        departmentFilter = el.querySelector('#filter-department').value;
         statusFilter = el.querySelector('#filter-status').value;
         render();
+      };
+
+      el.querySelector('#date-from').addEventListener('change', applyFilters);
+      el.querySelector('#date-to').addEventListener('change', applyFilters);
+      el.querySelector('#filter-department').addEventListener('change', applyFilters);
+      el.querySelector('#filter-status').addEventListener('change', applyFilters);
+
+      el.querySelector('#search-intern').addEventListener('input', (e) => {
+        searchQuery = e.target.value.trim();
+        const filtered = filterBySearch(records, searchQuery);
+        el.querySelector('#records-tbody').innerHTML = renderRows(records, searchQuery);
+        el.querySelector('#record-count').textContent = `${filtered.length} Records`;
       });
 
       el.querySelector('#export-btn').addEventListener('click', async () => {
@@ -200,4 +208,33 @@ export async function renderAttendanceOverviewPage() {
   }
 
   await render();
+}
+
+function filterBySearch(records, query) {
+  if (!query) return records;
+  const lower = query.toLowerCase();
+  return records.filter(r => (r.intern?.full_name || '').toLowerCase().includes(lower));
+}
+
+function renderRows(records, searchQuery) {
+  const filtered = filterBySearch(records, searchQuery);
+  if (filtered.length === 0) {
+    return '<tr><td colspan="9" class="text-center text-neutral-400 py-8">No records found</td></tr>';
+  }
+  return filtered.map(r => `
+    <tr>
+      <td>${r.intern?.full_name || '—'}</td>
+      <td>${formatDate(r.date)}</td>
+      <td class="text-sm">${r.time_in_1 ? formatTime(r.time_in_1) : '—'}</td>
+      <td class="text-sm">${r.time_out_1 ? formatTime(r.time_out_1) : '—'}</td>
+      <td class="text-sm">${r.time_in_2 ? formatTime(r.time_in_2) : '—'}</td>
+      <td class="text-sm">${r.time_out_2 ? formatTime(r.time_out_2) : '—'}</td>
+      <td>${formatHoursDisplay(r.total_hours)}</td>
+      <td><span class="badge-${r.status === 'approved' ? 'success' : r.status === 'rejected' ? 'danger' : 'pending'}">${r.status}</span></td>
+      <td>
+        ${r.is_late ? '<span class="badge-warning text-xs">Late</span>' : ''}
+        ${r.is_outside_hours ? '<span class="badge-danger text-xs ml-1">Outside</span>' : ''}
+      </td>
+    </tr>
+  `).join('');
 }

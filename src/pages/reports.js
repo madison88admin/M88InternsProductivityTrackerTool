@@ -308,7 +308,7 @@ async function populateDarWeeks(el) {
 
 // ─── DAR: Fetch all data for one intern's weekly report ─────────────────────
 
-async function fetchDarData(internId, mondayDate, fridayDate) {
+export async function fetchDarData(internId, mondayDate, fridayDate) {
   const [
     { data: intern },
     { data: attendance },
@@ -402,7 +402,7 @@ function calcSessionHours(timeIn, timeOut) {
 
 // ─── DAR: PDF generation ────────────────────────────────────────────────────
 
-async function generateDarPdf(darData, weekNum, mondayDate, existingDoc) {
+export async function generateDarPdf(darData, weekNum, mondayDate, existingDoc) {
   const { default: jsPDF } = await import('jspdf');
   const { default: autoTable } = await import('jspdf-autotable');
 
