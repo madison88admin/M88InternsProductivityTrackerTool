@@ -40,6 +40,9 @@ export async function renderSystemSettingsPage() {
     ? (retentionRaw.months ?? 36)
     : (retentionRaw ?? 36);
 
+  const internTaskSubmission = settingsMap.intern_task_submission?.value || {};
+  const taskSubmissionEnabled = internTaskSubmission.enabled === true;
+
   renderLayout(`
     <div class="page-header animate-fade-in-up">
       <h1 class="page-title">System Settings</h1>
@@ -98,6 +101,18 @@ export async function renderSystemSettingsPage() {
         </div>
       </div>
 
+      <!-- Task Submission -->
+      <div class="card">
+        <h3 class="text-base font-bold text-neutral-900 mb-4 flex items-center gap-2">${icons.tasks} Task Submission</h3>
+        <label class="flex items-center gap-3 cursor-pointer">
+          <input type="checkbox" id="intern-task-submission" ${taskSubmissionEnabled ? 'checked' : ''} />
+          <div>
+            <p class="text-sm font-medium text-neutral-800">Allow interns to submit their own tasks</p>
+            <p class="text-xs text-neutral-400 mt-0.5">Interns can submit tasks they completed for supervisor review and approval. Approved tasks become active and can be used in narratives.</p>
+          </div>
+        </label>
+      </div>
+
       <div class="flex justify-end">
         <button type="submit" class="btn-primary">
           ${icons.check}
@@ -134,6 +149,10 @@ export async function renderSystemSettingsPage() {
           {
             key: 'data_retention_months',
             value: { months: parseInt(el.querySelector('#retention-months').value) || retentionMonths },
+          },
+          {
+            key: 'intern_task_submission',
+            value: { enabled: el.querySelector('#intern-task-submission').checked },
           },
         ];
 

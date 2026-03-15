@@ -39,7 +39,7 @@ export async function renderNarrativesPage() {
     .select('*')
     .eq('intern_id', profile.id)
     .eq('date', today)
-    .single();
+    .maybeSingle();
 
   // Fetch recent narratives (past)
   const { data: recentNarratives } = await supabase
@@ -307,7 +307,7 @@ async function fetchAttendanceForDate(internId, date) {
     .select('*')
     .eq('intern_id', internId)
     .eq('date', date)
-    .single();
+    .maybeSingle();
   return data;
 }
 

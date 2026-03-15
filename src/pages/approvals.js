@@ -108,6 +108,10 @@ export async function renderApprovalsPage() {
       btn.addEventListener('click', () => viewApprovalDetails(btn.dataset.approvalId, approvals));
     });
 
+    el.querySelectorAll('.review-task-btn').forEach(btn => {
+      btn.addEventListener('click', () => openTaskSubmissionReviewModal(btn.dataset.approvalId, approvals));
+    });
+
     // Bulk approve
     el.querySelector('#bulk-approve-btn')?.addEventListener('click', async () => {
       const today = new Date().toISOString().slice(0, 10);
@@ -152,7 +156,11 @@ function renderApprovalCard(approval, isAdmin = false) {
           <button class="btn-sm btn-secondary view-details-btn" data-approval-id="${approval.id}" title="View Details">
             ${icons.eye}
           </button>
-          ${canActOnCorrection ? `
+          ${approval.type === 'task_submission' ? `
+            <button class="btn-sm btn-primary review-task-btn" data-approval-id="${approval.id}" title="Review & Edit Task">
+              ${icons.edit} <span class="ml-1">Review</span>
+            </button>
+          ` : canActOnCorrection ? `
             <button class="btn-sm btn-success approve-btn" data-approval-id="${approval.id}" title="Approve">
               ${icons.check}
             </button>
@@ -272,6 +280,22 @@ async function processApproval(approvalId, status, comments, approval) {
 
       if (error) throw new Error(error.message);
     }
+  } else if (approval.type === 'task_submission') {
+    if (status === 'approved') {
+      const { error } = await supabase
+        .from('tasks')
+        .update({ status: 'in_progress', submission_status: 'approved' })
+        .eq('id', approval.entity_id);
+
+      if (error) throw new Error(error.message);
+    } else {
+      const { error } = await supabase
+        .from('tasks')
+        .update({ submission_status: 'rejected' })
+        .eq('id', approval.entity_id);
+
+      if (error) throw new Error(error.message);
+    }
   } else if (approval.type === 'attendance_correction') {
     if (status === 'approved') {
       const { data: correction } = await supabase
@@ -330,6 +354,96 @@ async function processApproval(approvalId, status, comments, approval) {
     type: approval.type,
     entity_id: approval.entity_id,
     comments,
+  });
+}
+
+async function openTaskSubmissionReviewModal(approvalId, approvals) {
+  const approval = approvals.find(a => a.id === approvalId);
+  if (!approval) return;
+
+  const { data: task } = await supabase
+    .from('tasks')
+    .select('*')
+    .eq('id', approval.entity_id)
+    .single();
+
+  if (!task) {
+    showToast('Task not found', 'error');
+    return;
+  }
+
+  createModal('Review Submitted Task', `
+    <form id="review-task-form" class="space-y-4">
+      <p class="text-sm text-neutral-500">Review and optionally edit the task details before approving.</p>
+      <div>
+        <label class="form-label">Task Title <span class="text-danger-500">*</span></label>
+        <input type="text" id="review-task-title" class="form-input" value="${task.title}" required />
+      </div>
+      <div>
+        <label class="form-label">Description</label>
+        <textarea id="review-task-description" class="form-input" rows="3">${task.description || ''}</textarea>
+      </div>
+      <div class="grid grid-cols-2 gap-4">
+        <div>
+          <label class="form-label">Estimated Hours</label>
+          <input type="number" id="review-task-hours" class="form-input" min="0" step="0.5" value="${task.estimated_hours || ''}" placeholder="Optional" />
+        </div>
+        <div>
+          <label class="form-label">Due Date</label>
+          <input type="date" id="review-task-due" class="form-input" value="${task.due_date || ''}" />
+        </div>
+      </div>
+      <div class="flex justify-end gap-3 pt-2 border-t border-neutral-200">
+        <button type="button" id="review-task-cancel" class="btn-secondary">Cancel</button>
+        <button type="button" id="review-task-reject" class="btn-danger">Reject</button>
+        <button type="submit" class="btn-success">Approve & Set In Progress</button>
+      </div>
+    </form>
+  `, (el, close) => {
+    el.querySelector('#review-task-cancel').addEventListener('click', close);
+
+    el.querySelector('#review-task-reject').addEventListener('click', () => {
+      close();
+      openRejectModal(approvalId, approvals);
+    });
+
+    el.querySelector('#review-task-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const title = el.querySelector('#review-task-title').value.trim();
+      if (!title) {
+        showToast('Task title is required', 'error');
+        return;
+      }
+
+      const description = el.querySelector('#review-task-description').value.trim();
+      const estimatedHours = parseFloat(el.querySelector('#review-task-hours').value) || null;
+      const dueDate = el.querySelector('#review-task-due').value || null;
+
+      const submitBtn = el.querySelector('button[type="submit"]');
+      submitBtn.disabled = true;
+
+      try {
+        const { error: updateError } = await supabase
+          .from('tasks')
+          .update({
+            title,
+            description: description || null,
+            estimated_hours: estimatedHours,
+            due_date: dueDate,
+          })
+          .eq('id', task.id);
+
+        if (updateError) throw new Error(updateError.message);
+
+        await processApproval(approvalId, 'approved', null, approval);
+        showToast('Task approved and set to in progress', 'success');
+        close();
+        renderApprovalsPage();
+      } catch (err) {
+        showToast(err.message || 'Failed to approve task', 'error');
+        submitBtn.disabled = false;
+      }
+    });
   });
 }
 
@@ -447,6 +561,46 @@ async function viewApprovalDetails(approvalId, approvals) {
               <p class="text-xs text-neutral-500">Requested Status</p>
               <p class="font-medium capitalize">${task.pending_status?.replace('_', ' ') || '—'}</p>
             </div>
+          </div>
+        </div>
+      `;
+    }
+  } else if (approval.type === 'task_submission') {
+    const { data: task } = await supabase
+      .from('tasks')
+      .select('*')
+      .eq('id', approval.entity_id)
+      .single();
+
+    if (task) {
+      detailHtml = `
+        <div class="space-y-3">
+          <div class="p-3 bg-neutral-50 rounded-lg">
+            <p class="text-xs text-neutral-500">Task Title</p>
+            <p class="font-medium">${task.title}</p>
+          </div>
+          ${task.description ? `
+            <div class="p-3 bg-neutral-50 rounded-lg">
+              <p class="text-xs text-neutral-500">Description</p>
+              <p class="text-sm text-neutral-800">${task.description}</p>
+            </div>
+          ` : ''}
+          <div class="grid grid-cols-2 gap-3">
+            ${task.estimated_hours ? `
+              <div class="p-3 bg-neutral-50 rounded-lg">
+                <p class="text-xs text-neutral-500">Estimated Hours</p>
+                <p class="font-medium">${task.estimated_hours}h</p>
+              </div>
+            ` : ''}
+            ${task.due_date ? `
+              <div class="p-3 bg-neutral-50 rounded-lg">
+                <p class="text-xs text-neutral-500">Due Date</p>
+                <p class="font-medium">${formatDate(task.due_date)}</p>
+              </div>
+            ` : ''}
+          </div>
+          <div class="p-3 bg-warning-50 rounded-lg border border-warning-200">
+            <p class="text-xs text-warning-600">Submitted by intern — pending review</p>
           </div>
         </div>
       `;

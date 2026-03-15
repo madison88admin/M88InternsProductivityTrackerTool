@@ -101,7 +101,7 @@ export function renderLayout(contentHtml, init, guardPath) {
       <div class="px-5 py-5 flex items-center gap-3" style="border-bottom: 1px solid var(--color-neutral-100);">
         <img src="/favicon.png" alt="Logo" class="w-15 h-15 object-contain shrink-0" />
         <div class="min-w-0">
-          <p class="text-sm font-bold text-neutral-900 truncate">Intern Productivity <br> Tracker</p>
+          <p class="text-sm font-bold text-neutral-900 truncate">Interns Productivity <br> Tracker</p>
           <p class="text-xs text-neutral-400">Madison 88</p>
         </div>
       </div>

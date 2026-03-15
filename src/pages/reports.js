@@ -61,10 +61,13 @@ export async function renderReportsPage() {
       <!-- DAR-specific controls -->
       <div id="dar-controls" class="mt-4 grid grid-cols-1 md:grid-cols-3 gap-4" style="display:none;">
         <div>
-          <label class="form-label">Intern(s)</label>
-          <select id="dar-intern" class="form-input" multiple size="5">
-          </select>
-          <p class="text-xs text-neutral-400 mt-1">Hold Ctrl/Cmd to select multiple</p>
+          <div class="flex items-center justify-between mb-1">
+            <label class="form-label mb-0">Intern(s)</label>
+            <button type="button" id="dar-select-all" class="text-xs text-primary-600 hover:text-primary-800 font-medium">Select All</button>
+          </div>
+          <div id="dar-intern-list" class="border border-neutral-200 rounded-lg overflow-y-auto bg-white divide-y divide-neutral-100" style="max-height:170px; min-height:56px;">
+            <p class="text-xs text-neutral-400 p-3">Loading interns...</p>
+          </div>
         </div>
         <div>
           <label class="form-label">Week</label>
@@ -192,19 +195,41 @@ async function populateDarInterns(el) {
     .eq('is_active', true)
     .order('full_name');
 
-  const select = el.querySelector('#dar-intern');
-  select.innerHTML = (interns || []).map(i =>
-    `<option value="${i.id}">${i.full_name}</option>`
-  ).join('');
+  const list = el.querySelector('#dar-intern-list');
+  const internList = interns || [];
 
-  // Store interns data for later use
-  select._internsData = interns || [];
+  list.innerHTML = internList.length > 0
+    ? internList.map(i => `
+        <label class="flex items-center gap-2 px-3 py-2 hover:bg-neutral-50 cursor-pointer">
+          <input type="checkbox" class="dar-intern-check" value="${i.id}" />
+          <span class="text-sm text-neutral-800">${i.full_name}</span>
+        </label>
+      `).join('')
+    : '<p class="text-xs text-neutral-400 p-3">No active interns found</p>';
 
-  // Remove existing listener if any, then add new one
-  const handler = () => populateDarWeeks(el);
-  select.removeEventListener('change', select._weekHandler);
-  select._weekHandler = handler;
-  select.addEventListener('change', handler);
+  // Store interns data on the container for use in week population
+  list._internsData = internList;
+
+  // Select All / Deselect All toggle
+  const selectAllBtn = el.querySelector('#dar-select-all');
+  selectAllBtn.textContent = 'Select All';
+  selectAllBtn.onclick = () => {
+    const checkboxes = list.querySelectorAll('.dar-intern-check');
+    const allChecked = Array.from(checkboxes).every(cb => cb.checked);
+    checkboxes.forEach(cb => { cb.checked = !allChecked; });
+    selectAllBtn.textContent = allChecked ? 'Select All' : 'Deselect All';
+    populateDarWeeks(el);
+  };
+
+  // Wire change events on each checkbox
+  list.addEventListener('change', (e) => {
+    if (e.target.classList.contains('dar-intern-check')) {
+      const checkboxes = list.querySelectorAll('.dar-intern-check');
+      const allChecked = Array.from(checkboxes).every(cb => cb.checked);
+      selectAllBtn.textContent = allChecked ? 'Deselect All' : 'Select All';
+      populateDarWeeks(el);
+    }
+  });
 }
 
 // ─── DAR: Local date string helper (avoids UTC shift from toISOString) ──────
@@ -226,8 +251,8 @@ function formatDateMMDDYYYY(dateStr) {
 // ─── DAR: Auto-detect weeks from attendance records ─────────────────────────
 
 async function populateDarWeeks(el) {
-  const internSelect = el.querySelector('#dar-intern');
-  const selectedIds = Array.from(internSelect.selectedOptions).map(o => o.value);
+  const list = el.querySelector('#dar-intern-list');
+  const selectedIds = Array.from(list.querySelectorAll('.dar-intern-check:checked')).map(cb => cb.value);
 
   if (selectedIds.length === 0) {
     el.querySelector('#dar-week').innerHTML = '<option value="">Select an intern first</option>';
@@ -235,7 +260,7 @@ async function populateDarWeeks(el) {
   }
 
   const firstInternId = selectedIds[0];
-  const intern = internSelect._internsData.find(i => i.id === firstInternId);
+  const intern = (list._internsData || []).find(i => i.id === firstInternId);
 
   const { data: records } = await supabase
     .from('attendance_records')
@@ -599,11 +624,11 @@ async function generateDarPdf(darData, weekNum, mondayDate, existingDoc) {
 // ─── DAR: Generation handler ────────────────────────────────────────────────
 
 async function handleDarGeneration(el) {
-  const internSelect = el.querySelector('#dar-intern');
+  const list = el.querySelector('#dar-intern-list');
   const weekSelect = el.querySelector('#dar-week');
   const bulkMode = el.querySelector('#dar-bulk-mode').value;
 
-  const selectedInternIds = Array.from(internSelect.selectedOptions).map(o => o.value);
+  const selectedInternIds = Array.from(list.querySelectorAll('.dar-intern-check:checked')).map(cb => cb.value);
   const weekValue = weekSelect.value;
 
   if (selectedInternIds.length === 0) {

@@ -6,7 +6,7 @@ import { getProfile } from '../lib/auth.js';
 import { renderLayout } from '../components/layout.js';
 import { supabase } from '../lib/supabase.js';
 import { icons } from '../lib/icons.js';
-import { formatDate, formatHoursDisplay, getMonday, getFriday } from '../lib/utils.js';
+import { formatDate, formatTime, formatHoursDisplay, getMonday, getFriday } from '../lib/utils.js';
 
 export async function renderTeamAttendancePage() {
   const profile = getProfile();
@@ -67,10 +67,10 @@ export async function renderTeamAttendancePage() {
       <tr>
         <td>${a.intern?.full_name || '—'}</td>
         <td>${formatDate(a.date)}</td>
-        <td class="text-sm">${a.morning_in || '—'}</td>
-        <td class="text-sm">${a.morning_out || '—'}</td>
-        <td class="text-sm">${a.afternoon_in || '—'}</td>
-        <td class="text-sm">${a.afternoon_out || '—'}</td>
+        <td class="text-sm">${a.time_in_1 ? formatTime(a.time_in_1) : '—'}</td>
+        <td class="text-sm">${a.time_out_1 ? formatTime(a.time_out_1) : '—'}</td>
+        <td class="text-sm">${a.time_in_2 ? formatTime(a.time_in_2) : '—'}</td>
+        <td class="text-sm">${a.time_out_2 ? formatTime(a.time_out_2) : '—'}</td>
         <td>${formatHoursDisplay(a.total_hours)}</td>
         <td>
           <span class="badge-${a.status === 'approved' ? 'success' : a.status === 'rejected' ? 'danger' : 'pending'}">${a.status}</span>

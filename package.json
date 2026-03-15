@@ -19,6 +19,7 @@
     "jspdf": "^4.2.0",
     "jspdf-autotable": "^5.0.7",
     "jszip": "^3.10.1",
+    "node": "^25.8.1",
     "quill": "^2.0.3",
     "tailwindcss": "^4.2.1",
     "vite": "^7.3.1",
