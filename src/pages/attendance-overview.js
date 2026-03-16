@@ -7,6 +7,8 @@ import { supabase } from '../lib/supabase.js';
 import { showToast } from '../lib/toast.js';
 import { icons } from '../lib/icons.js';
 import { formatDate, formatHoursDisplay, formatTime } from '../lib/utils.js';
+import { createModal } from '../lib/component.js';
+import { logAudit } from '../lib/audit.js';
 
 export async function renderAttendanceOverviewPage() {
   const { data: departments } = await supabase
@@ -15,11 +17,10 @@ export async function renderAttendanceOverviewPage() {
     .eq('is_active', true)
     .order('name');
 
-  // Default: last 7 days
-  const now = new Date();
-  const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-  let dateFrom = weekAgo.toISOString().slice(0, 10);
-  let dateTo = now.toISOString().slice(0, 10);
+  // Default: current Mon–Fri week
+  const weekRanges = getWeekRanges(16);
+  let dateFrom = weekRanges[0].from;
+  let dateTo = weekRanges[0].to;
   let departmentFilter = '';
   let statusFilter = '';
   let searchQuery = '';
@@ -28,10 +29,11 @@ export async function renderAttendanceOverviewPage() {
     let query = supabase
       .from('attendance_records')
       .select('*, intern:profiles!attendance_records_intern_id_fkey(full_name, department_id, email)')
-      .gte('date', dateFrom)
-      .lte('date', dateTo)
       .order('date', { ascending: false })
       .limit(500);
+
+    if (dateFrom) query = query.gte('date', dateFrom);
+    if (dateTo) query = query.lte('date', dateTo);
 
     if (statusFilter) query = query.eq('status', statusFilter);
 
@@ -63,14 +65,13 @@ export async function renderAttendanceOverviewPage() {
 
       <!-- Filters -->
       <div class="card mb-6">
-        <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div>
-            <label class="form-label">From</label>
-            <input type="date" id="date-from" class="form-input" value="${dateFrom}" />
-          </div>
-          <div>
-            <label class="form-label">To</label>
-            <input type="date" id="date-to" class="form-input" value="${dateTo}" />
+            <label class="form-label">Week</label>
+            <select id="week-range" class="form-input">
+              <option value="all">All weeks</option>
+              ${weekRanges.map(w => `<option value="${w.from}|${w.to}" ${dateFrom === w.from ? 'selected' : ''}>${w.label}</option>`).join('')}
+            </select>
           </div>
           <div>
             <label class="form-label">Department</label>
@@ -151,6 +152,7 @@ export async function renderAttendanceOverviewPage() {
                 <th>Hours</th>
                 <th>Status</th>
                 <th>Flags</th>
+                <th></th>
               </tr>
             </thead>
             <tbody id="records-tbody">
@@ -161,23 +163,40 @@ export async function renderAttendanceOverviewPage() {
       </div>
     `, (el) => {
       const applyFilters = () => {
-        dateFrom = el.querySelector('#date-from').value;
-        dateTo = el.querySelector('#date-to').value;
+        const val = el.querySelector('#week-range').value;
+        if (val === 'all') {
+          dateFrom = null;
+          dateTo = null;
+        } else {
+          const [from, to] = val.split('|');
+          dateFrom = from;
+          dateTo = to;
+        }
         departmentFilter = el.querySelector('#filter-department').value;
         statusFilter = el.querySelector('#filter-status').value;
         render();
       };
 
-      el.querySelector('#date-from').addEventListener('change', applyFilters);
-      el.querySelector('#date-to').addEventListener('change', applyFilters);
+      el.querySelector('#week-range').addEventListener('change', applyFilters);
       el.querySelector('#filter-department').addEventListener('change', applyFilters);
       el.querySelector('#filter-status').addEventListener('change', applyFilters);
+
+      function bindEditButtons(container) {
+        container.querySelectorAll('.edit-attendance-btn').forEach(btn => {
+          btn.addEventListener('click', () => {
+            const id = btn.dataset.id;
+            const record = records.find(r => r.id === id);
+            if (record) openEditAttendanceModal(record, render);
+          });
+        });
+      }
 
       el.querySelector('#search-intern').addEventListener('input', (e) => {
         searchQuery = e.target.value.trim();
         const filtered = filterBySearch(records, searchQuery);
         el.querySelector('#records-tbody').innerHTML = renderRows(records, searchQuery);
         el.querySelector('#record-count').textContent = `${filtered.length} Records`;
+        bindEditButtons(el.querySelector('#records-tbody'));
       });
 
       el.querySelector('#export-btn').addEventListener('click', async () => {
@@ -198,12 +217,15 @@ export async function renderAttendanceOverviewPage() {
           const ws = XLSX.utils.json_to_sheet(rows);
           const wb = XLSX.utils.book_new();
           XLSX.utils.book_append_sheet(wb, ws, 'Attendance');
-          XLSX.writeFile(wb, `attendance_overview_${dateFrom}_${dateTo}.xlsx`);
+          const fileLabel = dateFrom ? `${dateFrom}_${dateTo}` : 'all';
+          XLSX.writeFile(wb, `attendance_overview_${fileLabel}.xlsx`);
           showToast('Exported successfully', 'success');
         } catch (err) {
           showToast('Export failed', 'error');
         }
       });
+
+      bindEditButtons(el);
     }, '/attendance-overview');
   }
 
@@ -219,7 +241,7 @@ function filterBySearch(records, query) {
 function renderRows(records, searchQuery) {
   const filtered = filterBySearch(records, searchQuery);
   if (filtered.length === 0) {
-    return '<tr><td colspan="9" class="text-center text-neutral-400 py-8">No records found</td></tr>';
+    return '<tr><td colspan="10" class="text-center text-neutral-400 py-8">No records found</td></tr>';
   }
   return filtered.map(r => `
     <tr>
@@ -235,6 +257,138 @@ function renderRows(records, searchQuery) {
         ${r.is_late ? '<span class="badge-warning text-xs">Late</span>' : ''}
         ${r.is_outside_hours ? '<span class="badge-danger text-xs ml-1">Outside</span>' : ''}
       </td>
+      <td>
+        <button class="btn-sm btn-secondary edit-attendance-btn" data-id="${r.id}" title="Edit attendance">
+          ${icons.edit}
+        </button>
+      </td>
     </tr>
   `).join('');
+}
+
+function getWeekRanges(count = 16) {
+  const today = new Date();
+  const day = today.getDay();
+  const diff = day === 0 ? -6 : 1 - day;
+  const monday = new Date(today);
+  monday.setDate(today.getDate() + diff);
+  monday.setHours(0, 0, 0, 0);
+
+  const fmt = d => d.toISOString().slice(0, 10);
+  const label = (mon, fri) => {
+    const opts = { month: 'short', day: 'numeric' };
+    return `${mon.toLocaleDateString('en-US', opts)} – ${fri.toLocaleDateString('en-US', { ...opts, year: 'numeric' })}`;
+  };
+
+  return Array.from({ length: count }, (_, i) => {
+    const mon = new Date(monday);
+    mon.setDate(monday.getDate() - i * 7);
+    const fri = new Date(mon);
+    fri.setDate(mon.getDate() + 4);
+    return { from: fmt(mon), to: fmt(fri), label: label(mon, fri) };
+  });
+}
+
+function toTimeInput(ts) {
+  if (!ts) return '';
+  const d = new Date(ts);
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
+
+function openEditAttendanceModal(record, onSaved) {
+  const internName = record.intern?.full_name || 'Unknown';
+
+  createModal(`Edit Attendance — ${internName}`, `
+    <form id="edit-attendance-form" class="space-y-4">
+      <div class="p-3 bg-neutral-50 rounded-lg text-sm text-neutral-600">
+        <strong>Date:</strong> ${formatDate(record.date)} &nbsp;|&nbsp;
+        <strong>Status:</strong> ${record.status}
+      </div>
+      <p class="text-xs text-neutral-500">Leave a field blank to clear that punch. Hours, late flag, and outside-hours flag are recalculated automatically on save.</p>
+      <div class="grid grid-cols-2 gap-4">
+        <div>
+          <label class="form-label">AM Time In</label>
+          <input type="time" id="edit-time-in-1" class="form-input" value="${toTimeInput(record.time_in_1)}">
+        </div>
+        <div>
+          <label class="form-label">AM Time Out</label>
+          <input type="time" id="edit-time-out-1" class="form-input" value="${toTimeInput(record.time_out_1)}">
+        </div>
+        <div>
+          <label class="form-label">PM Time In</label>
+          <input type="time" id="edit-time-in-2" class="form-input" value="${toTimeInput(record.time_in_2)}">
+        </div>
+        <div>
+          <label class="form-label">PM Time Out</label>
+          <input type="time" id="edit-time-out-2" class="form-input" value="${toTimeInput(record.time_out_2)}">
+        </div>
+      </div>
+      <div class="flex justify-end gap-3 pt-2">
+        <button type="button" id="edit-att-cancel" class="btn-secondary">Cancel</button>
+        <button type="submit" id="edit-att-submit" class="btn-primary">Save Changes</button>
+      </div>
+    </form>
+  `, async (el, close) => {
+    el.querySelector('#edit-att-cancel').addEventListener('click', close);
+
+    el.querySelector('#edit-attendance-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+
+      const timeIn1  = el.querySelector('#edit-time-in-1').value;
+      const timeOut1 = el.querySelector('#edit-time-out-1').value;
+      const timeIn2  = el.querySelector('#edit-time-in-2').value;
+      const timeOut2 = el.querySelector('#edit-time-out-2').value;
+
+      // Basic sequence validation
+      if (timeOut1 && !timeIn1) {
+        showToast('AM Time In is required when AM Time Out is set', 'error'); return;
+      }
+      if (timeIn2 && !timeOut1) {
+        showToast('AM Time Out is required before PM Time In', 'error'); return;
+      }
+      if (timeOut2 && !timeIn2) {
+        showToast('PM Time In is required when PM Time Out is set', 'error'); return;
+      }
+
+      const toTs = (t) => t ? new Date(`${record.date}T${t}:00`).toISOString() : null;
+
+      const updates = {
+        time_in_1:  toTs(timeIn1),
+        time_out_1: toTs(timeOut1),
+        time_in_2:  toTs(timeIn2),
+        time_out_2: toTs(timeOut2),
+      };
+
+      const submitBtn = el.querySelector('#edit-att-submit');
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'Saving...';
+
+      try {
+        const { error } = await supabase
+          .from('attendance_records')
+          .update(updates)
+          .eq('id', record.id);
+
+        if (error) throw error;
+
+        await logAudit('attendance.admin_edited', 'attendance_record', record.id, {
+          intern: internName,
+          date: record.date,
+          previous: {
+            time_in_1: record.time_in_1, time_out_1: record.time_out_1,
+            time_in_2: record.time_in_2, time_out_2: record.time_out_2,
+          },
+          updated: updates,
+        });
+
+        showToast('Attendance updated successfully', 'success');
+        close();
+        onSaved();
+      } catch (err) {
+        showToast(err.message || 'Failed to update attendance', 'error');
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Save Changes';
+      }
+    });
+  });
 }

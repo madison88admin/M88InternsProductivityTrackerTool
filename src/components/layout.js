@@ -52,6 +52,7 @@ function getNavSections(role, profile) {
         { path: '/allowance-management', label: 'Allowance', icon: icons.php },
         { path: '/task-management', label: 'Tasks', icon: icons.tasks },
         { path: '/approvals', label: 'Approvals', icon: icons.approval },
+        { path: '/holiday-calendar', label: 'Holiday Calendar', icon: icons.calendar },
         { path: '/reports', label: 'Reports', icon: icons.reports },
       ]},
       { label: 'People', items: [

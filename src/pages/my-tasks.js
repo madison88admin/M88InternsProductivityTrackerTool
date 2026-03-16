@@ -8,11 +8,13 @@ import { supabase } from '../lib/supabase.js';
 import { showToast } from '../lib/toast.js';
 import { logAudit } from '../lib/audit.js';
 import { icons } from '../lib/icons.js';
-import { formatDate } from '../lib/utils.js';
+import { formatDate, getTodayDate } from '../lib/utils.js';
 import { createModal } from '../lib/component.js';
+import { isHoliday } from '../lib/holidays.js';
 
 export async function renderMyTasksPage() {
   const profile = getProfile();
+  const holidayInfo = await isHoliday(getTodayDate());
 
   const { data: tasks } = await supabase
     .from('tasks')
@@ -30,19 +32,26 @@ export async function renderMyTasksPage() {
   const allTasks = tasks || [];
   const pendingReviewTasks = allTasks.filter(t => t.is_self_submitted && t.submission_status === 'pending');
 
+  const today = getTodayDate();
   const statusGroups = {
     not_started: allTasks.filter(t => t.status === 'not_started' && t.submission_status !== 'pending'),
     in_progress: allTasks.filter(t => t.status === 'in_progress'),
     completed: allTasks.filter(t => t.status === 'completed'),
   };
+  const overdueCount = allTasks.filter(t =>
+    t.due_date && t.due_date < today && t.status !== 'completed' && t.submission_status !== 'pending'
+  ).length;
 
   renderLayout(`
+    <!-- Page header -->
     <div class="page-header animate-fade-in-up">
-      <div>
-        <h1 class="page-title">My Tasks</h1>
-        <p class="page-subtitle">View and manage your assigned tasks</p>
+      <div class="flex items-start justify-between gap-4 flex-wrap">
+        <div>
+          <h1 class="page-title">My Tasks</h1>
+          <p class="page-subtitle">View and manage your assigned tasks</p>
+        </div>
         ${taskSubmissionEnabled && profile.supervisor_id ? `
-          <button id="submit-task-btn" class="btn-primary mt-3">
+          <button id="submit-task-btn" class="btn-primary shrink-0">
             ${icons.tasks}
             <span class="ml-2">Submit Task</span>
           </button>
@@ -50,44 +59,102 @@ export async function renderMyTasksPage() {
       </div>
     </div>
 
+    ${holidayInfo.isHoliday ? `
+      <div class="bg-danger-50 border border-danger-300 rounded-xl p-4 mb-6 flex items-center gap-3 animate-fade-in-up">
+        <div class="shrink-0 text-danger-500">${icons.calendar}</div>
+        <div>
+          <p class="text-sm font-bold text-danger-700">Holiday: ${holidayInfo.name}</p>
+          <p class="text-xs text-danger-600">Today is a holiday. Starting or completing tasks is disabled.</p>
+        </div>
+      </div>
+    ` : ''}
+
+    <!-- Summary strip -->
+    ${allTasks.length > 0 ? `
+      <div class="flex flex-wrap gap-3 mb-6 animate-fade-in-up" style="animation-delay: 50ms;">
+        <div class="flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium" style="background: var(--color-neutral-100); color: var(--color-neutral-700);">
+          <span class="font-bold text-neutral-900">${allTasks.length}</span> Total
+        </div>
+        ${statusGroups.in_progress.length > 0 ? `
+          <div class="flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium bg-warning-50 text-warning-700">
+            <span class="w-2 h-2 rounded-full bg-warning-500 shrink-0"></span>
+            <span class="font-bold">${statusGroups.in_progress.length}</span> In Progress
+          </div>
+        ` : ''}
+        ${statusGroups.completed.length > 0 ? `
+          <div class="flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium bg-success-50 text-success-700">
+            <span class="w-2 h-2 rounded-full bg-success-500 shrink-0"></span>
+            <span class="font-bold">${statusGroups.completed.length}</span> Completed
+          </div>
+        ` : ''}
+        ${overdueCount > 0 ? `
+          <div class="flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium bg-danger-50 text-danger-700">
+            <span class="w-2 h-2 rounded-full bg-danger-500 shrink-0"></span>
+            <span class="font-bold">${overdueCount}</span> Overdue
+          </div>
+        ` : ''}
+      </div>
+    ` : ''}
+
     <!-- Status Tabs -->
-    <div class="filter-tabs mb-6">
-      <button class="filter-tab active task-tab" data-status="all">
-        All (${allTasks.length})
-      </button>
-      ${pendingReviewTasks.length > 0 ? `
-        <button class="filter-tab task-tab" data-status="pending_review">
-          Pending Review (${pendingReviewTasks.length})
+    <div class="flex items-center gap-3 mb-6 animate-fade-in-up" style="animation-delay: 100ms;">
+      <div class="flex flex-wrap gap-1 p-1 rounded-xl" style="background: var(--color-neutral-100);">
+        <button class="task-tab px-4 py-1.5 rounded-lg text-sm font-semibold transition-all bg-white shadow-sm text-neutral-800" data-status="all">
+          All
+          <span class="ml-1.5 text-xs font-bold text-neutral-400">${allTasks.length}</span>
         </button>
-      ` : ''}
-      <button class="filter-tab task-tab" data-status="not_started">
-        Not Started (${statusGroups.not_started.length})
-      </button>
-      <button class="filter-tab task-tab" data-status="in_progress">
-        In Progress (${statusGroups.in_progress.length})
-      </button>
-      <button class="filter-tab task-tab" data-status="completed">
-        Completed (${statusGroups.completed.length})
-      </button>
+        ${pendingReviewTasks.length > 0 ? `
+          <button class="task-tab px-4 py-1.5 rounded-lg text-sm font-semibold transition-all text-neutral-500" data-status="pending_review">
+            Pending Review
+            <span class="ml-1.5 inline-block px-1.5 py-0.5 rounded-full text-xs font-bold text-white bg-warning-500">${pendingReviewTasks.length}</span>
+          </button>
+        ` : ''}
+        <button class="task-tab px-4 py-1.5 rounded-lg text-sm font-semibold transition-all text-neutral-500" data-status="not_started">
+          <span class="inline-flex items-center gap-1.5">
+            <span class="w-2 h-2 rounded-full bg-neutral-400 shrink-0"></span>
+            Not Started
+            <span class="text-xs font-bold text-neutral-400">${statusGroups.not_started.length}</span>
+          </span>
+        </button>
+        <button class="task-tab px-4 py-1.5 rounded-lg text-sm font-semibold transition-all text-neutral-500" data-status="in_progress">
+          <span class="inline-flex items-center gap-1.5">
+            <span class="w-2 h-2 rounded-full bg-warning-400 shrink-0"></span>
+            In Progress
+            <span class="text-xs font-bold text-neutral-400">${statusGroups.in_progress.length}</span>
+          </span>
+        </button>
+        <button class="task-tab px-4 py-1.5 rounded-lg text-sm font-semibold transition-all text-neutral-500" data-status="completed">
+          <span class="inline-flex items-center gap-1.5">
+            <span class="w-2 h-2 rounded-full bg-success-400 shrink-0"></span>
+            Completed
+            <span class="text-xs font-bold text-neutral-400">${statusGroups.completed.length}</span>
+          </span>
+        </button>
+      </div>
     </div>
 
     <!-- Task List -->
-    <div id="task-list" class="space-y-4">
-      ${allTasks.map(task => renderTaskCard(task)).join('')}
+    <div id="task-list" class="space-y-3 animate-fade-in-up" style="animation-delay: 150ms;">
       ${allTasks.length === 0 ? `
-        <div class="card text-center py-12">
-          <div class="text-neutral-300 mb-3">${icons.tasks}</div>
-          <p class="text-neutral-500">No tasks assigned yet</p>
-          <p class="text-sm text-neutral-400 mt-1">Your supervisor will assign tasks to you</p>
+        <div class="card flex flex-col items-center justify-center py-20 text-center">
+          <div class="w-16 h-16 rounded-2xl flex items-center justify-center mb-4 text-neutral-400" style="background: var(--color-neutral-100);">
+            ${icons.tasks}
+          </div>
+          <p class="text-base font-semibold text-neutral-600">No tasks yet</p>
+          <p class="text-sm text-neutral-400 mt-1 max-w-xs">Your supervisor will assign tasks to you. They'll appear here once assigned.</p>
         </div>
-      ` : ''}
+      ` : allTasks.map(task => renderTaskCard(task, holidayInfo.isHoliday, today)).join('')}
     </div>
   `, (el) => {
     // Status filter tabs
     el.querySelectorAll('.task-tab').forEach(tab => {
       tab.addEventListener('click', () => {
-        el.querySelectorAll('.task-tab').forEach(t => t.classList.remove('active'));
-        tab.classList.add('active');
+        el.querySelectorAll('.task-tab').forEach(t => {
+          t.classList.remove('bg-white', 'shadow-sm', 'text-neutral-800');
+          t.classList.add('text-neutral-500');
+        });
+        tab.classList.add('bg-white', 'shadow-sm', 'text-neutral-800');
+        tab.classList.remove('text-neutral-500');
 
         const status = tab.dataset.status;
         el.querySelectorAll('.task-card').forEach(card => {
@@ -186,6 +253,11 @@ export async function renderMyTasksPage() {
     // Status change buttons
     el.querySelectorAll('.task-status-btn').forEach(btn => {
       btn.addEventListener('click', async () => {
+        if (holidayInfo.isHoliday) {
+          showToast('Cannot change task status on a holiday', 'error');
+          return;
+        }
+
         const taskId = btn.dataset.taskId;
         const newStatus = btn.dataset.newStatus;
 
@@ -293,60 +365,136 @@ export async function renderMyTasksPage() {
   }, '/my-tasks');
 }
 
-function renderTaskCard(task) {
-  const statusColors = {
-    not_started: 'neutral',
-    in_progress: 'warning',
-    completed: 'success',
-  };
-  const color = statusColors[task.status] || 'neutral';
-
+function renderTaskCard(task, isHolidayToday, today) {
   const isPendingReview = task.is_self_submitted && task.submission_status === 'pending';
   const isRejectedSubmission = task.is_self_submitted && task.submission_status === 'rejected';
+  const isOverdue = !!task.due_date && task.due_date < today && task.status !== 'completed' && !isPendingReview;
+  const isDueSoon = !isOverdue && !!task.due_date && task.status !== 'completed' && !isPendingReview && (() => {
+    const diff = (new Date(task.due_date) - new Date(today)) / 86400000;
+    return diff >= 0 && diff <= 2;
+  })();
 
-  const nextStatuses = {
-    not_started: ['in_progress'],
-    in_progress: ['completed'],
-    completed: [],
-  };
+  // Left accent bar color per state
+  const accentColor = isPendingReview ? 'var(--color-warning-400)'
+    : isRejectedSubmission ? 'var(--color-danger-500)'
+    : isOverdue ? 'var(--color-danger-500)'
+    : task.status === 'completed' ? 'var(--color-success-400)'
+    : task.status === 'in_progress' ? 'var(--color-warning-400)'
+    : 'var(--color-neutral-300)';
 
-  const showActions = !isPendingReview && !isRejectedSubmission;
+  // Status badge
+  const statusBadge = isPendingReview
+    ? `<span class="inline-block px-2 py-0.5 rounded-full text-xs font-semibold bg-warning-50 text-warning-700">Pending Review</span>`
+    : isRejectedSubmission
+    ? `<span class="inline-block px-2 py-0.5 rounded-full text-xs font-semibold bg-danger-50 text-danger-700">Submission Rejected</span>`
+    : task.status === 'completed'
+    ? `<span class="inline-block px-2 py-0.5 rounded-full text-xs font-semibold bg-success-50 text-success-700">Completed</span>`
+    : task.status === 'in_progress'
+    ? `<span class="inline-block px-2 py-0.5 rounded-full text-xs font-semibold bg-warning-50 text-warning-700">In Progress</span>`
+    : `<span class="inline-block px-2 py-0.5 rounded-full text-xs font-semibold bg-neutral-100 text-neutral-600">Not Started</span>`;
+
+  // Urgency badge
+  const urgencyBadge = isOverdue
+    ? `<span class="inline-block px-2 py-0.5 rounded-full text-xs font-bold bg-danger-500 text-white">Overdue</span>`
+    : isDueSoon
+    ? `<span class="inline-block px-2 py-0.5 rounded-full text-xs font-bold bg-warning-100 text-warning-700">Due Soon</span>`
+    : '';
+
+  // Pending approval badge
+  const pendingBadge = task.pending_status
+    ? `<span class="inline-block px-2 py-0.5 rounded-full text-xs font-semibold bg-primary-50 text-primary-700">Awaiting Approval</span>`
+    : '';
+
+  // Self-submitted badge
+  const selfBadge = task.is_self_submitted && task.submission_status === 'approved'
+    ? `<span class="inline-block px-2 py-0.5 rounded-full text-xs font-semibold bg-neutral-100 text-neutral-500">Self-submitted</span>`
+    : '';
+
+  // Due date styling
+  const dueDateHtml = task.due_date
+    ? `<span class="flex items-center gap-1 ${isOverdue ? 'text-danger-600 font-semibold' : isDueSoon ? 'text-warning-600 font-medium' : 'text-neutral-400'}">
+        <svg class="w-3 h-3 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+        Due ${formatDate(task.due_date)}
+      </span>`
+    : '';
+
+  // Action buttons
+  const actionBtns = (() => {
+    if (isPendingReview || isRejectedSubmission || task.status === 'completed') return '';
+    if (task.status === 'not_started') return `
+      <button class="task-status-btn flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all text-white"
+              style="background: var(--color-primary-600);"
+              data-task-id="${task.id}" data-new-status="in_progress"
+              ${task.pending_status || isHolidayToday ? 'disabled style="opacity:0.5;cursor:not-allowed;"' : ''}>
+        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+        Start Task
+      </button>`;
+    if (task.status === 'in_progress') return `
+      <button class="task-status-btn flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all text-white"
+              style="background: var(--color-success-600);"
+              data-task-id="${task.id}" data-new-status="completed"
+              ${task.pending_status || isHolidayToday ? 'disabled style="opacity:0.5;cursor:not-allowed;"' : ''}>
+        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
+        ${task.pending_status ? 'Approval Pending' : 'Mark Complete'}
+      </button>`;
+    return '';
+  })();
 
   return `
-    <div class="card task-card" data-status="${task.status}" data-id="${task.id}" data-submission-status="${task.submission_status || ''}">
-      <div class="flex items-start justify-between">
-        <div class="flex-1">
-          <div class="flex items-center gap-2 mb-2 flex-wrap">
-            <h4 class="font-semibold text-neutral-900">${task.title}</h4>
-            ${!isPendingReview && !isRejectedSubmission ? `
-              <span class="badge bg-${color}-50 text-${color}-600">${task.status.replace('_', ' ')}</span>
+    <div class="task-card border rounded-xl overflow-hidden transition-all hover:shadow-md"
+         style="background: #ffffff; border-color: var(--color-neutral-200);"
+         data-status="${task.status}" data-id="${task.id}" data-submission-status="${task.submission_status || ''}">
+      <div class="flex">
+        <!-- Left accent bar -->
+        <div class="w-1 shrink-0 rounded-l-xl" style="background: ${accentColor};"></div>
+
+        <!-- Card body -->
+        <div class="flex-1 p-4">
+          <!-- Top row: title + badges + action -->
+          <div class="flex items-start gap-3">
+            <div class="flex-1 min-w-0">
+              <div class="flex items-center flex-wrap gap-2 mb-1.5">
+                <h4 class="font-semibold text-neutral-900 ${task.status === 'completed' ? 'line-through text-neutral-400' : ''} leading-snug">${task.title}</h4>
+                ${statusBadge}${urgencyBadge}${pendingBadge}${selfBadge}
+              </div>
+              ${task.description ? `<p class="text-sm text-neutral-500 leading-relaxed mb-2">${task.description}</p>` : ''}
+            </div>
+            ${actionBtns ? `<div class="shrink-0">${actionBtns}</div>` : ''}
+          </div>
+
+          <!-- Metadata row -->
+          <div class="flex items-center flex-wrap gap-x-4 gap-y-1 text-xs text-neutral-400 mt-2 pt-2 border-t" style="border-color: var(--color-neutral-100);">
+            <span class="flex items-center gap-1">
+              <svg class="w-3 h-3 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+              ${!task.is_self_submitted ? `${task.created_by_profile?.full_name || 'Unknown'}` : 'Self-submitted'}
+            </span>
+            ${task.estimated_hours ? `
+              <span class="flex items-center gap-1">
+                <svg class="w-3 h-3 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                ${task.estimated_hours}h est.
+              </span>
             ` : ''}
-            ${task.pending_status ? `<span class="badge-pending">Pending: ${task.pending_status.replace('_', ' ')}</span>` : ''}
-            ${isPendingReview ? `<span class="badge bg-warning-50 text-warning-600">Pending Review</span>` : ''}
-            ${isRejectedSubmission ? `<span class="badge bg-danger-50 text-danger-600">Submission Rejected</span>` : ''}
-            ${task.is_self_submitted && task.submission_status === 'approved' ? `<span class="badge bg-neutral-100 text-neutral-500 text-xs">Self-submitted</span>` : ''}
+            ${dueDateHtml}
+            <span class="flex items-center gap-1 ml-auto">
+              <svg class="w-3 h-3 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+              Created ${formatDate(task.created_at)}
+            </span>
           </div>
-          ${task.description ? `<p class="text-sm text-neutral-600 mb-2">${task.description}</p>` : ''}
-          <div class="flex items-center gap-4 text-xs text-neutral-400 flex-wrap">
-            ${!task.is_self_submitted ? `<span>Assigned by: ${task.created_by_profile?.full_name || 'Unknown'}</span>` : `<span>Submitted by you</span>`}
-            ${task.estimated_hours ? `<span>Est: ${task.estimated_hours}h</span>` : ''}
-            ${task.due_date ? `<span>Due: ${formatDate(task.due_date)}</span>` : ''}
-            <span>Created: ${formatDate(task.created_at)}</span>
-          </div>
+
+          <!-- Status notices -->
           ${isPendingReview ? `
-            <p class="text-xs text-warning-600 mt-2">Awaiting supervisor review before this task becomes active.</p>
+            <div class="mt-3 flex items-start gap-2 rounded-lg px-3 py-2.5 text-xs text-warning-700 bg-warning-50 border border-warning-200">
+              <svg class="w-3.5 h-3.5 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+              Awaiting supervisor approval before this task becomes active.
+            </div>
+          ` : ''}
+          ${isRejectedSubmission ? `
+            <div class="mt-3 flex items-start gap-2 rounded-lg px-3 py-2.5 text-xs text-danger-700 bg-danger-50 border border-danger-200">
+              <svg class="w-3.5 h-3.5 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
+              This task submission was rejected by your supervisor.
+            </div>
           ` : ''}
         </div>
-        ${showActions ? `
-          <div class="flex gap-2 ml-4">
-            ${nextStatuses[task.status]?.map(ns => `
-              <button class="btn-sm btn-primary task-status-btn" data-task-id="${task.id}" data-new-status="${ns}"
-                ${task.pending_status ? 'disabled' : ''}>
-                ${ns === 'in_progress' ? 'Start' : 'Complete'}
-              </button>
-            `).join('') || ''}
-          </div>
-        ` : ''}
       </div>
     </div>
   `;

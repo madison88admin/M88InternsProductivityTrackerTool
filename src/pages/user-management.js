@@ -10,6 +10,7 @@ import { logAudit } from '../lib/audit.js';
 import { icons } from '../lib/icons.js';
 import { formatDate, renderAvatar } from '../lib/utils.js';
 import { createModal, confirmDialog } from '../lib/component.js';
+import { openOjtCompletionModal } from '../lib/ojt-completion.js';
 
 export async function renderUserManagementPage() {
   const profile = getProfile();
@@ -87,9 +88,12 @@ export async function renderUserManagementPage() {
                 <td>${user.departments?.name || '—'}</td>
                 <td>${user.locations?.name || '—'}</td>
                 <td>
-                  <span class="badge-${user.is_active ? 'approved' : 'rejected'}">
-                    ${user.is_active ? 'Active' : 'Inactive'}
-                  </span>
+                  <div class="flex flex-col gap-1 items-start">
+                    <span class="badge-${user.is_active ? 'approved' : 'rejected'}">
+                      ${user.is_active ? 'Active' : 'Inactive'}
+                    </span>
+                    ${user.role === 'intern' && user.is_voluntary ? `<span class="badge-info">Voluntary</span>` : ''}
+                  </div>
                 </td>
                 <td>${formatDate(user.created_at)}</td>
                 <td>
@@ -97,6 +101,10 @@ export async function renderUserManagementPage() {
                     <button class="btn-sm btn-secondary edit-user-btn" data-user-id="${user.id}" title="Edit">
                       ${icons.edit}
                     </button>
+                    ${user.role === 'intern' && user.is_active && (user.hours_required || 0) > 0 && (user.hours_rendered || 0) >= user.hours_required ? `
+                    <button class="btn-sm btn-primary ojt-review-btn" data-user-id="${user.id}" title="Review OJT Completion">
+                      ${icons.approval}
+                    </button>` : ''}
                     <button class="btn-sm ${user.is_active ? 'btn-warning' : 'btn-success'} toggle-user-btn"
                             data-user-id="${user.id}" data-active="${user.is_active}"
                             title="${user.is_active ? 'Deactivate' : 'Activate'}"
@@ -122,6 +130,13 @@ export async function renderUserManagementPage() {
       btn.addEventListener('click', () => {
         const user = users.find(u => u.id === btn.dataset.userId);
         if (user) openEditUserModal(user, departments, locations, supervisors);
+      });
+    });
+
+    // OJT completion review
+    el.querySelectorAll('.ojt-review-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        openOjtCompletionModal(btn.dataset.userId, renderUserManagementPage);
       });
     });
 
@@ -338,6 +353,16 @@ function openInviteModal(departments, locations, supervisors) {
               <input type="date" id="invite-start" class="form-input" />
             </div>
           </div>
+          <div class="flex items-center justify-between rounded-xl border border-neutral-200 px-4 py-3">
+            <div>
+              <p class="text-sm font-medium text-neutral-800">Voluntary Intern</p>
+              <p class="text-xs text-neutral-400 mt-0.5">Intern is joining voluntarily beyond required hours</p>
+            </div>
+            <label class="relative inline-flex items-center cursor-pointer">
+              <input type="checkbox" id="invite-voluntary" class="sr-only peer" />
+              <div class="w-10 h-6 rounded-full peer-focus:ring-2 peer-focus:ring-primary-300 transition-colors bg-neutral-200 peer-checked:bg-primary-600 after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:after:translate-x-4"></div>
+            </label>
+          </div>
         </div>
 
       </div>
@@ -413,6 +438,7 @@ function openInviteModal(departments, locations, supervisors) {
             const hours = el.querySelector('#invite-hours').value;
             updates.hours_required = hours ? parseFloat(hours) : null;
             updates.ojt_start_date = el.querySelector('#invite-start').value || null;
+            updates.is_voluntary = el.querySelector('#invite-voluntary').checked;
           }
 
           await supabase.from('profiles').update(updates).eq('id', data.user.id);
@@ -507,6 +533,16 @@ function openEditUserModal(user, departments, locations, supervisors) {
               <input type="date" id="edit-start" class="form-input" value="${user.ojt_start_date || ''}" />
             </div>
           </div>
+          <div class="flex items-center justify-between rounded-xl border border-neutral-200 px-4 py-3">
+            <div>
+              <p class="text-sm font-medium text-neutral-800">Voluntary Intern</p>
+              <p class="text-xs text-neutral-400 mt-0.5">Intern is joining voluntarily beyond required hours</p>
+            </div>
+            <label class="relative inline-flex items-center cursor-pointer">
+              <input type="checkbox" id="edit-voluntary" class="sr-only peer" ${user.is_voluntary ? 'checked' : ''} />
+              <div class="w-10 h-6 rounded-full peer-focus:ring-2 peer-focus:ring-primary-300 transition-colors bg-neutral-200 peer-checked:bg-primary-600 after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:after:translate-x-4"></div>
+            </label>
+          </div>
         </div>
 
       </div>
@@ -567,6 +603,7 @@ function openEditUserModal(user, departments, locations, supervisors) {
         updates.course = el.querySelector('#edit-course').value || null;
         updates.hours_required = el.querySelector('#edit-hours').value ? parseFloat(el.querySelector('#edit-hours').value) : null;
         updates.ojt_start_date = el.querySelector('#edit-start').value || null;
+        updates.is_voluntary = el.querySelector('#edit-voluntary').checked;
       } else {
         updates.supervisor_id = null;
       }

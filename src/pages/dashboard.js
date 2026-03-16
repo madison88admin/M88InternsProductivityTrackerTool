@@ -7,6 +7,7 @@ import { renderLayout } from '../components/layout.js';
 import { supabase } from '../lib/supabase.js';
 import { icons } from '../lib/icons.js';
 import { formatDate, formatHoursDisplay, getTodayDate, computeEstimatedEndDate, renderAvatar, getMonday } from '../lib/utils.js';
+import { openOjtCompletionModal } from '../lib/ojt-completion.js';
 
 export async function renderDashboard() {
   const role = getUserRole();
@@ -30,11 +31,72 @@ export async function renderDashboard() {
 
   renderLayout(content, (el) => {
     initDashboardCharts(role, el);
+
+    // OJT completion review buttons (admin dashboard)
+    el.querySelectorAll('.ojt-review-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        openOjtCompletionModal(btn.dataset.internId, renderDashboard);
+      });
+    });
+
+    // Performance panel week filter (intern dashboard only)
+    if (role === 'intern' && _internDashData) {
+      let weekOffset = null; // null = All Time | 0 = this week | -1 = last week | …
+
+      const weekLabel = el.querySelector('#perf-week-label');
+      const prevBtn   = el.querySelector('#perf-prev');
+      const nextBtn   = el.querySelector('#perf-next');
+      const grid      = el.querySelector('#performance-kpi-grid');
+      if (!grid) return;
+
+      const refresh = () => {
+        let att, tasks, narr, ws;
+        if (weekOffset === null) {
+          att   = _internDashData.allAttendance;
+          tasks = _internDashData.allTasks;
+          narr  = _internDashData.allNarratives;
+          ws    = getMonday(new Date());
+          weekLabel.textContent = 'All Time';
+        } else {
+          const mon = getMonday(new Date());
+          mon.setDate(mon.getDate() + weekOffset * 7);
+          const sun = new Date(mon);
+          sun.setDate(sun.getDate() + 6);
+          const start = mon.toLocaleDateString('en-CA');
+          const end   = sun.toLocaleDateString('en-CA');
+          att   = _internDashData.allAttendance.filter(r => r.date >= start && r.date <= end);
+          tasks = _internDashData.allTasks.filter(t => t.due_date && t.due_date >= start && t.due_date <= end);
+          narr  = _internDashData.allNarratives.filter(n => n.date >= start && n.date <= end);
+          ws    = mon;
+          weekLabel.textContent = `${formatDate(mon, { month: 'short', day: 'numeric' })} – ${formatDate(sun, { month: 'short', day: 'numeric', year: 'numeric' })}`;
+        }
+        nextBtn.disabled = weekOffset === null;
+        grid.innerHTML = buildPerformanceKPIGrid(att, tasks, narr, ws, _internDashData.today);
+      };
+
+      // ← go back one week (or from All Time → this week)
+      prevBtn.addEventListener('click', () => {
+        weekOffset = weekOffset === null ? 0 : weekOffset - 1;
+        nextBtn.disabled = false;
+        refresh();
+      });
+
+      // → go forward one week (from this week → All Time)
+      nextBtn.addEventListener('click', () => {
+        if (weekOffset === null) return;
+        weekOffset = weekOffset >= 0 ? null : weekOffset + 1;
+        nextBtn.disabled = weekOffset === null;
+        refresh();
+      });
+    }
   }, '/dashboard');
 }
 
 /** Cached intern KPI data — populated by buildAdminDashboard, consumed by initDashboardCharts */
 let _internKPIData = [];
+
+/** Raw data for the intern performance panel — used by the week filter */
+let _internDashData = null;
 
 async function buildInternDashboard(profile) {
   await refreshProfile();
@@ -56,6 +118,9 @@ async function buildInternDashboard(profile) {
   const allTasks        = (allTasksRes.data || []).filter(t => !t.is_archived);
   const allNarratives   = allNarrativesRes.data || [];
   const unreadNotifs    = notifsRes.count || 0;
+
+  // Store for the week-filter re-render
+  _internDashData = { allAttendance, allTasks, allNarratives, today };
 
   // ── OJT progress ──────────────────────────────────────────────────────────
   const approvedAtt   = allAttendance.filter(r => r.status === 'approved');
@@ -81,7 +146,7 @@ async function buildInternDashboard(profile) {
   const thisWeekDotsHtml = weekLabels.map((label, i) => {
     const d = new Date(monday);
     d.setDate(d.getDate() + i);
-    const dateStr = d.toISOString().slice(0, 10);
+    const dateStr = d.toLocaleDateString('en-CA');
     const isFuture = dateStr > today;
     const isToday  = dateStr === today;
     const rec = allAttendance.find(r => r.date === dateStr);
@@ -233,11 +298,16 @@ async function buildInternDashboard(profile) {
       <div class="flex items-start justify-between mb-6">
         <div>
           <h3 class="text-base font-bold text-neutral-900">My Performance Overview</h3>
-          <p class="text-sm text-neutral-500 mt-0.5">A breakdown of how you're doing across all areas</p>
+          <p class="text-sm text-neutral-500 mt-0.5">A breakdown across all areas</p>
+        </div>
+        <div class="flex items-center gap-1.5">
+          <button id="perf-prev" class="w-7 h-7 rounded-lg flex items-center justify-center text-neutral-500 hover:bg-neutral-100 transition-colors border border-neutral-200" title="Previous week">&#8249;</button>
+          <span id="perf-week-label" class="text-xs font-semibold text-neutral-600 min-w-32.5 text-center px-1">All Time</span>
+          <button id="perf-next" class="w-7 h-7 rounded-lg flex items-center justify-center text-neutral-500 hover:bg-neutral-100 transition-colors border border-neutral-200 disabled:opacity-30 disabled:cursor-not-allowed" disabled title="Next week">&#8250;</button>
         </div>
       </div>
 
-      <div class="grid grid-cols-1 md:grid-cols-3 gap-5">
+      <div id="performance-kpi-grid" class="grid grid-cols-1 md:grid-cols-3 gap-5">
 
         <!-- ▸ Attendance KPI ─────────────────────────────────────────────── -->
         <div class="rounded-xl p-4" style="border: 1px solid var(--color-neutral-100);">
@@ -431,6 +501,219 @@ async function buildInternDashboard(profile) {
   `;
 }
 
+/**
+ * Build the 3-column performance KPI grid HTML.
+ * Called on initial render (via buildInternDashboard) and on every week filter change.
+ * @param {Array}  att       Attendance records to include (filtered or full)
+ * @param {Array}  tasks     Tasks to include (filtered or full)
+ * @param {Array}  narr      Narratives to include (filtered or full)
+ * @param {Date}   weekStart Monday of the week used for the attendance day-dots
+ * @param {string} today     YYYY-MM-DD string for "today"
+ */
+function buildPerformanceKPIGrid(att, tasks, narr, weekStart, today) {
+  // ── Attendance KPIs ──────────────────────────────────────────────────────
+  const approvedAtt      = att.filter(r => r.status === 'approved');
+  const daysWorked       = approvedAtt.length;
+  const lateCount        = approvedAtt.filter(r => r.is_late).length;
+  const onTimeCount      = daysWorked - lateCount;
+  const onTimeRate       = daysWorked > 0 ? Math.round((onTimeCount / daysWorked) * 100) : null;
+  const pendingAttCount  = att.filter(r => r.status === 'pending').length;
+  const rejectedAttCount = att.filter(r => r.status === 'rejected').length;
+
+  // ── Task KPIs ─────────────────────────────────────────────────────────────
+  const completedTasks  = tasks.filter(t => t.status === 'completed').length;
+  const inProgressTasks = tasks.filter(t => t.status === 'in_progress').length;
+  const notStartedTasks = tasks.filter(t => t.status === 'not_started').length;
+  const totalTasks      = tasks.length;
+  const activeTasks     = inProgressTasks + notStartedTasks;
+  const taskRate        = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : null;
+  const overdueTasks    = tasks.filter(t => t.due_date && t.due_date < today && t.status !== 'completed').length;
+
+  // ── Narrative KPIs ────────────────────────────────────────────────────────
+  const approvedNarr  = narr.filter(n => n.status === 'approved').length;
+  const pendingNarr   = narr.filter(n => n.status === 'pending').length;
+  const rejectedNarr  = narr.filter(n => n.status === 'rejected').length;
+  const totalNarr     = narr.length;
+  const reviewedNarr  = approvedNarr + rejectedNarr;
+  const narrativeRate = reviewedNarr > 0 ? Math.round((approvedNarr / reviewedNarr) * 100) : null;
+
+  // ── Helpers ───────────────────────────────────────────────────────────────
+  const kpiScore = rate => {
+    if (rate === null) return { textClass: 'text-neutral-400', barColor: '#e2e8f0', label: '—' };
+    if (rate >= 90)    return { textClass: 'text-success-600', barColor: '#22c55e', label: rate + '%' };
+    if (rate >= 70)    return { textClass: 'text-warning-600', barColor: '#f59e0b', label: rate + '%' };
+    return               { textClass: 'text-danger-600',  barColor: '#ef4444', label: rate + '%' };
+  };
+  const attScore  = kpiScore(onTimeRate);
+  const taskScr   = kpiScore(taskRate);
+  const narrScore = kpiScore(narrativeRate);
+  const statRow = (label, value, valueClass = 'text-neutral-800') =>
+    `<div class="flex justify-between items-center py-1.5" style="border-bottom:1px solid var(--color-neutral-50);">
+       <span class="text-xs text-neutral-500">${label}</span>
+       <span class="text-xs font-bold ${valueClass}">${value}</span>
+     </div>`;
+
+  // ── Week day-dots (Mon–Fri of the given weekStart) ────────────────────────
+  const weekLabels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'];
+  const thisWeekDotsHtml = weekLabels.map((label, i) => {
+    const d = new Date(weekStart);
+    d.setDate(d.getDate() + i);
+    const dateStr  = d.toLocaleDateString('en-CA');
+    const isFuture = dateStr > today;
+    const isToday  = dateStr === today;
+    const rec = att.find(r => r.date === dateStr);
+    let dotStyle, symbol;
+    if (isFuture) {
+      dotStyle = 'background:var(--color-neutral-100);color:var(--color-neutral-300);';
+      symbol = '·';
+    } else if (rec?.status === 'approved') {
+      dotStyle = rec.is_late
+        ? 'background:var(--color-warning-100);color:var(--color-warning-700);'
+        : 'background:var(--color-success-100);color:var(--color-success-700);';
+      symbol = rec.is_late ? '!' : '✓';
+    } else if (rec?.status === 'pending') {
+      dotStyle = 'background:var(--color-primary-50);color:var(--color-primary-600);';
+      symbol = '~';
+    } else {
+      dotStyle = 'background:var(--color-danger-50);color:var(--color-danger-400);';
+      symbol = '✗';
+    }
+    return `
+      <div class="flex flex-col items-center gap-1">
+        <div class="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold ${isToday ? 'ring-2 ring-offset-1 ring-primary-400' : ''}" style="${dotStyle}">${symbol}</div>
+        <span class="text-xs font-medium ${isToday ? 'text-primary-600' : 'text-neutral-400'}">${label}</span>
+      </div>`;
+  }).join('');
+
+  return `
+    <!-- ▸ Attendance KPI ─────────────────────────────────────────────── -->
+    <div class="rounded-xl p-4" style="border: 1px solid var(--color-neutral-100);">
+      <div class="flex items-center gap-2 mb-4">
+        <div class="w-8 h-8 rounded-lg flex items-center justify-center bg-primary-50 text-primary-600">${icons.clock}</div>
+        <p class="text-sm font-bold text-neutral-800">Attendance</p>
+      </div>
+      <div class="flex items-end justify-between mb-2">
+        <div>
+          <p class="text-3xl font-bold ${attScore.textClass}">${attScore.label}</p>
+          <p class="text-xs text-neutral-400 mt-0.5">on-time rate</p>
+        </div>
+        ${onTimeRate !== null ? `
+          <div class="text-right">
+            <p class="text-xs font-semibold text-neutral-500">${onTimeCount} on-time</p>
+            <p class="text-xs text-neutral-400">${lateCount} late</p>
+          </div>
+        ` : ''}
+      </div>
+      <div class="h-1.5 rounded-full mb-4 overflow-hidden" style="background: var(--color-neutral-100);">
+        <div class="h-full rounded-full transition-all" style="width: ${onTimeRate ?? 0}%; background: ${attScore.barColor};"></div>
+      </div>
+      <p class="text-xs font-semibold text-neutral-400 uppercase tracking-wider mb-2">This Week</p>
+      <div class="flex items-center justify-between mb-4">
+        ${thisWeekDotsHtml}
+      </div>
+      <div class="space-y-0">
+        ${statRow('Approved Days', daysWorked)}
+        ${statRow('Late Arrivals', lateCount, lateCount > 3 ? 'text-warning-600' : 'text-neutral-800')}
+        ${statRow('Pending Approval', pendingAttCount, pendingAttCount > 0 ? 'text-primary-600' : 'text-neutral-800')}
+        ${statRow('Rejected', rejectedAttCount, rejectedAttCount > 0 ? 'text-danger-600' : 'text-neutral-800')}
+      </div>
+    </div>
+
+    <!-- ▸ Tasks KPI ───────────────────────────────────────────────────── -->
+    <div class="rounded-xl p-4" style="border: 1px solid var(--color-neutral-100);">
+      <div class="flex items-center gap-2 mb-4">
+        <div class="w-8 h-8 rounded-lg flex items-center justify-center bg-warning-50 text-warning-600">${icons.tasks}</div>
+        <p class="text-sm font-bold text-neutral-800">Tasks</p>
+      </div>
+      <div class="flex items-end justify-between mb-2">
+        <div>
+          <p class="text-3xl font-bold ${taskScr.textClass}">${taskScr.label}</p>
+          <p class="text-xs text-neutral-400 mt-0.5">completion rate</p>
+        </div>
+        ${totalTasks > 0 ? `
+          <div class="text-right">
+            <p class="text-xs font-semibold text-neutral-500">${completedTasks}/${totalTasks} done</p>
+            ${overdueTasks > 0 ? `<p class="text-xs font-semibold text-danger-500">${overdueTasks} overdue</p>` : '<p class="text-xs text-neutral-400">0 overdue</p>'}
+          </div>
+        ` : ''}
+      </div>
+      <div class="h-1.5 rounded-full mb-4 overflow-hidden" style="background: var(--color-neutral-100);">
+        <div class="h-full rounded-full transition-all" style="width: ${taskRate ?? 0}%; background: ${taskScr.barColor};"></div>
+      </div>
+      ${totalTasks > 0 ? `
+        <p class="text-xs font-semibold text-neutral-400 uppercase tracking-wider mb-3">Breakdown</p>
+        <div class="space-y-2 mb-4">
+          ${[
+            { label: 'Completed',    count: completedTasks,  color: '#22c55e' },
+            { label: 'In Progress',  count: inProgressTasks, color: '#6366f1' },
+            { label: 'Not Started',  count: notStartedTasks, color: '#94a3b8' },
+          ].map(item => `
+            <div class="flex items-center gap-2">
+              <span class="text-xs text-neutral-500 w-20 shrink-0">${item.label}</span>
+              <div class="flex-1 h-1.5 rounded-full overflow-hidden" style="background: var(--color-neutral-100);">
+                <div class="h-full rounded-full" style="width: ${totalTasks > 0 ? Math.round((item.count / totalTasks) * 100) : 0}%; background: ${item.color};"></div>
+              </div>
+              <span class="text-xs font-bold text-neutral-600 w-4 text-right shrink-0">${item.count}</span>
+            </div>
+          `).join('')}
+        </div>
+      ` : `<p class="text-xs text-neutral-400 mb-4">No tasks assigned yet.</p>`}
+      <div class="space-y-0">
+        ${statRow('Total Tasks', totalTasks)}
+        ${statRow('Active (pending work)', activeTasks, activeTasks > 0 ? 'text-warning-600' : 'text-neutral-800')}
+        ${statRow('Overdue', overdueTasks, overdueTasks > 0 ? 'text-danger-600' : 'text-neutral-800')}
+      </div>
+    </div>
+
+    <!-- ▸ Narratives KPI ─────────────────────────────────────────────── -->
+    <div class="rounded-xl p-4" style="border: 1px solid var(--color-neutral-100);">
+      <div class="flex items-center gap-2 mb-4">
+        <div class="w-8 h-8 rounded-lg flex items-center justify-center bg-success-50 text-success-600">${icons.narrative}</div>
+        <p class="text-sm font-bold text-neutral-800">Narratives</p>
+      </div>
+      <div class="flex items-end justify-between mb-2">
+        <div>
+          <p class="text-3xl font-bold ${narrScore.textClass}">${narrScore.label}</p>
+          <p class="text-xs text-neutral-400 mt-0.5">approval rate</p>
+        </div>
+        ${totalNarr > 0 ? `
+          <div class="text-right">
+            <p class="text-xs font-semibold text-neutral-500">${approvedNarr} approved</p>
+            <p class="text-xs text-neutral-400">${totalNarr} total</p>
+          </div>
+        ` : ''}
+      </div>
+      <div class="h-1.5 rounded-full mb-4 overflow-hidden" style="background: var(--color-neutral-100);">
+        <div class="h-full rounded-full transition-all" style="width: ${narrativeRate ?? 0}%; background: ${narrScore.barColor};"></div>
+      </div>
+      ${totalNarr > 0 ? `
+        <p class="text-xs font-semibold text-neutral-400 uppercase tracking-wider mb-3">Breakdown</p>
+        <div class="space-y-2 mb-4">
+          ${[
+            { label: 'Approved',  count: approvedNarr, color: '#22c55e' },
+            { label: 'Pending',   count: pendingNarr,  color: '#6366f1' },
+            { label: 'Rejected',  count: rejectedNarr, color: '#ef4444' },
+          ].map(item => `
+            <div class="flex items-center gap-2">
+              <span class="text-xs text-neutral-500 w-20 shrink-0">${item.label}</span>
+              <div class="flex-1 h-1.5 rounded-full overflow-hidden" style="background: var(--color-neutral-100);">
+                <div class="h-full rounded-full" style="width: ${totalNarr > 0 ? Math.round((item.count / totalNarr) * 100) : 0}%; background: ${item.color};"></div>
+              </div>
+              <span class="text-xs font-bold text-neutral-600 w-4 text-right shrink-0">${item.count}</span>
+            </div>
+          `).join('')}
+        </div>
+      ` : `<p class="text-xs text-neutral-400 mb-4">No narratives submitted yet.</p>`}
+      <div class="space-y-0">
+        ${statRow('Total Submitted', totalNarr)}
+        ${statRow('Approved', approvedNarr, approvedNarr > 0 ? 'text-success-600' : 'text-neutral-800')}
+        ${statRow('Pending Review', pendingNarr, pendingNarr > 0 ? 'text-primary-600' : 'text-neutral-800')}
+        ${statRow('Rejected', rejectedNarr, rejectedNarr > 0 ? 'text-danger-600' : 'text-neutral-800')}
+      </div>
+    </div>
+  `;
+}
+
 async function buildSupervisorDashboard(profile) {
   // Fetch pending approvals
   const { count: pendingApprovals } = await supabase
@@ -548,7 +831,7 @@ async function buildAdminDashboard(profile) {
   // ── Intern KPI data ─────────────────────────────────────────────────────────
   const { data: interns } = await supabase
     .from('profiles')
-    .select('id, full_name, avatar_url, school, hours_required, hours_rendered, ojt_start_date, status, department:departments(name)')
+    .select('id, full_name, avatar_url, school, hours_required, hours_rendered, ojt_start_date, status, is_voluntary, department:departments(name)')
     .eq('role', 'intern')
     .eq('is_active', true)
     .order('full_name');
@@ -628,7 +911,18 @@ async function buildAdminDashboard(profile) {
 
   const estEndDisplay = intern => {
     if (intern.progress >= 100) {
-      return `<span class="inline-flex items-center gap-1 text-xs font-semibold text-success-600">${icons.check} Completed</span>`;
+      if (intern.is_voluntary) {
+        return `
+          <div class="flex flex-col items-end gap-1">
+            <span class="inline-flex items-center gap-1 text-xs font-semibold text-success-600">${icons.check} Completed</span>
+            <span class="text-xs font-semibold text-primary-600">Voluntary</span>
+          </div>`;
+      }
+      return `
+        <div class="flex flex-col items-end gap-1">
+          <span class="inline-flex items-center gap-1 text-xs font-semibold text-success-600">${icons.check} Completed</span>
+          <button class="ojt-review-btn text-xs font-medium text-primary-600 hover:underline" data-intern-id="${intern.id}">Review</button>
+        </div>`;
     }
     if (!intern.estimatedEnd) return `<span class="text-xs text-neutral-400">—</span>`;
     const daysLeft = Math.ceil((intern.estimatedEnd - new Date()) / (1000 * 60 * 60 * 24));
@@ -907,14 +1201,14 @@ async function initDashboardCharts(role, container) {
         .from('attendance_records')
         .select('date, total_hours')
         .eq('intern_id', profile.id)
-        .gte('date', monday.toISOString().slice(0, 10))
+        .gte('date', monday.toLocaleDateString('en-CA'))
         .order('date');
 
       const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'];
       const hours = days.map((_, i) => {
         const d = new Date(monday);
         d.setDate(d.getDate() + i);
-        const dateStr = d.toISOString().slice(0, 10);
+        const dateStr = d.toLocaleDateString('en-CA');
         const record = weeklyData?.find(r => r.date === dateStr);
         return record?.total_hours || 0;
       });
@@ -941,7 +1235,7 @@ async function initDashboardCharts(role, container) {
     const attendanceCanvas = container.querySelector('#team-attendance-chart');
     if (attendanceCanvas) {
       const profile = getProfile();
-      const today = new Date().toISOString().slice(0, 10);
+      const today = new Date().toLocaleDateString('en-CA');
 
       const { data: teamInterns } = await supabase
         .from('profiles')

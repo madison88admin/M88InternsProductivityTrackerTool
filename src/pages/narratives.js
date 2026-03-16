@@ -11,10 +11,12 @@ import { logAudit } from '../lib/audit.js';
 import { icons } from '../lib/icons.js';
 import { formatDate, formatDateTime, formatHoursDisplay, getTodayDate } from '../lib/utils.js';
 import { createModal } from '../lib/component.js';
+import { isHoliday } from '../lib/holidays.js';
 
 export async function renderNarrativesPage() {
   const profile = getProfile();
   const today = getTodayDate();
+  const todayHolidayInfo = await isHoliday(today);
 
   // Fetch intern's active tasks (not completed, or completed but not yet approved by supervisor)
   const { data: allTasks } = await supabase
@@ -224,11 +226,21 @@ export async function renderNarrativesPage() {
         <h1 class="page-title">Daily Narratives</h1>
         <p class="page-subtitle">Document your daily activities by session</p>
       </div>
-      <button id="add-narrative-btn" class="btn-primary" ${(!tasks || tasks.length === 0) ? 'disabled title="No active tasks available"' : ''}>
+      <button id="add-narrative-btn" class="btn-primary" ${(!tasks || tasks.length === 0 || todayHolidayInfo.isHoliday) ? `disabled title="${todayHolidayInfo.isHoliday ? 'Narrative submission is disabled on holidays' : 'No active tasks available'}"` : ''}>
         ${icons.plus}
         <span class="ml-2">New Narrative</span>
       </button>
     </div>
+
+    ${todayHolidayInfo.isHoliday ? `
+      <div class="bg-danger-50 border border-danger-300 rounded-xl p-4 mb-6 flex items-center gap-3 animate-fade-in-up">
+        ${icons.calendar}
+        <div>
+          <p class="text-sm font-bold text-danger-700">Holiday: ${todayHolidayInfo.name}</p>
+          <p class="text-xs text-danger-600">Narrative submission is disabled on holidays.</p>
+        </div>
+      </div>
+    ` : ''}
 
     ${(!tasks || tasks.length === 0) ? `
       <div class="bg-warning-50 border border-warning-500/30 rounded-lg p-4 mb-6">
@@ -354,6 +366,7 @@ function openNarrativeModal(tasks, profile, today) {
           <div>
             <label class="form-label">Narrative</label>
             <div id="morning-editor"></div>
+            <p id="morning-char-count" class="text-xs text-neutral-400 mt-1 text-right">0 / 250</p>
           </div>
         </div>
         <p id="morning-existing" class="text-xs text-neutral-400 mt-2 hidden"></p>
@@ -375,6 +388,7 @@ function openNarrativeModal(tasks, profile, today) {
           <div>
             <label class="form-label">Narrative</label>
             <div id="afternoon-editor"></div>
+            <p id="afternoon-char-count" class="text-xs text-neutral-400 mt-1 text-right">0 / 250</p>
           </div>
         </div>
         <p id="afternoon-existing" class="text-xs text-neutral-400 mt-2 hidden"></p>
@@ -410,6 +424,43 @@ function openNarrativeModal(tasks, profile, today) {
       placeholder: 'Describe your afternoon activities...',
     });
 
+    const blockPaste = (e) => {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      showToast('Pasting is not allowed. Please type your narrative.', 'error');
+    };
+    morningQuill.root.addEventListener('paste', blockPaste, true);
+    afternoonQuill.root.addEventListener('paste', blockPaste, true);
+    morningQuill.root.addEventListener('drop', blockPaste, true);
+    afternoonQuill.root.addEventListener('drop', blockPaste, true);
+
+    const CHAR_LIMIT = 250;
+
+    function updateCharCount(quillInstance, counterId) {
+      const len = quillInstance.getText().trim().length;
+      const counter = el.querySelector(`#${counterId}`);
+      if (!counter) return;
+      counter.textContent = `${len} / ${CHAR_LIMIT}`;
+      counter.classList.toggle('text-danger-500', len > CHAR_LIMIT);
+      counter.classList.toggle('text-neutral-400', len <= CHAR_LIMIT);
+    }
+
+    morningQuill.on('text-change', () => {
+      const text = morningQuill.getText();
+      if (text.length - 1 > CHAR_LIMIT) {
+        morningQuill.deleteText(CHAR_LIMIT, text.length);
+      }
+      updateCharCount(morningQuill, 'morning-char-count');
+    });
+
+    afternoonQuill.on('text-change', () => {
+      const text = afternoonQuill.getText();
+      if (text.length - 1 > CHAR_LIMIT) {
+        afternoonQuill.deleteText(CHAR_LIMIT, text.length);
+      }
+      updateCharCount(afternoonQuill, 'afternoon-char-count');
+    });
+
     let currentAttendance = null;
     let morningHours = 0;
     let afternoonHours = 0;
@@ -422,6 +473,24 @@ function openNarrativeModal(tasks, profile, today) {
 
       // Show/hide late warning
       el.querySelector('#late-warning').classList.toggle('hidden', !isLate);
+
+      // Check if the selected date is a holiday
+      const selectedHolidayInfo = await isHoliday(selectedDate);
+      if (selectedHolidayInfo.isHoliday) {
+        const sessionInfo = el.querySelector('#session-info');
+        el.querySelector('#session-info-text').textContent = `${formatDate(selectedDate)} is a holiday (${selectedHolidayInfo.name}). You cannot submit narratives for this date.`;
+        sessionInfo.classList.remove('hidden');
+        el.querySelector('#narrative-submit').disabled = true;
+
+        // Disable both session editors
+        morningQuill.enable(false);
+        afternoonQuill.enable(false);
+        el.querySelector('#morning-task').disabled = true;
+        el.querySelector('#afternoon-task').disabled = true;
+        el.querySelector('#morning-section').classList.add('opacity-50');
+        el.querySelector('#afternoon-section').classList.add('opacity-50');
+        return;
+      }
 
       // Fetch attendance for selected date
       currentAttendance = await fetchAttendanceForDate(profile.id, selectedDate);
@@ -516,6 +585,13 @@ function openNarrativeModal(tasks, profile, today) {
       const afternoonTaskId = el.querySelector('#afternoon-task').value;
       const selectedDate = el.querySelector('#narrative-date').value;
       const isLate = selectedDate < today;
+
+      // Holiday guard (defense in depth)
+      const submitHolidayCheck = await isHoliday(selectedDate);
+      if (submitHolidayCheck.isHoliday) {
+        showToast(`Cannot submit narrative for ${formatDate(selectedDate)} — it is a holiday (${submitHolidayCheck.name})`, 'error');
+        return;
+      }
 
       const hasMorning = existingNarratives.some(n => n.session === 'morning');
       const hasAfternoon = existingNarratives.some(n => n.session === 'afternoon');
@@ -688,6 +764,7 @@ function openEditNarrativeModal(narrative, tasks, profile) {
       <div>
         <label class="form-label">Narrative <span class="text-danger-500">*</span></label>
         <div id="edit-narrative-editor"></div>
+        <p id="edit-char-count" class="text-xs text-neutral-400 mt-1 text-right">0 / 250</p>
       </div>
 
       <div class="flex justify-end gap-3 pt-2">
@@ -708,6 +785,35 @@ function openEditNarrativeModal(narrative, tasks, profile) {
       },
     });
     quill.root.innerHTML = narrative.content;
+
+    const CHAR_LIMIT = 250;
+    const blockPasteEdit = (e) => {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      showToast('Pasting is not allowed. Please type your narrative.', 'error');
+    };
+    quill.root.addEventListener('paste', blockPasteEdit, true);
+    quill.root.addEventListener('drop', blockPasteEdit, true);
+
+    function updateEditCharCount() {
+      const len = quill.getText().trim().length;
+      const counter = el.querySelector('#edit-char-count');
+      if (!counter) return;
+      counter.textContent = `${len} / ${CHAR_LIMIT}`;
+      counter.classList.toggle('text-danger-500', len > CHAR_LIMIT);
+      counter.classList.toggle('text-neutral-400', len <= CHAR_LIMIT);
+    }
+
+    quill.on('text-change', () => {
+      const text = quill.getText();
+      if (text.length - 1 > CHAR_LIMIT) {
+        quill.deleteText(CHAR_LIMIT, text.length);
+      }
+      updateEditCharCount();
+    });
+
+    // Initialize counter with existing content
+    updateEditCharCount();
 
     el.querySelector('#edit-cancel').addEventListener('click', close);
 

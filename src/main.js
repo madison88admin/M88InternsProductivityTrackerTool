@@ -30,6 +30,7 @@ import { renderDepartmentsPage } from './pages/departments.js';
 import { renderLocationsPage } from './pages/locations.js';
 import { renderAuditLogsPage } from './pages/audit-logs.js';
 import { renderSystemSettingsPage } from './pages/system-settings.js';
+import { renderHolidayCalendarPage } from './pages/holiday-calendar.js';
 import { renderNotificationsPage } from './pages/notifications.js';
 import { renderProfilePage } from './pages/profile.js';
 
@@ -72,6 +73,7 @@ addRoute('/user-management', renderUserManagementPage, ['admin']);
 addRoute('/locations', renderLocationsPage, ['admin']);
 addRoute('/audit-logs', renderAuditLogsPage, ['admin']);
 addRoute('/system-settings', renderSystemSettingsPage, ['admin']);
+addRoute('/holiday-calendar', renderHolidayCalendarPage, ['admin']);
 
 // ── Navigation Guard ────────────────────────────────────────
 setBeforeEach(async (path) => {
@@ -127,6 +129,7 @@ registerRoles('/user-management', ['admin']);
 registerRoles('/locations', ['admin']);
 registerRoles('/audit-logs', ['admin']);
 registerRoles('/system-settings', ['admin']);
+registerRoles('/holiday-calendar', ['admin']);
 
 // ── 404 Handler ─────────────────────────────────────────────
 setNotFound(() => {

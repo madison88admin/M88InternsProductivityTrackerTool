@@ -8,6 +8,7 @@ import { supabase } from '../lib/supabase.js';
 import { showToast } from '../lib/toast.js';
 import { icons } from '../lib/icons.js';
 import { formatDate, formatDateTime } from '../lib/utils.js';
+import { openOjtCompletionModal } from '../lib/ojt-completion.js';
 
 export async function renderNotificationsPage() {
   const profile = getProfile();
@@ -144,9 +145,21 @@ export async function renderNotificationsPage() {
       }
     });
 
-    // Individual click → mark as read
+    // Individual click → mark as read (or open action modal for OJT notifications)
     el.querySelectorAll('.notification-item').forEach(item => {
       item.addEventListener('click', async () => {
+        const notifType = item.dataset.type;
+        const entityId = item.dataset.entityId;
+
+        // OJT completion notifications open the three-option action modal
+        if (notifType === 'ojt_completed' && entityId) {
+          if (item.dataset.read !== 'true') {
+            await supabase.from('notifications').update({ is_read: true }).eq('id', item.dataset.id);
+          }
+          openOjtCompletionModal(entityId, renderNotificationsPage);
+          return;
+        }
+
         if (item.dataset.read === 'true') return;
         await supabase.from('notifications').update({ is_read: true }).eq('id', item.dataset.id);
 
@@ -176,7 +189,9 @@ function renderNotifItem(n) {
     <div class="notification-item border rounded-xl p-4 flex gap-3.5 cursor-pointer hover:border-primary-200 transition-all"
          style="${itemStyle}"
          data-id="${n.id}"
-         data-read="${isRead}">
+         data-read="${isRead}"
+         data-type="${n.type || ''}"
+         data-entity-id="${n.entity_id || ''}">
       <!-- Type icon -->
       <div class="shrink-0 w-10 h-10 rounded-full flex items-center justify-center ${getNotifColor(n.type)}">
         ${getNotifIcon(n.type)}
@@ -240,6 +255,7 @@ function getTypeLabel(type) {
     allowance_approved: 'Allowance',
     correction_submitted: 'Correction',
     escalation: 'Escalation',
+    ojt_completed: 'OJT',
   };
   return labels[type] || 'System';
 }
@@ -253,6 +269,7 @@ function getTypeBadge(type) {
     Allowance: 'bg-success-50 text-success-700',
     Correction: 'bg-warning-50 text-warning-700',
     Escalation: 'bg-danger-50 text-danger-600',
+    OJT: 'bg-success-50 text-success-700',
     System: 'bg-neutral-100 text-neutral-600',
   };
   const cls = colorMap[label] || 'bg-neutral-100 text-neutral-600';
@@ -272,11 +289,13 @@ function getNotifColor(type) {
     allowance_approved: 'bg-success-50 text-success-600',
     correction_submitted: 'bg-warning-50 text-warning-600',
     escalation: 'bg-danger-50 text-danger-600',
+    ojt_completed: 'bg-success-50 text-success-600',
   };
   return map[type] || 'bg-neutral-100 text-neutral-500';
 }
 
 function getNotifIcon(type) {
+  if (type === 'ojt_completed') return icons.approval;
   if (type?.includes('attendance')) return icons.clock;
   if (type?.includes('task')) return icons.tasks;
   if (type?.includes('narrative')) return icons.narrative;

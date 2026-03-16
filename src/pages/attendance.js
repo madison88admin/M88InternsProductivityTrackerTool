@@ -10,10 +10,12 @@ import { logAudit } from '../lib/audit.js';
 import { icons } from '../lib/icons.js';
 import { formatDate, formatTime, formatHoursDisplay, getTodayDate, getPublicIP, isLateArrival, isOutsideAllowedHours } from '../lib/utils.js';
 import { createModal } from '../lib/component.js';
+import { isHoliday } from '../lib/holidays.js';
 
 export async function renderAttendancePage() {
   const profile = getProfile();
   const today = getTodayDate();
+  const holidayInfo = await isHoliday(today);
 
   // Fetch today's record
   let { data: todayRecord } = await supabase
@@ -39,6 +41,16 @@ export async function renderAttendancePage() {
       <p class="page-subtitle">Log your daily time-in and time-out</p>
     </div>
 
+    ${holidayInfo.isHoliday ? `
+      <div class="bg-danger-50 border border-danger-300 rounded-xl p-4 mb-6 flex items-center gap-3 animate-fade-in-up">
+        ${icons.calendar}
+        <div>
+          <p class="text-sm font-bold text-danger-700">Holiday: ${holidayInfo.name}</p>
+          <p class="text-xs text-danger-600">Today is a holiday. Attendance logging is disabled.</p>
+        </div>
+      </div>
+    ` : ''}
+
     <!-- Today's Punch Card -->
     <div class="card mb-6">
       <div class="flex items-center justify-between mb-4">
@@ -63,7 +75,9 @@ export async function renderAttendancePage() {
       ` : ''}
 
       <div class="flex gap-3">
-        ${nextPunch ? `
+        ${holidayInfo.isHoliday ? `
+          <p class="text-sm text-danger-600 font-medium">Attendance logging is disabled on holidays</p>
+        ` : nextPunch ? `
           <button id="punch-btn" class="btn-primary" data-punch="${nextPunch}">
             ${icons.clock}
             <span class="ml-2">${getPunchLabel(nextPunch)}</span>
@@ -71,8 +85,8 @@ export async function renderAttendancePage() {
         ` : `
           <p class="text-sm text-success-600 font-medium">✓ All punches logged for today</p>
         `}
-        
-        ${todayRecord && !isAllPunchesComplete(todayRecord) ? `
+
+        ${!holidayInfo.isHoliday && todayRecord && !isAllPunchesComplete(todayRecord) ? `
           <button id="correction-btn" class="btn-secondary">
             ${icons.edit}
             <span class="ml-2">Request Correction</span>
