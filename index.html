@@ -13,6 +13,54 @@
 <body>
   <div id="app"></div>
   <div id="toast-container" class="toast-container"></div>
+
+  <!-- Block mobile phone browsers (even in "Desktop Site" mode) -->
+  <script>
+  (function() {
+    function isMobilePhone() {
+      // 1. User-Agent Client Hints API (Chromium browsers)
+      //    navigator.userAgentData.mobile stays TRUE even in "Desktop Site" mode
+      if (navigator.userAgentData && navigator.userAgentData.mobile === true) {
+        return true;
+      }
+      // 2. Screen size + touch: phone screens have a smaller dimension <= 480px
+      //    Physical screen dimensions do NOT change in "Desktop Site" mode
+      var minDim = Math.min(screen.width, screen.height);
+      var hasTouch = navigator.maxTouchPoints > 0;
+      if (hasTouch && minDim <= 480) {
+        return true;
+      }
+      // 3. Fallback: UA string (may be spoofed in desktop mode, but catches older browsers)
+      if (/iPhone|iPod|Android.*Mobile|Windows Phone|BlackBerry|Opera Mini|IEMobile/i.test(navigator.userAgent)) {
+        return true;
+      }
+      return false;
+    }
+
+    if (isMobilePhone()) {
+      window.__MOBILE_BLOCKED = true;
+      var app = document.getElementById('app');
+      app.innerHTML =
+        '<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;background:#f9fafb;padding:24px">' +
+          '<div style="text-align:center;max-width:420px">' +
+            '<div style="font-size:48px;margin-bottom:16px">&#128679;</div>' +
+            '<h1 style="font-size:22px;font-weight:700;color:#111827;margin:0 0 12px">Desktop Only</h1>' +
+            '<p style="font-size:15px;color:#6b7280;line-height:1.6;margin:0 0 20px">' +
+              'The M88 Interns Productivity Tracker is only accessible on desktop computers. ' +
+              'Mobile phone browsers are not supported, including &ldquo;Desktop Site&rdquo; mode.' +
+            '</p>' +
+            '<p style="font-size:13px;color:#9ca3af;margin:0">' +
+              'Please open this site on a laptop or desktop computer to continue.' +
+            '</p>' +
+          '</div>' +
+        '</div>';
+      // Hide the toast container
+      var toast = document.getElementById('toast-container');
+      if (toast) toast.style.display = 'none';
+    }
+  })();
+  </script>
+
   <script type="module" src="/src/main.js"></script>
 </body>
 </html>

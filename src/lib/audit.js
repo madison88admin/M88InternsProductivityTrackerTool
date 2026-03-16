@@ -5,6 +5,21 @@
 import { supabase } from './supabase.js';
 import { getCurrentUser } from './auth.js';
 
+// Cache the client IP for the session — fetched once, reused on every log call
+let cachedIp = null;
+
+async function getClientIp() {
+  if (cachedIp) return cachedIp;
+  try {
+    const res = await fetch('https://api.ipify.org?format=json');
+    const { ip } = await res.json();
+    cachedIp = ip;
+    return ip;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Log an action to the audit trail.
  * @param {string} action - e.g., 'attendance.time_in', 'task.created', 'approval.approved'
@@ -14,6 +29,7 @@ import { getCurrentUser } from './auth.js';
  */
 export async function logAudit(action, entityType, entityId = null, details = null) {
   const user = getCurrentUser();
+  const ip = await getClientIp();
 
   try {
     await supabase.from('audit_logs').insert({
@@ -21,8 +37,8 @@ export async function logAudit(action, entityType, entityId = null, details = nu
       action,
       entity_type: entityType,
       entity_id: entityId,
-      details: details ? JSON.stringify(details) : null,
-      ip_address: null, // Will be populated by Supabase edge function or RLS
+      details: details || null,
+      ip_address: ip,
     });
   } catch (err) {
     console.error('Audit log failed:', err);

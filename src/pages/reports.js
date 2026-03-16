@@ -3,7 +3,6 @@
  * Generate and export attendance, task, allowance reports with charts.
  * Includes Daily Activity Report (DAR) PDF generation.
  */
-import { getProfile, getUserRole } from '../lib/auth.js';
 import { renderLayout } from '../components/layout.js';
 import { supabase } from '../lib/supabase.js';
 import { showToast } from '../lib/toast.js';
@@ -13,10 +12,6 @@ import { formatDate, formatTime, formatHoursDisplay, getMonday, getFriday } from
 let chartInstance = null;
 
 export async function renderReportsPage() {
-  const profile = getProfile();
-  const role = getUserRole();
-
-  // Get locations and departments for filters
   const [{ data: locations }, { data: departments }] = await Promise.all([
     supabase.from('locations').select('id, name').eq('is_active', true).order('name'),
     supabase.from('departments').select('id, name').eq('is_active', true).order('name'),
@@ -25,12 +20,12 @@ export async function renderReportsPage() {
   renderLayout(`
     <div class="page-header animate-fade-in-up">
       <h1 class="page-title">Reports</h1>
-      <p class="page-subtitle">Generate and export reports</p>
+      <p class="page-subtitle">Generate, view, and export operational reports</p>
     </div>
 
-    <!-- Report Type Selection -->
+    <!-- Filters Card -->
     <div class="card mb-6">
-      <div class="grid grid-cols-1 md:grid-cols-4 gap-4" id="standard-filters">
+      <div class="grid grid-cols-1 md:grid-cols-5 gap-4" id="standard-filters">
         <div>
           <label class="form-label">Report Type</label>
           <select id="report-type" class="form-input">
@@ -38,7 +33,7 @@ export async function renderReportsPage() {
             <option value="hours">Hours Logged</option>
             <option value="tasks">Task Status</option>
             <option value="allowance">Allowance Summary</option>
-            <option value="dar">Daily Activity Report</option>
+            <option value="dar">Daily Activity Report (DAR)</option>
           </select>
         </div>
         <div id="date-from-group">
@@ -54,6 +49,13 @@ export async function renderReportsPage() {
           <select id="filter-location" class="form-input">
             <option value="">All Locations</option>
             ${(locations || []).map(l => `<option value="${l.id}">${l.name}</option>`).join('')}
+          </select>
+        </div>
+        <div id="department-group">
+          <label class="form-label">Department</label>
+          <select id="filter-department" class="form-input">
+            <option value="">All Departments</option>
+            ${(departments || []).map(d => `<option value="${d.id}">${d.name}</option>`).join('')}
           </select>
         </div>
       </div>
@@ -85,10 +87,10 @@ export async function renderReportsPage() {
         </div>
       </div>
 
-      <div class="mt-4 flex gap-3">
+      <div class="mt-4 flex flex-wrap gap-3 items-center">
         <button id="generate-btn" class="btn-primary">
           ${icons.filter}
-          <span class="ml-2">Generate</span>
+          <span class="ml-2">Generate Report</span>
         </button>
         <button id="export-xlsx-btn" class="btn-secondary" disabled>
           ${icons.download}
@@ -101,46 +103,54 @@ export async function renderReportsPage() {
       </div>
     </div>
 
-    <!-- Chart -->
+    <!-- Chart + Summary Stats -->
     <div class="card mb-6" id="chart-section" style="display:none;">
-      <canvas id="report-chart" height="300"></canvas>
+      <div id="chart-inner" class="flex flex-col md:flex-row items-start gap-6">
+        <div id="chart-canvas-wrap" style="position:relative; flex-shrink:0;">
+          <canvas id="report-chart"></canvas>
+        </div>
+        <div id="chart-stats" class="flex-1"></div>
+      </div>
     </div>
 
     <!-- Data Table -->
     <div class="card" id="table-section" style="display:none;">
-      <div id="report-table-container"></div>
+      <div class="flex items-center justify-between mb-4">
+        <h3 class="text-lg font-semibold text-neutral-800" id="table-title">Results</h3>
+        <span class="text-sm text-neutral-500 bg-neutral-100 px-3 py-1 rounded-full" id="table-count"></span>
+      </div>
+      <div id="report-table-container" class="overflow-x-auto"></div>
     </div>
   `, (el) => {
-    // Set default dates (last 30 days)
     const now = new Date();
     const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
     el.querySelector('#date-from').value = thirtyDaysAgo.toISOString().slice(0, 10);
     el.querySelector('#date-to').value = now.toISOString().slice(0, 10);
 
     let reportData = null;
+    let currentType = 'attendance';
 
-    // Toggle DAR controls visibility
     el.querySelector('#report-type').addEventListener('change', (e) => {
-      const isDar = e.target.value === 'dar';
+      currentType = e.target.value;
+      const isDar = currentType === 'dar';
       el.querySelector('#dar-controls').style.display = isDar ? '' : 'none';
       el.querySelector('#date-from-group').style.display = isDar ? 'none' : '';
       el.querySelector('#date-to-group').style.display = isDar ? 'none' : '';
       el.querySelector('#location-group').style.display = isDar ? 'none' : '';
+      el.querySelector('#department-group').style.display = isDar ? 'none' : '';
       el.querySelector('#export-xlsx-btn').style.display = isDar ? 'none' : '';
       el.querySelector('#export-pdf-btn').style.display = isDar ? 'none' : '';
       el.querySelector('#chart-section').style.display = 'none';
       el.querySelector('#table-section').style.display = 'none';
+      reportData = null;
 
-      if (isDar) {
-        populateDarInterns(el);
-      }
+      if (isDar) populateDarInterns(el);
     });
 
     el.querySelector('#generate-btn').addEventListener('click', async () => {
-      const type = el.querySelector('#report-type').value;
+      currentType = el.querySelector('#report-type').value;
 
-      // DAR branch
-      if (type === 'dar') {
+      if (currentType === 'dar') {
         await handleDarGeneration(el);
         return;
       }
@@ -148,9 +158,10 @@ export async function renderReportsPage() {
       const dateFrom = el.querySelector('#date-from').value;
       const dateTo = el.querySelector('#date-to').value;
       const locationId = el.querySelector('#filter-location').value;
+      const departmentId = el.querySelector('#filter-department').value;
 
       if (!dateFrom || !dateTo) {
-        showToast('Please select date range', 'error');
+        showToast('Please select a date range', 'error');
         return;
       }
 
@@ -159,28 +170,33 @@ export async function renderReportsPage() {
       btn.innerHTML = `<span class="spinner"></span> Generating...`;
 
       try {
-        reportData = await fetchReportData(type, dateFrom, dateTo, locationId);
-        renderChart(el, type, reportData);
-        renderTable(el, type, reportData);
+        reportData = await fetchReportData(currentType, dateFrom, dateTo, locationId, departmentId);
+        renderChart(el, currentType, reportData);
+        renderTable(el, currentType, reportData);
 
         el.querySelector('#chart-section').style.display = '';
         el.querySelector('#table-section').style.display = '';
         el.querySelector('#export-xlsx-btn').disabled = false;
         el.querySelector('#export-pdf-btn').disabled = false;
       } catch (err) {
+        console.error('Report generation error:', err);
         showToast('Failed to generate report', 'error');
       } finally {
         btn.disabled = false;
-        btn.innerHTML = `${icons.filter}<span class="ml-2">Generate</span>`;
+        btn.innerHTML = `${icons.filter}<span class="ml-2">Generate Report</span>`;
       }
     });
 
     el.querySelector('#export-xlsx-btn').addEventListener('click', () => {
-      if (reportData) exportXlsx(reportData, el.querySelector('#report-type').value);
+      if (reportData) exportXlsx(reportData, currentType);
     });
 
     el.querySelector('#export-pdf-btn').addEventListener('click', () => {
-      if (reportData) exportPdf(reportData, el.querySelector('#report-type').value);
+      if (reportData) {
+        const dateFrom = el.querySelector('#date-from').value;
+        const dateTo = el.querySelector('#date-to').value;
+        exportPdf(reportData, currentType, dateFrom, dateTo);
+      }
     });
   }, '/reports');
 }
@@ -207,10 +223,8 @@ async function populateDarInterns(el) {
       `).join('')
     : '<p class="text-xs text-neutral-400 p-3">No active interns found</p>';
 
-  // Store interns data on the container for use in week population
   list._internsData = internList;
 
-  // Select All / Deselect All toggle
   const selectAllBtn = el.querySelector('#dar-select-all');
   selectAllBtn.textContent = 'Select All';
   selectAllBtn.onclick = () => {
@@ -221,7 +235,6 @@ async function populateDarInterns(el) {
     populateDarWeeks(el);
   };
 
-  // Wire change events on each checkbox
   list.addEventListener('change', (e) => {
     if (e.target.classList.contains('dar-intern-check')) {
       const checkboxes = list.querySelectorAll('.dar-intern-check');
@@ -273,7 +286,6 @@ async function populateDarWeeks(el) {
     return;
   }
 
-  // Group dates into Mon-Fri weeks
   const weeks = new Map();
   const ojtStart = intern?.ojt_start_date ? new Date(intern.ojt_start_date + 'T00:00:00') : null;
 
@@ -349,7 +361,6 @@ export async function fetchDarData(internId, mondayDate, fridayDate) {
       .maybeSingle(),
   ]);
 
-  // Fetch supervisor profile for signature
   let supervisor = null;
   if (intern?.supervisor_id) {
     const { data } = await supabase
@@ -445,7 +456,7 @@ export async function generateDarPdf(darData, weekNum, mondayDate, existingDoc) 
   doc.text('DAILY ACTIVITY REPORT — INTERNSHIP', pageWidth / 2, y, { align: 'center' });
   y += 8;
 
-  // Info fields — fixed column positions so labels and values align
+  // Info fields
   doc.setFontSize(11);
   const departmentName = intern?.departments?.name || '—';
   const courseName = intern?.course || '—';
@@ -455,7 +466,7 @@ export async function generateDarPdf(darData, weekNum, mondayDate, existingDoc) 
   const rightLabelX = pageWidth / 2 + 5;
   const rightValueX = pageWidth / 2 + 32;
 
-  // Row 1: NAME (left) | COURSE (right)
+  // Row 1: NAME | COURSE
   doc.setFont(undefined, 'bold');
   doc.text('NAME', leftLabelX, y);
   doc.setFont(undefined, 'normal');
@@ -468,7 +479,7 @@ export async function generateDarPdf(darData, weekNum, mondayDate, existingDoc) 
 
   y += 5.5;
 
-  // Row 2: DEPARTMENT (left) | WEEK (right)
+  // Row 2: DEPARTMENT | WEEK
   doc.setFont(undefined, 'bold');
   doc.text('DEPARTMENT', leftLabelX, y);
   doc.setFont(undefined, 'normal');
@@ -481,7 +492,7 @@ export async function generateDarPdf(darData, weekNum, mondayDate, existingDoc) 
 
   y += 6;
 
-  // Build 5 weekdays (Mon-Fri) using local date strings
+  // Build 5 weekdays (Mon-Fri)
   const monday = new Date(mondayDate + 'T00:00:00');
   const weekdays = [];
   for (let i = 0; i < 5; i++) {
@@ -501,7 +512,6 @@ export async function generateDarPdf(darData, weekNum, mondayDate, existingDoc) 
     const afternoonNarr = narratives.find(n => n.date === dateStr && n.session === 'afternoon');
     const isApproved = att?.status === 'approved';
 
-    // Morning row
     const mHours = calcSessionHours(att?.time_in_1, att?.time_out_1);
     const mTask = morningNarr?.task?.title || '';
     const mContent = stripHtml(morningNarr?.content);
@@ -519,14 +529,9 @@ export async function generateDarPdf(darData, weekNum, mondayDate, existingDoc) 
     ]);
 
     const mRowIdx = dayIdx * 2;
-    if (isApproved && internSigDataUrl) {
-      signatureCells.push({ row: mRowIdx, col: 5, dataUrl: internSigDataUrl });
-    }
-    if (isApproved && supervisorSigDataUrl) {
-      signatureCells.push({ row: mRowIdx, col: 6, dataUrl: supervisorSigDataUrl });
-    }
+    if (isApproved && internSigDataUrl) signatureCells.push({ row: mRowIdx, col: 5, dataUrl: internSigDataUrl });
+    if (isApproved && supervisorSigDataUrl) signatureCells.push({ row: mRowIdx, col: 6, dataUrl: supervisorSigDataUrl });
 
-    // Afternoon row
     const aHours = calcSessionHours(att?.time_in_2, att?.time_out_2);
     const aTask = afternoonNarr?.task?.title || '';
     const aContent = stripHtml(afternoonNarr?.content);
@@ -544,23 +549,17 @@ export async function generateDarPdf(darData, weekNum, mondayDate, existingDoc) 
     ]);
 
     const aRowIdx = dayIdx * 2 + 1;
-    if (isApproved && internSigDataUrl) {
-      signatureCells.push({ row: aRowIdx, col: 5, dataUrl: internSigDataUrl });
-    }
-    if (isApproved && supervisorSigDataUrl) {
-      signatureCells.push({ row: aRowIdx, col: 6, dataUrl: supervisorSigDataUrl });
-    }
+    if (isApproved && internSigDataUrl) signatureCells.push({ row: aRowIdx, col: 5, dataUrl: internSigDataUrl });
+    if (isApproved && supervisorSigDataUrl) signatureCells.push({ row: aRowIdx, col: 6, dataUrl: supervisorSigDataUrl });
 
     totalHours += mHours + aHours;
   });
 
-  // Calculate row height to fill the entire page
   const pageHeight = doc.internal.pageSize.getHeight();
   const approxHeaderRowH = 14;
   const footerSpace = 18;
   const bodyRowH = (pageHeight - y - margin - footerSpace - approxHeaderRowH) / 10;
 
-  // Render table
   autoTable(doc, {
     startY: y,
     head: [['DATE', 'TIME IN', 'TIME OUT', 'TASK ACCOMPLISHED', 'NO. OF HOURS', 'Signature of Intern', 'Signature of Supervisor']],
@@ -605,7 +604,6 @@ export async function generateDarPdf(darData, weekNum, mondayDate, existingDoc) 
     },
   });
 
-  // Footer: total hours + total allowance on the same line
   const finalY = doc.lastAutoTable.finalY + 6;
   doc.setFontSize(10);
   doc.setFont(undefined, 'bold');
@@ -616,7 +614,7 @@ export async function generateDarPdf(darData, weekNum, mondayDate, existingDoc) 
   const allowanceTotal = Number.isFinite(allowancePeriod?.total_amount)
     ? allowancePeriod.total_amount
     : (Number.isFinite(computedAllowance) ? computedAllowance : 0);
-  doc.text(`TOTAL ALLOWANCE FOR THIS WEEK: ${allowanceTotal.toFixed(2)}`, pageWidth - margin, finalY, { align: 'right' });
+  doc.text(`TOTAL ALLOWANCE FOR THIS WEEK: ₱${allowanceTotal.toFixed(2)}`, pageWidth - margin, finalY, { align: 'right' });
 
   return doc;
 }
@@ -649,7 +647,6 @@ async function handleDarGeneration(el) {
 
   try {
     if (selectedInternIds.length === 1 || bulkMode === 'single') {
-      // Individual PDFs — download each one
       for (const internId of selectedInternIds) {
         const darData = await fetchDarData(internId, mondayDate, fridayDate);
         const doc = await generateDarPdf(darData, weekNum, mondayDate);
@@ -659,7 +656,6 @@ async function handleDarGeneration(el) {
       showToast(`${selectedInternIds.length} DAR PDF(s) generated`, 'success');
 
     } else if (bulkMode === 'zip') {
-      // Individual PDFs packaged in a ZIP
       const JSZip = (await import('jszip')).default;
       const zip = new JSZip();
 
@@ -683,7 +679,6 @@ async function handleDarGeneration(el) {
       showToast('DAR ZIP downloaded', 'success');
 
     } else if (bulkMode === 'combined') {
-      // All interns in one PDF, each on a new page
       let doc = null;
 
       for (let i = 0; i < selectedInternIds.length; i++) {
@@ -706,208 +701,453 @@ async function handleDarGeneration(el) {
     showToast('Failed to generate DAR', 'error');
   } finally {
     btn.disabled = false;
-    btn.innerHTML = `${icons.filter}<span class="ml-2">Generate</span>`;
+    btn.innerHTML = `${icons.filter}<span class="ml-2">Generate Report</span>`;
   }
 }
 
-// ─── Standard report functions (unchanged) ──────────────────────────────────
+// ─── Standard report data fetching ──────────────────────────────────────────
 
-async function fetchReportData(type, dateFrom, dateTo, locationId) {
+async function fetchReportData(type, dateFrom, dateTo, locationId, departmentId) {
   switch (type) {
     case 'attendance': {
-      let query = supabase
+      const { data } = await supabase
         .from('attendance_records')
-        .select('*, intern:profiles!attendance_records_intern_id_fkey(full_name, location_id)')
+        .select('*, intern:profiles!attendance_records_intern_id_fkey(id, full_name, location_id, department_id, locations(name), departments(name))')
         .gte('date', dateFrom)
         .lte('date', dateTo)
         .order('date', { ascending: false });
-      const { data } = await query;
       let records = data || [];
       if (locationId) records = records.filter(r => r.intern?.location_id === locationId);
+      if (departmentId) records = records.filter(r => r.intern?.department_id === departmentId);
       return records;
     }
+
     case 'hours': {
-      let query = supabase
+      const { data } = await supabase
         .from('attendance_records')
-        .select('date, total_hours, intern:profiles!attendance_records_intern_id_fkey(full_name, location_id)')
+        .select('date, total_hours, intern:profiles!attendance_records_intern_id_fkey(id, full_name, location_id, department_id, locations(name), departments(name))')
         .eq('status', 'approved')
         .gte('date', dateFrom)
         .lte('date', dateTo);
-      const { data } = await query;
       let records = data || [];
       if (locationId) records = records.filter(r => r.intern?.location_id === locationId);
+      if (departmentId) records = records.filter(r => r.intern?.department_id === departmentId);
 
       // Group by intern
       const grouped = {};
       records.forEach(r => {
-        const name = r.intern?.full_name || 'Unknown';
-        if (!grouped[name]) grouped[name] = 0;
-        grouped[name] += r.total_hours || 0;
+        const id = r.intern?.id || r.intern?.full_name || 'unknown';
+        if (!grouped[id]) {
+          grouped[id] = {
+            name: r.intern?.full_name || 'Unknown',
+            department: r.intern?.departments?.name || '—',
+            location: r.intern?.locations?.name || '—',
+            hours: 0,
+            days: 0,
+          };
+        }
+        grouped[id].hours += r.total_hours || 0;
+        grouped[id].days += 1;
       });
-      return Object.entries(grouped).map(([name, hours]) => ({ name, hours }));
+      return Object.values(grouped);
     }
+
     case 'tasks': {
       const { data } = await supabase
         .from('tasks')
-        .select('status')
+        .select('id, title, status, priority, due_date, created_at, assignee:profiles!tasks_assigned_to_fkey(full_name, department_id, departments(name))')
         .gte('created_at', dateFrom)
         .lte('created_at', dateTo + 'T23:59:59');
-      const counts = { not_started: 0, in_progress: 0, completed: 0, blocked: 0 };
-      (data || []).forEach(t => { counts[t.status] = (counts[t.status] || 0) + 1; });
-      return counts;
+      let tasks = data || [];
+      if (departmentId) tasks = tasks.filter(t => t.assignee?.department_id === departmentId);
+      return tasks;
     }
+
     case 'allowance': {
       const { data } = await supabase
         .from('allowance_periods')
-        .select('*, intern:profiles!allowance_periods_intern_id_fkey(full_name)')
+        .select('*, intern:profiles!allowance_periods_intern_id_fkey(full_name, department_id, departments(name))')
         .gte('week_start', dateFrom)
         .lte('week_end', dateTo)
         .eq('status', 'approved')
         .order('week_start', { ascending: false });
-      return data || [];
+      let records = data || [];
+      if (departmentId) records = records.filter(p => p.intern?.department_id === departmentId);
+      return records;
     }
+
     default:
       return [];
   }
 }
 
+// ─── Chart rendering ─────────────────────────────────────────────────────────
+
 async function renderChart(el, type, data) {
   const { Chart, registerables } = await import('chart.js');
   Chart.register(...registerables);
 
-  if (chartInstance) chartInstance.destroy();
-  const ctx = el.querySelector('#report-chart').getContext('2d');
+  if (chartInstance) {
+    chartInstance.destroy();
+    chartInstance = null;
+  }
+
+  const canvasWrap = el.querySelector('#chart-canvas-wrap');
+  const statsEl = el.querySelector('#chart-stats');
 
   let config;
+
   switch (type) {
     case 'attendance': {
-      const statusCounts = { pending: 0, approved: 0, rejected: 0 };
-      data.forEach(r => { statusCounts[r.status] = (statusCounts[r.status] || 0) + 1; });
+      const counts = { pending: 0, approved: 0, rejected: 0 };
+      data.forEach(r => { counts[r.status] = (counts[r.status] || 0) + 1; });
+      const total = data.length;
+
+      // Constrain doughnut
+      canvasWrap.style.width = '260px';
+      canvasWrap.style.height = '260px';
+
+      statsEl.innerHTML = `
+        <div>
+          <p class="text-xs font-semibold text-neutral-500 uppercase tracking-wide mb-3">Summary</p>
+          <div class="space-y-3">
+            ${statTile('Total Records', total, '#4f46e5')}
+            ${statTile('Approved', counts.approved, '#10b981')}
+            ${statTile('Pending', counts.pending, '#f59e0b')}
+            ${statTile('Rejected', counts.rejected, '#ef4444')}
+          </div>
+        </div>`;
+
       config = {
         type: 'doughnut',
         data: {
           labels: ['Pending', 'Approved', 'Rejected'],
-          datasets: [{
-            data: [statusCounts.pending, statusCounts.approved, statusCounts.rejected],
-            backgroundColor: ['#f59e0b', '#10b981', '#ef4444'],
-          }],
+          datasets: [{ data: [counts.pending, counts.approved, counts.rejected], backgroundColor: ['#f59e0b', '#10b981', '#ef4444'], borderWidth: 2 }],
         },
-        options: { plugins: { title: { display: true, text: 'Attendance Status Distribution' } } },
+        options: {
+          responsive: true,
+          maintainAspectRatio: true,
+          plugins: {
+            legend: { position: 'bottom' },
+            title: { display: true, text: 'Attendance Status Distribution', font: { size: 13 } },
+          },
+        },
       };
       break;
     }
+
     case 'hours': {
+      canvasWrap.style.width = '100%';
+      canvasWrap.style.height = '320px';
+      statsEl.innerHTML = '';
+
+      const totalHrs = data.reduce((s, d) => s + d.hours, 0);
+      const totalDays = data.reduce((s, d) => s + d.days, 0);
+
+      statsEl.innerHTML = `
+        <div>
+          <p class="text-xs font-semibold text-neutral-500 uppercase tracking-wide mb-3">Summary</p>
+          <div class="space-y-3">
+            ${statTile('Total Interns', data.length, '#4f46e5')}
+            ${statTile('Total Hours', totalHrs.toFixed(1) + ' hrs', '#10b981')}
+            ${statTile('Total Days', totalDays + ' days', '#f59e0b')}
+          </div>
+        </div>`;
+      canvasWrap.style.width = 'auto';
+      canvasWrap.style.flex = '1';
+
       config = {
         type: 'bar',
         data: {
           labels: data.map(d => d.name),
-          datasets: [{
-            label: 'Hours',
-            data: data.map(d => d.hours),
-            backgroundColor: '#4f46e5',
-          }],
+          datasets: [{ label: 'Total Hours', data: data.map(d => +d.hours.toFixed(2)), backgroundColor: '#4f46e5', borderRadius: 4 }],
         },
-        options: { plugins: { title: { display: true, text: 'Total Hours by Intern' } }, scales: { y: { beginAtZero: true } } },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: { title: { display: true, text: 'Hours Logged per Intern', font: { size: 13 } }, legend: { display: false } },
+          scales: { y: { beginAtZero: true, title: { display: true, text: 'Hours' } } },
+        },
       };
       break;
     }
+
     case 'tasks': {
+      const counts = { not_started: 0, in_progress: 0, completed: 0, blocked: 0 };
+      data.forEach(t => { if (t.status in counts) counts[t.status]++; });
+      const total = data.length;
+
+      canvasWrap.style.width = '260px';
+      canvasWrap.style.height = '260px';
+
+      statsEl.innerHTML = `
+        <div>
+          <p class="text-xs font-semibold text-neutral-500 uppercase tracking-wide mb-3">Summary</p>
+          <div class="space-y-3">
+            ${statTile('Total Tasks', total, '#4f46e5')}
+            ${statTile('Not Started', counts.not_started, '#6b7280')}
+            ${statTile('In Progress', counts.in_progress, '#3b82f6')}
+            ${statTile('Completed', counts.completed, '#10b981')}
+            ${statTile('Blocked', counts.blocked, '#ef4444')}
+          </div>
+        </div>`;
+
       config = {
         type: 'doughnut',
         data: {
           labels: ['Not Started', 'In Progress', 'Completed', 'Blocked'],
-          datasets: [{
-            data: [data.not_started, data.in_progress, data.completed, data.blocked],
-            backgroundColor: ['#6b7280', '#3b82f6', '#10b981', '#ef4444'],
-          }],
+          datasets: [{ data: [counts.not_started, counts.in_progress, counts.completed, counts.blocked], backgroundColor: ['#6b7280', '#3b82f6', '#10b981', '#ef4444'], borderWidth: 2 }],
         },
-        options: { plugins: { title: { display: true, text: 'Task Status Breakdown' } } },
+        options: {
+          responsive: true,
+          maintainAspectRatio: true,
+          plugins: {
+            legend: { position: 'bottom' },
+            title: { display: true, text: 'Task Status Breakdown', font: { size: 13 } },
+          },
+        },
       };
       break;
     }
+
     case 'allowance': {
       const byIntern = {};
       data.forEach(p => {
         const name = p.intern?.full_name || 'Unknown';
-        byIntern[name] = (byIntern[name] || 0) + p.total_amount;
+        byIntern[name] = (byIntern[name] || 0) + (p.total_amount || 0);
       });
+      const grandTotal = Object.values(byIntern).reduce((s, v) => s + v, 0);
+
+      statsEl.innerHTML = `
+        <div>
+          <p class="text-xs font-semibold text-neutral-500 uppercase tracking-wide mb-3">Summary</p>
+          <div class="space-y-3">
+            ${statTile('Total Periods', data.length, '#4f46e5')}
+            ${statTile('Total Interns', Object.keys(byIntern).length, '#3b82f6')}
+            ${statTile('Grand Total', '₱' + grandTotal.toFixed(2), '#10b981')}
+          </div>
+        </div>`;
+      canvasWrap.style.width = 'auto';
+      canvasWrap.style.flex = '1';
+
       config = {
         type: 'bar',
         data: {
           labels: Object.keys(byIntern),
-          datasets: [{
-            label: 'Total Allowance (₱)',
-            data: Object.values(byIntern),
-            backgroundColor: '#10b981',
-          }],
+          datasets: [{ label: 'Total Allowance (₱)', data: Object.values(byIntern).map(v => +v.toFixed(2)), backgroundColor: '#10b981', borderRadius: 4 }],
         },
-        options: { plugins: { title: { display: true, text: 'Allowance by Intern' } }, scales: { y: { beginAtZero: true } } },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: { title: { display: true, text: 'Total Allowance per Intern', font: { size: 13 } }, legend: { display: false } },
+          scales: { y: { beginAtZero: true, title: { display: true, text: 'Amount (₱)' } } },
+        },
       };
       break;
     }
   }
 
-  chartInstance = new Chart(ctx, config);
+  // Set explicit height on canvas for bar charts
+  const canvas = el.querySelector('#report-chart');
+  if (type === 'hours' || type === 'allowance') {
+    canvas.style.height = '300px';
+  } else {
+    canvas.style.height = '';
+  }
+
+  chartInstance = new Chart(canvas, config);
 }
+
+function statTile(label, value, color) {
+  return `
+    <div class="flex items-center justify-between py-2 px-3 bg-neutral-50 rounded-lg border border-neutral-100">
+      <span class="text-sm text-neutral-600">${label}</span>
+      <span class="text-sm font-semibold" style="color:${color}">${value}</span>
+    </div>`;
+}
+
+// ─── Table rendering ─────────────────────────────────────────────────────────
 
 function renderTable(el, type, data) {
   const container = el.querySelector('#report-table-container');
+  const titleEl = el.querySelector('#table-title');
+  const countEl = el.querySelector('#table-count');
+
+  const labels = {
+    attendance: 'Attendance Records',
+    hours: 'Hours Logged by Intern',
+    tasks: 'Task Details',
+    allowance: 'Approved Allowance Periods',
+  };
+  titleEl.textContent = labels[type] || 'Results';
+
+  const statusBadge = (status) => {
+    const map = {
+      approved: 'badge-success',
+      rejected: 'badge-danger',
+      pending: 'badge-pending',
+      completed: 'badge-success',
+      in_progress: 'badge-info',
+      not_started: 'badge-secondary',
+      blocked: 'badge-danger',
+    };
+    const cls = map[status] || 'badge-secondary';
+    return `<span class="${cls}">${status.replace(/_/g, ' ')}</span>`;
+  };
 
   switch (type) {
-    case 'attendance':
+    case 'attendance': {
+      countEl.textContent = `${data.length} records`;
       container.innerHTML = `
         <table class="data-table">
-          <thead><tr><th>Intern</th><th>Date</th><th>Clock In</th><th>Clock Out</th><th>Hours</th><th>Status</th></tr></thead>
+          <thead>
+            <tr>
+              <th>Intern</th>
+              <th>Department</th>
+              <th>Location</th>
+              <th>Date</th>
+              <th>AM In</th>
+              <th>AM Out</th>
+              <th>PM In</th>
+              <th>PM Out</th>
+              <th>Total Hours</th>
+              <th>Status</th>
+            </tr>
+          </thead>
           <tbody>
-            ${data.map(r => `<tr>
-              <td>${r.intern?.full_name || '—'}</td>
-              <td>${formatDate(r.date)}</td>
-              <td>${r.morning_in || '—'}</td>
-              <td>${r.afternoon_out || '—'}</td>
-              <td>${formatHoursDisplay(r.total_hours)}</td>
-              <td><span class="badge-${r.status === 'approved' ? 'success' : r.status === 'rejected' ? 'danger' : 'pending'}">${r.status}</span></td>
-            </tr>`).join('')}
+            ${data.length === 0 ? '<tr><td colspan="10" class="text-center text-neutral-400 py-8">No records found</td></tr>' :
+              data.map(r => `<tr>
+                <td class="font-medium">${r.intern?.full_name || '—'}</td>
+                <td>${r.intern?.departments?.name || '—'}</td>
+                <td>${r.intern?.locations?.name || '—'}</td>
+                <td>${formatDate(r.date)}</td>
+                <td>${r.time_in_1 ? formatTime(r.time_in_1) : '—'}</td>
+                <td>${r.time_out_1 ? formatTime(r.time_out_1) : '—'}</td>
+                <td>${r.time_in_2 ? formatTime(r.time_in_2) : '—'}</td>
+                <td>${r.time_out_2 ? formatTime(r.time_out_2) : '—'}</td>
+                <td>${formatHoursDisplay(r.total_hours)}</td>
+                <td>${statusBadge(r.status)}</td>
+              </tr>`).join('')}
           </tbody>
         </table>`;
       break;
-    case 'hours':
+    }
+
+    case 'hours': {
+      const totalHrs = data.reduce((s, d) => s + d.hours, 0);
+      countEl.textContent = `${data.length} intern${data.length !== 1 ? 's' : ''}`;
       container.innerHTML = `
         <table class="data-table">
-          <thead><tr><th>Intern</th><th>Total Hours</th></tr></thead>
+          <thead>
+            <tr>
+              <th>Intern</th>
+              <th>Department</th>
+              <th>Location</th>
+              <th>Days Attended</th>
+              <th>Total Hours</th>
+              <th>Avg Hours / Day</th>
+            </tr>
+          </thead>
           <tbody>
-            ${data.map(d => `<tr><td>${d.name}</td><td>${formatHoursDisplay(d.hours)}</td></tr>`).join('')}
+            ${data.length === 0 ? '<tr><td colspan="6" class="text-center text-neutral-400 py-8">No records found</td></tr>' :
+              data.map(d => `<tr>
+                <td class="font-medium">${d.name}</td>
+                <td>${d.department}</td>
+                <td>${d.location}</td>
+                <td>${d.days}</td>
+                <td class="font-semibold">${formatHoursDisplay(d.hours)}</td>
+                <td>${d.days > 0 ? formatHoursDisplay(d.hours / d.days) : '—'}</td>
+              </tr>`).join('')}
+          </tbody>
+          ${data.length > 0 ? `
+          <tfoot>
+            <tr class="font-semibold bg-neutral-50">
+              <td colspan="3">Total</td>
+              <td>${data.reduce((s, d) => s + d.days, 0)}</td>
+              <td>${formatHoursDisplay(totalHrs)}</td>
+              <td>—</td>
+            </tr>
+          </tfoot>` : ''}
+        </table>`;
+      break;
+    }
+
+    case 'tasks': {
+      countEl.textContent = `${data.length} task${data.length !== 1 ? 's' : ''}`;
+      container.innerHTML = `
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Task Title</th>
+              <th>Assigned To</th>
+              <th>Department</th>
+              <th>Status</th>
+              <th>Priority</th>
+              <th>Due Date</th>
+              <th>Created</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${data.length === 0 ? '<tr><td colspan="7" class="text-center text-neutral-400 py-8">No tasks found</td></tr>' :
+              data.map(t => `<tr>
+                <td class="font-medium">${t.title || '—'}</td>
+                <td>${t.assignee?.full_name || '—'}</td>
+                <td>${t.assignee?.departments?.name || '—'}</td>
+                <td>${statusBadge(t.status)}</td>
+                <td>${t.priority ? `<span class="badge-secondary capitalize">${t.priority}</span>` : '—'}</td>
+                <td>${t.due_date ? formatDate(t.due_date) : '—'}</td>
+                <td>${formatDate(t.created_at?.slice(0, 10))}</td>
+              </tr>`).join('')}
           </tbody>
         </table>`;
       break;
-    case 'tasks':
+    }
+
+    case 'allowance': {
+      const grandTotal = data.reduce((s, p) => s + (p.total_amount || 0), 0);
+      countEl.textContent = `${data.length} period${data.length !== 1 ? 's' : ''}`;
       container.innerHTML = `
         <table class="data-table">
-          <thead><tr><th>Status</th><th>Count</th></tr></thead>
+          <thead>
+            <tr>
+              <th>Intern</th>
+              <th>Department</th>
+              <th>Week Start</th>
+              <th>Week End</th>
+              <th>Hours</th>
+              <th>Rate (₱/hr)</th>
+              <th>Amount</th>
+              <th>Status</th>
+            </tr>
+          </thead>
           <tbody>
-            <tr><td>Not Started</td><td>${data.not_started}</td></tr>
-            <tr><td>In Progress</td><td>${data.in_progress}</td></tr>
-            <tr><td>Completed</td><td>${data.completed}</td></tr>
-            <tr><td>Blocked</td><td>${data.blocked}</td></tr>
+            ${data.length === 0 ? '<tr><td colspan="8" class="text-center text-neutral-400 py-8">No records found</td></tr>' :
+              data.map(p => `<tr>
+                <td class="font-medium">${p.intern?.full_name || '—'}</td>
+                <td>${p.intern?.departments?.name || '—'}</td>
+                <td>${formatDate(p.week_start)}</td>
+                <td>${formatDate(p.week_end)}</td>
+                <td>${formatHoursDisplay(p.total_hours)}</td>
+                <td>₱${p.hourly_rate?.toFixed(2) ?? '—'}</td>
+                <td class="font-semibold">₱${p.total_amount?.toFixed(2) ?? '—'}</td>
+                <td>${statusBadge(p.status)}</td>
+              </tr>`).join('')}
           </tbody>
+          ${data.length > 0 ? `
+          <tfoot>
+            <tr class="font-semibold bg-neutral-50">
+              <td colspan="6">Grand Total</td>
+              <td>₱${grandTotal.toFixed(2)}</td>
+              <td></td>
+            </tr>
+          </tfoot>` : ''}
         </table>`;
       break;
-    case 'allowance':
-      container.innerHTML = `
-        <table class="data-table">
-          <thead><tr><th>Intern</th><th>Week</th><th>Hours</th><th>Rate</th><th>Amount</th></tr></thead>
-          <tbody>
-            ${data.map(p => `<tr>
-              <td>${p.intern?.full_name || '—'}</td>
-              <td>${formatDate(p.week_start)} – ${formatDate(p.week_end)}</td>
-              <td>${formatHoursDisplay(p.total_hours)}</td>
-              <td>₱${p.hourly_rate?.toFixed(2)}</td>
-              <td class="font-semibold">₱${p.total_amount?.toFixed(2)}</td>
-            </tr>`).join('')}
-          </tbody>
-        </table>`;
-      break;
+    }
   }
 }
+
+// ─── XLSX export ─────────────────────────────────────────────────────────────
 
 async function exportXlsx(data, type) {
   try {
@@ -917,76 +1157,250 @@ async function exportXlsx(data, type) {
     switch (type) {
       case 'attendance':
         rows = data.map(r => ({
-          Intern: r.intern?.full_name, Date: r.date,
-          'Clock In': r.morning_in, 'Clock Out': r.afternoon_out,
-          Hours: r.total_hours, Status: r.status,
+          Intern: r.intern?.full_name || '',
+          Department: r.intern?.departments?.name || '',
+          Location: r.intern?.locations?.name || '',
+          Date: r.date,
+          'AM In': r.time_in_1 ? formatTime(r.time_in_1) : '',
+          'AM Out': r.time_out_1 ? formatTime(r.time_out_1) : '',
+          'PM In': r.time_in_2 ? formatTime(r.time_in_2) : '',
+          'PM Out': r.time_out_2 ? formatTime(r.time_out_2) : '',
+          'Total Hours': r.total_hours || 0,
+          Status: r.status,
         }));
         break;
+
       case 'hours':
-        rows = data.map(d => ({ Intern: d.name, 'Total Hours': d.hours }));
+        rows = data.map(d => ({
+          Intern: d.name,
+          Department: d.department,
+          Location: d.location,
+          'Days Attended': d.days,
+          'Total Hours': +d.hours.toFixed(2),
+          'Avg Hours / Day': d.days > 0 ? +(d.hours / d.days).toFixed(2) : 0,
+        }));
         break;
+
       case 'tasks':
-        rows = [
-          { Status: 'Not Started', Count: data.not_started },
-          { Status: 'In Progress', Count: data.in_progress },
-          { Status: 'Completed', Count: data.completed },
-          { Status: 'Blocked', Count: data.blocked },
-        ];
+        rows = data.map(t => ({
+          'Task Title': t.title || '',
+          'Assigned To': t.assignee?.full_name || '',
+          Department: t.assignee?.departments?.name || '',
+          Status: t.status,
+          Priority: t.priority || '',
+          'Due Date': t.due_date || '',
+          'Created': t.created_at?.slice(0, 10) || '',
+        }));
         break;
+
       case 'allowance':
         rows = data.map(p => ({
-          Intern: p.intern?.full_name, 'Week Start': p.week_start,
-          'Week End': p.week_end, Hours: p.total_hours,
-          Rate: p.hourly_rate, Amount: p.total_amount,
+          Intern: p.intern?.full_name || '',
+          Department: p.intern?.departments?.name || '',
+          'Week Start': p.week_start,
+          'Week End': p.week_end,
+          Hours: p.total_hours || 0,
+          'Rate (₱/hr)': p.hourly_rate || 0,
+          Amount: p.total_amount || 0,
+          Status: p.status,
         }));
         break;
+
+      default:
+        rows = [];
     }
 
     const ws = XLSX.utils.json_to_sheet(rows);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Report');
     XLSX.writeFile(wb, `report_${type}_${new Date().toISOString().slice(0, 10)}.xlsx`);
-    showToast('XLSX exported', 'success');
+    showToast('XLSX exported successfully', 'success');
   } catch (err) {
+    console.error('XLSX export error:', err);
     showToast('Failed to export XLSX', 'error');
   }
 }
 
-async function exportPdf(data, type) {
+// ─── PDF export ──────────────────────────────────────────────────────────────
+
+async function exportPdf(data, type, dateFrom, dateTo) {
   try {
     const { default: jsPDF } = await import('jspdf');
-    await import('jspdf-autotable');
+    const { default: autoTable } = await import('jspdf-autotable');
 
-    const doc = new jsPDF();
-    doc.setFontSize(16);
-    doc.text(`Report: ${type.charAt(0).toUpperCase() + type.slice(1)}`, 14, 20);
-    doc.setFontSize(10);
-    doc.text(`Generated: ${new Date().toLocaleString()}`, 14, 28);
+    const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+    const pageWidth = doc.internal.pageSize.getWidth();   // 297
+    const pageHeight = doc.internal.pageSize.getHeight(); // 210
+    const margin = 14;
 
-    let head, body;
+    const reportTitles = {
+      attendance: 'Attendance Summary Report',
+      hours: 'Hours Logged Report',
+      tasks: 'Task Status Report',
+      allowance: 'Allowance Summary Report',
+    };
+    const reportTitle = reportTitles[type] || 'Report';
+    const dateRangeStr = `${formatDate(dateFrom)} – ${formatDate(dateTo)}`;
+
+    // ── Header bar ──────────────────────────────────────────────────────────
+    doc.setFillColor(41, 65, 148);
+    doc.rect(0, 0, pageWidth, 24, 'F');
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(15);
+    doc.setFont(undefined, 'bold');
+    doc.text('M88 INTERNS PRODUCTIVITY TRACKER', pageWidth / 2, 10, { align: 'center' });
+    doc.setFontSize(11);
+    doc.setFont(undefined, 'normal');
+    doc.text(reportTitle, pageWidth / 2, 18, { align: 'center' });
+
+    // ── Sub-header ──────────────────────────────────────────────────────────
+    doc.setTextColor(60, 60, 60);
+    doc.setFontSize(9);
+    doc.text(`Date Range: ${dateRangeStr}`, margin, 31);
+    doc.text(`Generated: ${new Date().toLocaleString()}`, pageWidth - margin, 31, { align: 'right' });
+
+    doc.setDrawColor(41, 65, 148);
+    doc.setLineWidth(0.4);
+    doc.line(margin, 34, pageWidth - margin, 34);
+
+    // ── Build table head/body ───────────────────────────────────────────────
+    let head, body, foot;
+
     switch (type) {
       case 'attendance':
-        head = [['Intern', 'Date', 'Clock In', 'Clock Out', 'Hours', 'Status']];
-        body = data.map(r => [r.intern?.full_name, r.date, r.morning_in || '—', r.afternoon_out || '—', r.total_hours?.toFixed(2), r.status]);
+        head = [['Intern', 'Department', 'Location', 'Date', 'AM In', 'AM Out', 'PM In', 'PM Out', 'Total Hours', 'Status']];
+        body = data.map(r => [
+          r.intern?.full_name || '—',
+          r.intern?.departments?.name || '—',
+          r.intern?.locations?.name || '—',
+          r.date || '—',
+          r.time_in_1 ? formatTime(r.time_in_1) : '—',
+          r.time_out_1 ? formatTime(r.time_out_1) : '—',
+          r.time_in_2 ? formatTime(r.time_in_2) : '—',
+          r.time_out_2 ? formatTime(r.time_out_2) : '—',
+          r.total_hours != null ? r.total_hours.toFixed(2) : '—',
+          r.status || '—',
+        ]);
         break;
-      case 'hours':
-        head = [['Intern', 'Total Hours']];
-        body = data.map(d => [d.name, d.hours.toFixed(2)]);
+
+      case 'hours': {
+        const totalHrs = data.reduce((s, d) => s + d.hours, 0);
+        const totalDays = data.reduce((s, d) => s + d.days, 0);
+        head = [['Intern', 'Department', 'Location', 'Days Attended', 'Total Hours', 'Avg Hours / Day']];
+        body = data.map(d => [
+          d.name,
+          d.department,
+          d.location,
+          d.days,
+          d.hours.toFixed(2),
+          d.days > 0 ? (d.hours / d.days).toFixed(2) : '—',
+        ]);
+        foot = [['TOTAL', '', '', totalDays, totalHrs.toFixed(2), '']];
         break;
+      }
+
       case 'tasks':
-        head = [['Status', 'Count']];
-        body = [['Not Started', data.not_started], ['In Progress', data.in_progress], ['Completed', data.completed], ['Blocked', data.blocked]];
+        head = [['Task Title', 'Assigned To', 'Department', 'Status', 'Priority', 'Due Date', 'Created']];
+        body = data.map(t => [
+          t.title || '—',
+          t.assignee?.full_name || '—',
+          t.assignee?.departments?.name || '—',
+          t.status?.replace(/_/g, ' ') || '—',
+          t.priority || '—',
+          t.due_date ? formatDate(t.due_date) : '—',
+          t.created_at ? formatDate(t.created_at.slice(0, 10)) : '—',
+        ]);
         break;
-      case 'allowance':
-        head = [['Intern', 'Week', 'Hours', 'Rate', 'Amount']];
-        body = data.map(p => [p.intern?.full_name, `${p.week_start} – ${p.week_end}`, p.total_hours?.toFixed(2), `₱${p.hourly_rate?.toFixed(2)}`, `₱${p.total_amount?.toFixed(2)}`]);
+
+      case 'allowance': {
+        const grandTotal = data.reduce((s, p) => s + (p.total_amount || 0), 0);
+        head = [['Intern', 'Department', 'Week Start', 'Week End', 'Hours', 'Rate (₱/hr)', 'Amount', 'Status']];
+        body = data.map(p => [
+          p.intern?.full_name || '—',
+          p.intern?.departments?.name || '—',
+          p.week_start || '—',
+          p.week_end || '—',
+          p.total_hours != null ? p.total_hours.toFixed(2) : '—',
+          p.hourly_rate != null ? `₱${p.hourly_rate.toFixed(2)}` : '—',
+          p.total_amount != null ? `₱${p.total_amount.toFixed(2)}` : '—',
+          p.status || '—',
+        ]);
+        foot = [['GRAND TOTAL', '', '', '', '', '', `₱${grandTotal.toFixed(2)}`, '']];
         break;
+      }
+
+      default:
+        head = [['No Data']];
+        body = [['No data available']];
     }
 
-    doc.autoTable({ head, body, startY: 35 });
+    // ── Render table ────────────────────────────────────────────────────────
+    autoTable(doc, {
+      head,
+      body,
+      foot: foot || undefined,
+      startY: 37,
+      margin: { left: margin, right: margin },
+      theme: 'striped',
+      styles: {
+        fontSize: 8,
+        cellPadding: 2.5,
+        valign: 'middle',
+        textColor: [30, 30, 30],
+        lineWidth: 0.1,
+        lineColor: [210, 210, 210],
+      },
+      headStyles: {
+        fillColor: [41, 65, 148],
+        textColor: [255, 255, 255],
+        fontStyle: 'bold',
+        fontSize: 8.5,
+        halign: 'center',
+      },
+      alternateRowStyles: {
+        fillColor: [245, 247, 255],
+      },
+      footStyles: {
+        fillColor: [235, 238, 255],
+        textColor: [30, 30, 30],
+        fontStyle: 'bold',
+        fontSize: 8.5,
+      },
+      didDrawPage: (hookData) => {
+        // Page number footer
+        doc.setFontSize(8);
+        doc.setTextColor(150);
+        doc.text(
+          `Page ${hookData.pageNumber} of ${doc.internal.getNumberOfPages()}`,
+          pageWidth / 2, pageHeight - 5, { align: 'center' }
+        );
+      },
+    });
+
+    // ── Summary block for tasks (aggregate counts) ──────────────────────────
+    if (type === 'tasks' && data.length > 0) {
+      const counts = { not_started: 0, in_progress: 0, completed: 0, blocked: 0 };
+      data.forEach(t => { if (t.status in counts) counts[t.status]++; });
+
+      const summaryY = doc.lastAutoTable.finalY + 8;
+      if (summaryY < pageHeight - 30) {
+        doc.setFontSize(9);
+        doc.setFont(undefined, 'bold');
+        doc.setTextColor(41, 65, 148);
+        doc.text('Status Summary:', margin, summaryY);
+        doc.setFont(undefined, 'normal');
+        doc.setTextColor(60, 60, 60);
+        doc.text(
+          `Not Started: ${counts.not_started}   In Progress: ${counts.in_progress}   Completed: ${counts.completed}   Blocked: ${counts.blocked}   Total: ${data.length}`,
+          margin + 30, summaryY
+        );
+      }
+    }
+
     doc.save(`report_${type}_${new Date().toISOString().slice(0, 10)}.pdf`);
-    showToast('PDF exported', 'success');
+    showToast('PDF exported successfully', 'success');
   } catch (err) {
+    console.error('PDF export error:', err);
     showToast('Failed to export PDF', 'error');
   }
 }

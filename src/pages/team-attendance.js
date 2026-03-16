@@ -6,7 +6,17 @@ import { getProfile } from '../lib/auth.js';
 import { renderLayout } from '../components/layout.js';
 import { supabase } from '../lib/supabase.js';
 import { icons } from '../lib/icons.js';
-import { formatDate, formatTime, formatHoursDisplay, getMonday, getFriday } from '../lib/utils.js';
+import { formatDate, formatTime, formatHoursDisplay, getMonday, getFriday, getTodayDate } from '../lib/utils.js';
+import { showToast } from '../lib/toast.js';
+import { logAudit } from '../lib/audit.js';
+import { createModal } from '../lib/component.js';
+
+function ipConsistencyBadge(ip_consistent) {
+  if (ip_consistent == null) return '';
+  return ip_consistent
+    ? '<span class="badge-success text-xs ml-1">IP Consistent</span>'
+    : '<span class="badge-danger text-xs ml-1">IP Mismatch</span>';
+}
 
 export async function renderTeamAttendancePage() {
   const profile = getProfile();
@@ -62,8 +72,16 @@ export async function renderTeamAttendancePage() {
 
   function renderContent(el) {
     const filtered = getFiltered();
+    const today = getTodayDate();
     const tbody = el.querySelector('#attendance-tbody');
-    tbody.innerHTML = filtered.map(a => `
+    tbody.innerHTML = filtered.map(a => {
+      // Show actions when End of Day is missing and at least one punch is logged
+      const hasPunches = a.time_in_1 || a.time_in_2;
+      const missingEndOfDay = !a.time_out_2 && hasPunches;
+      const isPastDate = a.date < today;
+      const showActions = missingEndOfDay && (isPastDate || isEndOfDayCutoffPassed());
+
+      return `
       <tr>
         <td>${a.intern?.full_name || '—'}</td>
         <td>${formatDate(a.date)}</td>
@@ -78,9 +96,18 @@ export async function renderTeamAttendancePage() {
         <td>
           ${a.is_late ? '<span class="badge-warning text-xs">Late</span>' : ''}
           ${a.is_outside_hours ? '<span class="badge-danger text-xs ml-1">Outside</span>' : ''}
+          ${ipConsistencyBadge(a.ip_consistent)}
+        </td>
+        <td>
+          ${showActions ? `
+            <div class="flex gap-2">
+              <button class="btn-sm btn-primary fill-eod-btn" data-id="${a.id}" data-date="${a.date}" data-intern="${a.intern?.full_name || 'Intern'}">Fill EOD</button>
+              <button class="btn-sm btn-secondary escalate-btn" data-id="${a.id}" data-date="${a.date}" data-intern-id="${a.intern_id}" data-intern="${a.intern?.full_name || 'Intern'}">Escalate</button>
+            </div>
+          ` : ''}
         </td>
       </tr>
-    `).join('') || '<tr><td colspan="9" class="text-center text-neutral-400 py-8">No attendance records</td></tr>';
+    `}).join('') || '<tr><td colspan="10" class="text-center text-neutral-400 py-8">No attendance records</td></tr>';
 
     el.querySelector('#record-count').textContent = `${filtered.length} record${filtered.length !== 1 ? 's' : ''}`;
   }
@@ -135,6 +162,7 @@ export async function renderTeamAttendancePage() {
               <th>Hours</th>
               <th>Status</th>
               <th>Flags</th>
+              <th>Actions</th>
             </tr>
           </thead>
           <tbody id="attendance-tbody"></tbody>
@@ -152,5 +180,111 @@ export async function renderTeamAttendancePage() {
       selectedStatus = e.target.value;
       renderContent(el);
     });
+
+    // Delegate click events for action buttons
+    el.addEventListener('click', (e) => {
+      const fillBtn = e.target.closest('.fill-eod-btn');
+      if (fillBtn) {
+        openFillEndOfDayModal(fillBtn.dataset.id, fillBtn.dataset.date, fillBtn.dataset.intern, profile, () => {
+          renderTeamAttendancePage();
+        });
+        return;
+      }
+
+      const escalateBtn = e.target.closest('.escalate-btn');
+      if (escalateBtn) {
+        handleEscalateToAdmin(escalateBtn.dataset.id, escalateBtn.dataset.date, escalateBtn.dataset.internId, escalateBtn.dataset.intern, profile);
+      }
+    });
   }, '/team-attendance');
+}
+
+function isEndOfDayCutoffPassed() {
+  const now = new Date();
+  return now.getHours() * 60 + now.getMinutes() >= 19 * 60 + 30; // 7:30 PM
+}
+
+function openFillEndOfDayModal(recordId, date, internName, profile, onComplete) {
+  createModal('Fill End of Day Time', `
+    <form id="fill-eod-form" class="space-y-4">
+      <p class="text-sm text-neutral-600">Enter the time <strong>${internName}</strong> left on <strong>${formatDate(date)}</strong>.</p>
+
+      <div>
+        <label class="form-label">End of Day Time</label>
+        <input type="time" id="eod-time" class="form-input" required />
+      </div>
+
+      <div class="flex justify-end gap-3">
+        <button type="button" id="fill-eod-cancel" class="btn-secondary">Cancel</button>
+        <button type="submit" class="btn-primary">Save</button>
+      </div>
+    </form>
+  `, (el, close) => {
+    el.querySelector('#fill-eod-cancel').addEventListener('click', close);
+
+    el.querySelector('#fill-eod-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const timeValue = el.querySelector('#eod-time').value;
+      if (!timeValue) {
+        showToast('Please enter a valid time', 'error');
+        return;
+      }
+
+      const correctedTimestamp = new Date(`${date}T${timeValue}:00`).toISOString();
+
+      try {
+        const { error } = await supabase
+          .from('attendance_records')
+          .update({ time_out_2: correctedTimestamp })
+          .eq('id', recordId);
+
+        if (error) throw error;
+
+        await logAudit('attendance.supervisor_filled_eod', 'attendance', recordId, {
+          filled_by: profile.id,
+          time_out_2: correctedTimestamp,
+        });
+
+        showToast(`End of Day time saved for ${internName}`, 'success');
+        close();
+        onComplete();
+      } catch (err) {
+        showToast(err.message || 'Failed to update attendance', 'error');
+      }
+    });
+  });
+}
+
+async function handleEscalateToAdmin(recordId, date, internId, internName, profile) {
+  if (!confirm(`Escalate ${internName}'s incomplete attendance on ${formatDate(date)} to admin?`)) return;
+
+  try {
+    const { data: admins } = await supabase
+      .from('profiles')
+      .select('id')
+      .eq('role', 'admin')
+      .eq('is_active', true);
+
+    if (admins && admins.length > 0) {
+      const notifications = admins.map(a => ({
+        user_id: a.id,
+        type: 'escalation',
+        title: 'Attendance Escalation',
+        message: `${profile.full_name} escalated ${internName}'s incomplete attendance for ${formatDate(date)}. End of Day punch is missing.`,
+        entity_type: 'attendance',
+        entity_id: recordId,
+      }));
+      await supabase.from('notifications').insert(notifications);
+    }
+
+    await logAudit('attendance.escalated_to_admin', 'attendance', recordId, {
+      escalated_by: profile.id,
+      intern_id: internId,
+      reason: 'Missing End of Day punch',
+    });
+
+    showToast('Escalated to admin successfully', 'success');
+  } catch (err) {
+    showToast(err.message || 'Failed to escalate', 'error');
+  }
 }

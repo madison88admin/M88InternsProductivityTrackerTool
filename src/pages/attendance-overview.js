@@ -232,6 +232,13 @@ export async function renderAttendanceOverviewPage() {
   await render();
 }
 
+function ipConsistencyBadge(ip_consistent) {
+  if (ip_consistent == null) return '';
+  return ip_consistent
+    ? '<span class="badge-success text-xs ml-1">IP Consistent</span>'
+    : '<span class="badge-danger text-xs ml-1">IP Mismatch</span>';
+}
+
 function filterBySearch(records, query) {
   if (!query) return records;
   const lower = query.toLowerCase();
@@ -256,6 +263,7 @@ function renderRows(records, searchQuery) {
       <td>
         ${r.is_late ? '<span class="badge-warning text-xs">Late</span>' : ''}
         ${r.is_outside_hours ? '<span class="badge-danger text-xs ml-1">Outside</span>' : ''}
+        ${ipConsistencyBadge(r.ip_consistent)}
       </td>
       <td>
         <button class="btn-sm btn-secondary edit-attendance-btn" data-id="${r.id}" title="Edit attendance">

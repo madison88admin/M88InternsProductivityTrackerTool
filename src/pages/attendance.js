@@ -12,6 +12,31 @@ import { formatDate, formatTime, formatHoursDisplay, getTodayDate, getPublicIP, 
 import { createModal } from '../lib/component.js';
 import { isHoliday } from '../lib/holidays.js';
 
+function ipConsistencyBadge(ip_consistent, size = 'normal') {
+  if (ip_consistent == null) return '';
+  const cls = size === 'sm' ? 'text-xs ml-1' : 'ml-2';
+  return ip_consistent
+    ? `<span class="badge-approved ${cls}">IP Consistent</span>`
+    : `<span class="badge-rejected ${cls}">IP Mismatch</span>`;
+}
+
+// Cutoff times in minutes from midnight — punch is locked at or after this time
+const PUNCH_CUTOFFS = {
+  time_in_1: 10 * 60 + 30,  // 10:30 AM
+  time_out_1: 13 * 60,       // 1:00 PM
+  time_in_2: 15 * 60,        // 3:00 PM
+  time_out_2: 19 * 60 + 30,  // 7:30 PM
+};
+
+function getCurrentMinutes() {
+  const now = new Date();
+  return now.getHours() * 60 + now.getMinutes();
+}
+
+function isPunchLocked(punchType) {
+  return getCurrentMinutes() >= PUNCH_CUTOFFS[punchType];
+}
+
 export async function renderAttendancePage() {
   const profile = getProfile();
   const today = getTodayDate();
@@ -34,6 +59,49 @@ export async function renderAttendancePage() {
     .limit(10);
 
   const nextPunch = getNextPunch(todayRecord);
+
+  // Auto-submit incomplete attendance at 7:30 PM
+  let wasAutoSubmitted = false;
+  const isPostEndOfDay = getCurrentMinutes() >= PUNCH_CUTOFFS.time_out_2;
+
+  if (isPostEndOfDay && todayRecord && !isAllPunchesComplete(todayRecord)) {
+    const hasSomePunches = todayRecord.time_in_1 || todayRecord.time_in_2;
+    if (hasSomePunches) {
+      const { data: existingApproval } = await supabase
+        .from('approvals')
+        .select('id')
+        .eq('entity_id', todayRecord.id)
+        .eq('type', 'attendance')
+        .maybeSingle();
+
+      if (!existingApproval && profile.supervisor_id) {
+        await supabase.from('approvals').insert({
+          type: 'attendance',
+          entity_id: todayRecord.id,
+          intern_id: profile.id,
+          supervisor_id: profile.supervisor_id,
+        });
+
+        await supabase.from('notifications').insert({
+          user_id: profile.supervisor_id,
+          type: 'pending_approval',
+          title: 'Attendance Auto-Submitted',
+          message: `${profile.full_name}'s attendance for ${formatDate(today)} was auto-submitted with incomplete punches.`,
+          entity_type: 'attendance',
+          entity_id: todayRecord.id,
+        });
+
+        await logAudit('attendance.auto_submitted', 'attendance', todayRecord.id, {
+          reason: 'End of day cutoff reached (7:30 PM)',
+          missing_punches: ['time_in_1', 'time_out_1', 'time_in_2', 'time_out_2'].filter(p => !todayRecord[p]),
+        });
+
+        wasAutoSubmitted = true;
+      } else if (existingApproval) {
+        wasAutoSubmitted = true;
+      }
+    }
+  }
 
   renderLayout(`
     <div class="page-header animate-fade-in-up">
@@ -66,11 +134,19 @@ export async function renderAttendancePage() {
       </div>
 
       ${todayRecord?.total_hours ? `
-        <div class="flex items-center gap-2 text-sm text-neutral-600 mb-4">
+        <div class="flex items-center gap-2 text-sm text-neutral-600 mb-2">
           ${icons.clock}
           <span>Total Hours: <strong>${formatHoursDisplay(todayRecord.total_hours)}</strong></span>
           ${todayRecord.is_late ? '<span class="badge-pending ml-2">Late</span>' : ''}
           ${todayRecord.is_outside_hours ? '<span class="badge-rejected ml-2">Outside Hours</span>' : ''}
+        </div>
+      ` : ''}
+
+      ${todayRecord?.ip_consistent != null ? `
+        <div class="flex items-center gap-2 text-sm mb-4">
+          ${icons.shield}
+          <span class="${todayRecord.ip_consistent ? 'text-success-600' : 'text-danger-600 font-medium'}">${todayRecord.ip_consistent ? 'All punches from the same network' : 'Punches logged from different networks'}</span>
+          ${ipConsistencyBadge(todayRecord.ip_consistent)}
         </div>
       ` : ''}
 
@@ -82,8 +158,14 @@ export async function renderAttendancePage() {
             ${icons.clock}
             <span class="ml-2">${getPunchLabel(nextPunch)}</span>
           </button>
-        ` : `
+        ` : isAllPunchesComplete(todayRecord) ? `
           <p class="text-sm text-success-600 font-medium">✓ All punches logged for today</p>
+        ` : wasAutoSubmitted ? `
+          <p class="text-sm text-warning-600 font-medium">Your attendance has been automatically submitted with incomplete punches</p>
+        ` : todayRecord ? `
+          <p class="text-sm text-warning-600 font-medium">Remaining punches are no longer available. ${!isPunchLocked('time_out_2') ? 'Your attendance will be auto-submitted at 7:30 PM.' : ''}</p>
+        ` : `
+          <p class="text-sm text-neutral-500">No punches available at this time</p>
         `}
 
         ${!holidayInfo.isHoliday && todayRecord && !isAllPunchesComplete(todayRecord) ? `
@@ -93,6 +175,10 @@ export async function renderAttendancePage() {
           </button>
         ` : ''}
       </div>
+
+      ${!holidayInfo.isHoliday ? `
+        <p class="text-xs text-neutral-400 mt-3">Punch cutoffs: Morning In by 10:30 AM · Lunch Out by 1:00 PM · Afternoon In by 3:00 PM · End of Day by 7:30 PM</p>
+      ` : ''}
     </div>
 
     <!-- Recent Attendance -->
@@ -132,6 +218,7 @@ export async function renderAttendancePage() {
                 <td>
                   ${record.is_late ? '<span class="badge-pending">Late</span>' : ''}
                   ${record.is_outside_hours ? '<span class="badge-rejected">Outside</span>' : ''}
+                  ${ipConsistencyBadge(record.ip_consistent, 'sm')}
                 </td>
               </tr>
             `).join('')}
@@ -146,6 +233,14 @@ export async function renderAttendancePage() {
     if (punchBtn) {
       punchBtn.addEventListener('click', async () => {
         const punchType = punchBtn.dataset.punch;
+
+        // Re-validate cutoff at click time (guard against race condition)
+        if (isPunchLocked(punchType)) {
+          showToast('This punch is no longer available. The cutoff time has passed.', 'error');
+          renderAttendancePage();
+          return;
+        }
+
         punchBtn.disabled = true;
         punchBtn.innerHTML = '<span class="spinner"></span><span class="ml-2">Logging...</span>';
 
@@ -170,8 +265,8 @@ export async function renderAttendancePage() {
             if (error) throw error;
             todayRecord = data;
           } else {
-            // Validate IP consistency
-            const firstIP = todayRecord.ip_address_in_1;
+            // Validate IP consistency (use first available IP as reference)
+            const firstIP = todayRecord.ip_address_in_1 || todayRecord.ip_address_in_2;
             if (firstIP && ip !== 'unknown' && ip !== firstIP) {
               showToast('Your IP address has changed. All daily punches must come from the same network.', 'error');
               punchBtn.disabled = false;
@@ -241,22 +336,32 @@ export async function renderAttendancePage() {
 }
 
 function renderPunchSlot(label, timestamp, type) {
+  const locked = !timestamp && isPunchLocked(type);
   return `
-    <div class="text-center p-4 rounded-xl ${timestamp ? 'bg-primary-50' : 'bg-neutral-100'}" style="border: 1px solid ${timestamp ? 'rgba(99,102,241,0.15)' : 'var(--color-neutral-200)'};">
-      <p class="text-xs font-semibold uppercase tracking-wider ${timestamp ? 'text-primary-600' : 'text-neutral-400'} mb-2">${label}</p>
-      <p class="text-lg font-bold ${timestamp ? 'text-neutral-900' : 'text-neutral-300'}">
-        ${timestamp ? formatTime(timestamp) : '--:--'}
+    <div class="text-center p-4 rounded-xl ${timestamp ? 'bg-primary-50' : locked ? 'bg-neutral-50' : 'bg-neutral-100'}" style="border: 1px solid ${timestamp ? 'rgba(99,102,241,0.15)' : locked ? 'rgba(239,68,68,0.15)' : 'var(--color-neutral-200)'};">
+      <p class="text-xs font-semibold uppercase tracking-wider ${timestamp ? 'text-primary-600' : locked ? 'text-danger-500' : 'text-neutral-400'} mb-2">${label}</p>
+      <p class="text-lg font-bold ${timestamp ? 'text-neutral-900' : locked ? 'text-danger-300' : 'text-neutral-300'}">
+        ${timestamp ? formatTime(timestamp) : locked ? 'Locked' : '--:--'}
       </p>
     </div>
   `;
 }
 
 function getNextPunch(record) {
-  if (!record) return 'time_in_1';
-  if (!record.time_in_1) return 'time_in_1';
-  if (!record.time_out_1) return 'time_out_1';
-  if (!record.time_in_2) return 'time_in_2';
-  if (!record.time_out_2) return 'time_out_2';
+  const currentMinutes = getCurrentMinutes();
+  const punchOrder = ['time_in_1', 'time_out_1', 'time_in_2', 'time_out_2'];
+
+  for (const punch of punchOrder) {
+    // Already logged — skip
+    if (record && record[punch]) continue;
+    // Past cutoff — locked, skip
+    if (currentMinutes >= PUNCH_CUTOFFS[punch]) continue;
+    // "Out" punches require the matching "In" to be logged first
+    if (punch === 'time_out_1' && (!record || !record.time_in_1)) continue;
+    if (punch === 'time_out_2' && (!record || !record.time_in_2)) continue;
+    return punch;
+  }
+
   return null;
 }
 

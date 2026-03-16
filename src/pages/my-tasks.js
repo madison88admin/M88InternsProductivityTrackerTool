@@ -51,7 +51,7 @@ export async function renderMyTasksPage() {
           <p class="page-subtitle">View and manage your assigned tasks</p>
         </div>
         ${taskSubmissionEnabled && profile.supervisor_id ? `
-          <button id="submit-task-btn" class="btn-primary shrink-0">
+          <button id="submit-task-btn" class="btn-primary shrink-0" ${pendingReviewTasks.length > 0 ? 'disabled' : ''} title="${pendingReviewTasks.length > 0 ? 'You have a task pending review. Submit another after this one is approved or rejected.' : ''}">
             ${icons.tasks}
             <span class="ml-2">Submit Task</span>
           </button>
@@ -171,6 +171,12 @@ export async function renderMyTasksPage() {
 
     // Submit Task button
     el.querySelector('#submit-task-btn')?.addEventListener('click', () => {
+      // Check if there are already pending tasks
+      if (pendingReviewTasks.length > 0) {
+        showToast('You can only submit one task at a time. Please wait for your pending task to be reviewed before submitting another.', 'warning');
+        return;
+      }
+
       createModal('Submit Task', `
         <form id="submit-task-form" class="space-y-4">
           <div>

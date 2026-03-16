@@ -147,6 +147,9 @@ setNotFound(() => {
 
 // ── App Initialization ──────────────────────────────────────
 async function boot() {
+  // Block mobile phone browsers (secondary guard — primary is in index.html)
+  if (window.__MOBILE_BLOCKED) return;
+
   try {
     await initAuth();
     initRouter();
