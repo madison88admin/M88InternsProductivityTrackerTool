@@ -410,41 +410,32 @@ function openInviteModal(departments, locations, supervisors) {
       const departmentId = el.querySelector('#invite-department')?.value || null;
 
       try {
-        // Use Supabase auth to invite
-        const { data, error } = await supabase.auth.admin.inviteUserByEmail(email, {
-          data: {
-            full_name: fullName,
-            role,
-            department_id: departmentId,
-            location_id: locationId,
-          },
-        });
+        // Collect all fields and delegate to the invite-user Edge Function
+        const body = {
+          email,
+          fullName,
+          role,
+          departmentId: departmentId || null,
+          locationId: locationId || null,
+          phone: el.querySelector('#invite-phone')?.value || null,
+        };
 
-        if (error) throw error;
-
-        // Update profile with all additional fields after creation
-        if (data?.user?.id) {
-          const updates = {
-            department_id: departmentId,
-            location_id: locationId,
-            phone: el.querySelector('#invite-phone')?.value || null,
-          };
-
-          if (role === 'intern') {
-            const supervisorId = el.querySelector('#invite-supervisor').value;
-            if (supervisorId) updates.supervisor_id = supervisorId;
-            updates.school = el.querySelector('#invite-school').value || null;
-            updates.course = el.querySelector('#invite-course').value || null;
-            const hours = el.querySelector('#invite-hours').value;
-            updates.hours_required = hours ? parseFloat(hours) : null;
-            updates.ojt_start_date = el.querySelector('#invite-start').value || null;
-            updates.is_voluntary = el.querySelector('#invite-voluntary').checked;
-          }
-
-          await supabase.from('profiles').update(updates).eq('id', data.user.id);
+        if (role === 'intern') {
+          const supervisorId = el.querySelector('#invite-supervisor').value;
+          if (supervisorId) body.supervisorId = supervisorId;
+          body.school = el.querySelector('#invite-school').value || null;
+          body.course = el.querySelector('#invite-course').value || null;
+          const hours = el.querySelector('#invite-hours').value;
+          body.hoursRequired = hours ? parseFloat(hours) : null;
+          body.ojtStartDate = el.querySelector('#invite-start').value || null;
+          body.isVoluntary = el.querySelector('#invite-voluntary').checked;
         }
 
-        await logAudit('user.invited', 'user', data?.user?.id, { email, role });
+        const { data, error } = await supabase.functions.invoke('invite-user', { body });
+        if (error) throw error;
+        if (!data?.ok) throw new Error(data?.error || 'Failed to send invitation');
+
+        await logAudit('user.invited', 'user', data?.userId, { email, role });
         showToast(`Invitation sent to ${email}`, 'success');
         close();
         renderUserManagementPage();

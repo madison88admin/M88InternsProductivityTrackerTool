@@ -715,27 +715,141 @@ function buildPerformanceKPIGrid(att, tasks, narr, weekStart, today) {
 }
 
 async function buildSupervisorDashboard(profile) {
-  // Fetch pending approvals
-  const { count: pendingApprovals } = await supabase
-    .from('approvals')
-    .select('*', { count: 'exact', head: true })
-    .eq('supervisor_id', profile.id)
-    .eq('status', 'pending');
+  const today = getTodayDate();
 
-  // Fetch team interns count
-  const { count: teamSize } = await supabase
-    .from('profiles')
-    .select('*', { count: 'exact', head: true })
-    .eq('supervisor_id', profile.id)
-    .eq('role', 'intern')
-    .eq('is_active', true);
+  // ── Stats + intern list in parallel ─────────────────────────────────────────
+  const [
+    { count: pendingApprovals },
+    { count: activeTasks },
+    { data: interns },
+  ] = await Promise.all([
+    supabase.from('approvals').select('*', { count: 'exact', head: true }).eq('supervisor_id', profile.id).eq('status', 'pending'),
+    supabase.from('tasks').select('*', { count: 'exact', head: true }).eq('created_by', profile.id).in('status', ['not_started', 'in_progress']),
+    supabase.from('profiles')
+      .select('id, full_name, avatar_url, hours_required, hours_rendered, ojt_start_date, is_voluntary, department:departments(name)')
+      .eq('supervisor_id', profile.id)
+      .eq('role', 'intern')
+      .eq('is_active', true)
+      .order('full_name'),
+  ]);
 
-  // Fetch active tasks
-  const { count: activeTasks } = await supabase
-    .from('tasks')
-    .select('*', { count: 'exact', head: true })
-    .eq('created_by', profile.id)
-    .in('status', ['not_started', 'in_progress']);
+  const teamSize = (interns || []).length;
+  const internIds = (interns || []).map(i => i.id);
+  let allAttendance = [];
+  let allTasks = [];
+
+  if (internIds.length > 0) {
+    const [attRes, taskRes] = await Promise.all([
+      supabase.from('attendance_records').select('intern_id, total_hours, is_late').in('intern_id', internIds).eq('status', 'approved'),
+      supabase.from('tasks').select('assigned_to, status, due_date, is_archived').in('assigned_to', internIds),
+    ]);
+    allAttendance = attRes.data || [];
+    allTasks = taskRes.data || [];
+  }
+
+  // Compute per-intern KPIs
+  const internKPIs = (interns || []).map(intern => {
+    const attendance = allAttendance.filter(a => a.intern_id === intern.id);
+    const tasks = allTasks.filter(t => t.assigned_to === intern.id && !t.is_archived);
+
+    const hoursRendered = intern.hours_rendered || attendance.reduce((s, a) => s + (a.total_hours || 0), 0);
+    const hoursRequired = intern.hours_required || 0;
+    const daysWorked = attendance.length;
+    const lateCount = attendance.filter(a => a.is_late).length;
+    const avgDailyHours = daysWorked > 0 ? hoursRendered / daysWorked : 8;
+    const progress = hoursRequired > 0 ? Math.min(100, (hoursRendered / hoursRequired) * 100) : 0;
+    const estimatedEnd = computeEstimatedEndDate(hoursRequired, hoursRendered, daysWorked);
+    const completedTasks = tasks.filter(t => t.status === 'completed').length;
+    const totalTasks = tasks.length;
+    const overdueTasks = tasks.filter(t => t.due_date && t.due_date < today && t.status !== 'completed').length;
+
+    return {
+      ...intern,
+      hoursRendered, hoursRequired, daysWorked, lateCount,
+      avgDailyHours, progress, estimatedEnd,
+      completedTasks, totalTasks, overdueTasks,
+      taskRate: totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : null,
+    };
+  });
+
+  // Aggregate stats
+  const activeCount = internKPIs.length;
+  const avgProgress = activeCount > 0 ? internKPIs.reduce((s, i) => s + i.progress, 0) / activeCount : 0;
+  const finishingSoon = internKPIs.filter(i => {
+    if (i.progress >= 100 || !i.estimatedEnd) return false;
+    return Math.ceil((i.estimatedEnd - new Date()) / (1000 * 60 * 60 * 24)) <= 30;
+  }).length;
+  const completedCount = internKPIs.filter(i => i.progress >= 100).length;
+  const workingInterns = internKPIs.filter(i => i.daysWorked > 0);
+  const avgDailyAll = workingInterns.length > 0
+    ? workingInterns.reduce((s, i) => s + i.avgDailyHours, 0) / workingInterns.length : 0;
+
+  // Sort: soonest estimated finish first, completed last
+  const sortedInterns = [...internKPIs].sort((a, b) => {
+    if (a.progress >= 100 && b.progress < 100) return 1;
+    if (b.progress >= 100 && a.progress < 100) return -1;
+    if (!a.estimatedEnd && !b.estimatedEnd) return 0;
+    if (!a.estimatedEnd) return 1;
+    if (!b.estimatedEnd) return -1;
+    return a.estimatedEnd - b.estimatedEnd;
+  });
+
+  const progressColor = p => p >= 75 ? '#22c55e' : p >= 50 ? '#6366f1' : p >= 25 ? '#f59e0b' : '#ef4444';
+
+  const internRows = sortedInterns.length > 0 ? sortedInterns.map(intern => {
+    let estEndCell;
+    if (intern.progress >= 100) {
+      estEndCell = `<span class="inline-flex items-center gap-1 text-xs font-semibold text-success-600">${icons.check} Completed</span>`;
+    } else if (!intern.estimatedEnd) {
+      estEndCell = `<span class="text-xs text-neutral-400">—</span>`;
+    } else {
+      const daysLeft = Math.ceil((intern.estimatedEnd - new Date()) / (1000 * 60 * 60 * 24));
+      const colorClass = daysLeft <= 14 ? 'text-success-600' : daysLeft <= 60 ? 'text-primary-600' : 'text-neutral-600';
+      estEndCell = `<div><p class="text-xs font-semibold ${colorClass}">${formatDate(intern.estimatedEnd)}</p><p class="text-xs text-neutral-400">${daysLeft}d away</p></div>`;
+    }
+    return `
+    <tr class="border-b border-neutral-100 hover:bg-neutral-50 transition-colors">
+      <td class="py-3 pr-4">
+        <div class="flex items-center gap-2.5">
+          ${renderAvatar(intern, 'w-8 h-8', 'text-xs')}
+          <div>
+            <p class="font-semibold text-neutral-900 text-sm leading-tight">${intern.full_name}</p>
+            <p class="text-xs text-neutral-400 mt-0.5">${intern.department?.name || 'No Department'}</p>
+          </div>
+        </div>
+      </td>
+      <td class="py-3 pr-6" style="min-width: 180px;">
+        <div class="flex items-center gap-2">
+          <div class="flex-1 h-1.5 rounded-full overflow-hidden" style="background: var(--color-neutral-100);">
+            <div class="h-full rounded-full transition-all" style="width: ${intern.progress.toFixed(1)}%; background: ${progressColor(intern.progress)};"></div>
+          </div>
+          <span class="text-xs font-bold text-neutral-700 w-9 text-right shrink-0">${intern.progress.toFixed(0)}%</span>
+        </div>
+      </td>
+      <td class="text-right py-3 pr-4">
+        <p class="text-xs font-semibold text-neutral-700">${formatHoursDisplay(intern.hoursRendered)}</p>
+        <p class="text-xs text-neutral-400">of ${formatHoursDisplay(intern.hoursRequired)}</p>
+      </td>
+      <td class="text-center py-3 px-3">
+        <p class="text-xs font-semibold text-neutral-700">${intern.avgDailyHours > 0 ? intern.avgDailyHours.toFixed(1) + 'h' : '—'}</p>
+        <p class="text-xs text-neutral-400">${intern.daysWorked}d worked</p>
+      </td>
+      <td class="text-center py-3 px-3">
+        ${intern.totalTasks > 0 ? `
+          <p class="text-xs font-semibold ${intern.taskRate >= 80 ? 'text-success-600' : intern.taskRate >= 50 ? 'text-warning-600' : 'text-neutral-500'}">${intern.completedTasks}/${intern.totalTasks}</p>
+          ${intern.overdueTasks > 0 ? `<p class="text-xs text-danger-500">${intern.overdueTasks} overdue</p>` : '<p class="text-xs text-neutral-400">&nbsp;</p>'}
+        ` : '<span class="text-xs text-neutral-400">—</span>'}
+      </td>
+      <td class="text-center py-3 px-3">
+        <span class="inline-block px-2 py-0.5 rounded-full text-xs font-semibold ${intern.lateCount > 5 ? 'bg-danger-50 text-danger-600' : intern.lateCount > 0 ? 'bg-warning-50 text-warning-600' : 'bg-success-50 text-success-600'}">${intern.lateCount}x</span>
+      </td>
+      <td class="text-right py-3 pl-3">${estEndCell}</td>
+    </tr>`;
+  }).join('') : `
+    <tr>
+      <td colspan="7" class="text-center py-10 text-sm text-neutral-400">No active interns on your team.</td>
+    </tr>
+  `;
 
   return `
     <div class="page-header animate-fade-in-up">
@@ -761,7 +875,7 @@ async function buildSupervisorDashboard(profile) {
         <div class="flex items-center justify-between">
           <div>
             <p class="text-xs font-semibold text-neutral-400 uppercase tracking-wider">Team Size</p>
-            <p class="text-xl font-bold mt-2 text-neutral-900">${teamSize || 0}</p>
+            <p class="text-xl font-bold mt-2 text-neutral-900">${teamSize}</p>
           </div>
           <div class="action-icon bg-primary-50 text-primary-600">
             ${icons.users}
@@ -790,6 +904,60 @@ async function buildSupervisorDashboard(profile) {
           <p class="text-sm text-neutral-500">Go to approvals →</p>
         </div>
       </a>
+    </div>
+
+    <!-- ═══════════════ INTERN KPI PANEL ═══════════════ -->
+    <div class="card animate-fade-in-up mt-6 mb-6" style="animation-delay: 300ms;">
+      <div class="flex items-start justify-between mb-5">
+        <div>
+          <h3 class="text-base font-bold text-neutral-900">Intern Performance Overview</h3>
+          <p class="text-sm text-neutral-500 mt-0.5">Real-time KPIs across all active interns</p>
+        </div>
+      </div>
+
+      <!-- Aggregate metric chips -->
+      <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
+        <div class="rounded-xl p-4" style="background: var(--color-primary-50);">
+          <p class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-primary-600);">Active Interns</p>
+          <p class="text-2xl font-bold mt-1" style="color: var(--color-primary-700);">${activeCount}</p>
+          ${completedCount > 0 ? `<p class="text-xs mt-0.5" style="color: var(--color-primary-500);">${completedCount} completed</p>` : ''}
+        </div>
+        <div class="rounded-xl p-4" style="background: var(--color-neutral-100);">
+          <p class="text-xs font-semibold uppercase tracking-wider text-neutral-500">Avg OJT Progress</p>
+          <p class="text-2xl font-bold mt-1 text-neutral-800">${avgProgress.toFixed(1)}%</p>
+          <p class="text-xs text-neutral-400 mt-0.5">across all interns</p>
+        </div>
+        <div class="rounded-xl p-4" style="background: var(--color-success-50);">
+          <p class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-success-600);">Finishing Soon</p>
+          <p class="text-2xl font-bold mt-1" style="color: var(--color-success-600);">${finishingSoon}</p>
+          <p class="text-xs mt-0.5" style="color: var(--color-success-500);">within 30 days</p>
+        </div>
+        <div class="rounded-xl p-4" style="background: var(--color-warning-50);">
+          <p class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-warning-600);">Avg Daily Hours</p>
+          <p class="text-2xl font-bold mt-1" style="color: var(--color-warning-600);">${avgDailyAll > 0 ? avgDailyAll.toFixed(1) + 'h' : '—'}</p>
+          <p class="text-xs mt-0.5" style="color: var(--color-warning-500);">per working day</p>
+        </div>
+      </div>
+
+      <!-- Per-intern KPI table -->
+      <div class="overflow-x-auto -mx-6 px-6">
+        <table class="w-full text-sm" style="min-width: 680px;">
+          <thead>
+            <tr style="border-bottom: 1px solid var(--color-neutral-100);">
+              <th class="text-left text-xs font-semibold text-neutral-400 uppercase tracking-wider pb-3 pr-4">Intern</th>
+              <th class="text-left text-xs font-semibold text-neutral-400 uppercase tracking-wider pb-3 pr-6" style="min-width: 180px;">OJT Progress</th>
+              <th class="text-right text-xs font-semibold text-neutral-400 uppercase tracking-wider pb-3 pr-4">Hours</th>
+              <th class="text-center text-xs font-semibold text-neutral-400 uppercase tracking-wider pb-3 px-3">Avg / Day</th>
+              <th class="text-center text-xs font-semibold text-neutral-400 uppercase tracking-wider pb-3 px-3">Tasks</th>
+              <th class="text-center text-xs font-semibold text-neutral-400 uppercase tracking-wider pb-3 px-3">Late Days</th>
+              <th class="text-right text-xs font-semibold text-neutral-400 uppercase tracking-wider pb-3 pl-3">Est. Finish</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${internRows}
+          </tbody>
+        </table>
+      </div>
     </div>
 
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 stagger-children" style="animation-delay: 1000ms;">
@@ -1060,26 +1228,8 @@ async function buildAdminDashboard(profile) {
       </a>
     </div>
 
-    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 stagger-children" style="animation-delay: 300ms;">
-      <div class="card">
-        <h3 class="text-base font-bold text-neutral-900 mb-1">Users by Role</h3>
-        <p class="text-sm text-neutral-500 mb-4">Distribution of active users across roles</p>
-        <div style="position: relative; height: 220px;">
-          <canvas id="users-by-role-chart"></canvas>
-        </div>
-      </div>
-
-      <div class="card">
-        <h3 class="text-base font-bold text-neutral-900 mb-1">System Activity (Last 7 Days)</h3>
-        <p class="text-sm text-neutral-500 mb-4">Recent audit log activity trends</p>
-        <div style="position: relative; height: 220px;">
-          <canvas id="system-activity-chart"></canvas>
-        </div>
-      </div>
-    </div>
-
     <!-- ═══════════════ INTERN KPI PANEL ═══════════════ -->
-    <div class="card animate-fade-in-up mt-6" style="animation-delay: 400ms;">
+    <div class="card animate-fade-in-up mt-6" style="animation-delay: 300ms;">
       <!-- Panel header -->
       <div class="flex items-start justify-between mb-5">
         <div>
@@ -1143,6 +1293,24 @@ async function buildAdminDashboard(profile) {
         </div>
       </div>
       ` : ''}
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 stagger-children mt-6" style="animation-delay: 500ms;">
+      <div class="card">
+        <h3 class="text-base font-bold text-neutral-900 mb-1">Users by Role</h3>
+        <p class="text-sm text-neutral-500 mb-4">Distribution of active users across roles</p>
+        <div style="position: relative; height: 220px;">
+          <canvas id="users-by-role-chart"></canvas>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3 class="text-base font-bold text-neutral-900 mb-1">System Activity (Last 7 Days)</h3>
+        <p class="text-sm text-neutral-500 mb-4">Recent audit log activity trends</p>
+        <div style="position: relative; height: 220px;">
+          <canvas id="system-activity-chart"></canvas>
+        </div>
+      </div>
     </div>
   `;
 }

@@ -2,6 +2,8 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 
 const BREVO_API_KEY = Deno.env.get("BREVO_API_KEY")!;
+const SENDER_EMAIL = Deno.env.get("SENDER_EMAIL")!;
+const SENDER_NAME = Deno.env.get("SENDER_NAME") || "M88 Tracker";
 
 serve(async (req: Request) => {
   try {
@@ -21,7 +23,7 @@ serve(async (req: Request) => {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        sender: { name: "M88 Tracker", email: "noreply@m88.com" },
+        sender: { name: SENDER_NAME, email: SENDER_EMAIL },
         to: [{ email: to }],
         subject,
         htmlContent: html,

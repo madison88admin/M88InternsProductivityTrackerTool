@@ -12,6 +12,7 @@ import { showToast } from './lib/toast.js';
 import { renderLoginPage } from './pages/login.js';
 import { renderAdminSetupPage } from './pages/admin-setup.js';
 import { renderForgotPasswordPage } from './pages/forgot-password.js';
+import { renderSetPasswordPage } from './pages/set-password.js';
 import { renderDashboard } from './pages/dashboard.js';
 import { renderAttendancePage } from './pages/attendance.js';
 import { renderMyTasksPage } from './pages/my-tasks.js';
@@ -35,7 +36,7 @@ import { renderNotificationsPage } from './pages/notifications.js';
 import { renderProfilePage } from './pages/profile.js';
 
 // ── Public routes (no auth required) ───────────────────────
-const PUBLIC_ROUTES = ['/login', '/admin-setup', '/forgot-password'];
+const PUBLIC_ROUTES = ['/login', '/admin-setup', '/forgot-password', '/set-password'];
 
 // ── Register Routes ─────────────────────────────────────────
 
@@ -43,6 +44,7 @@ const PUBLIC_ROUTES = ['/login', '/admin-setup', '/forgot-password'];
 addRoute('/login', renderLoginPage);
 addRoute('/admin-setup', renderAdminSetupPage);
 addRoute('/forgot-password', renderForgotPasswordPage);
+addRoute('/set-password', renderSetPasswordPage);
 
 // All authenticated users
 addRoute('/dashboard', renderDashboard, ['intern', 'supervisor', 'admin']);
