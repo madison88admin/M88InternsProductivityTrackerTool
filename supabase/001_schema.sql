@@ -306,7 +306,9 @@ INSERT INTO system_settings (key, value) VALUES
   ('work_hours', '{"start": "07:00", "end": "18:00", "late_threshold": "09:00"}'),
   ('attendance_rules', '{"require_same_ip": true, "allow_outside_hours": true, "flag_outside_hours": true}'),
   ('escalation_hours', '24'),
-  ('data_retention_months', '36');
+  ('data_retention_months', '36'),
+  ('enable_forgot_password', '{"enabled": true}'),
+  ('enable_admin_account_creation', '{"enabled": true}');
 
 -- ============================================================
 -- FUNCTIONS

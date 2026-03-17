@@ -43,6 +43,13 @@ export async function renderSystemSettingsPage() {
   const internTaskSubmission = settingsMap.intern_task_submission?.value || {};
   const taskSubmissionEnabled = internTaskSubmission.enabled === true;
 
+  // Security settings
+  const forgotPasswordSettings = settingsMap.enable_forgot_password?.value || {};
+  const forgotPasswordEnabled = forgotPasswordSettings.enabled !== false;
+
+  const adminAccountSettings = settingsMap.enable_admin_account_creation?.value || {};
+  const adminAccountEnabled = adminAccountSettings.enabled !== false;
+
   renderLayout(`
     <div class="page-header animate-fade-in-up">
       <h1 class="page-title">System Settings</h1>
@@ -113,6 +120,27 @@ export async function renderSystemSettingsPage() {
         </label>
       </div>
 
+      <!-- Security Features -->
+      <div class="card">
+        <h3 class="text-base font-bold text-neutral-900 mb-4 flex items-center gap-2">${icons.alert} Security Features</h3>
+        <div class="space-y-4">
+          <label class="flex items-center gap-3 cursor-pointer">
+            <input type="checkbox" id="enable-forgot-password" ${forgotPasswordEnabled ? 'checked' : ''} />
+            <div>
+              <p class="text-sm font-medium text-neutral-800">Enable Forgot Password</p>
+              <p class="text-xs text-neutral-400 mt-0.5">Allow users to access the forgot password link on the login page.</p>
+            </div>
+          </label>
+          <label class="flex items-center gap-3 cursor-pointer">
+            <input type="checkbox" id="enable-admin-account-creation" ${adminAccountEnabled ? 'checked' : ''} />
+            <div>
+              <p class="text-sm font-medium text-neutral-800">Enable Admin Account Creation</p>
+              <p class="text-xs text-neutral-400 mt-0.5">Allow users to access the admin setup page from the login page.</p>
+            </div>
+          </label>
+        </div>
+      </div>
+
       <div class="flex justify-end">
         <button type="submit" class="btn-primary">
           ${icons.check}
@@ -153,6 +181,14 @@ export async function renderSystemSettingsPage() {
           {
             key: 'intern_task_submission',
             value: { enabled: el.querySelector('#intern-task-submission').checked },
+          },
+          {
+            key: 'enable_forgot_password',
+            value: { enabled: el.querySelector('#enable-forgot-password').checked },
+          },
+          {
+            key: 'enable_admin_account_creation',
+            value: { enabled: el.querySelector('#enable-admin-account-creation').checked },
           },
         ];
 

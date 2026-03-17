@@ -7,6 +7,7 @@ import './styles/main.css';
 import { initAuth, isAuthenticated, getUserRole, hasRole } from './lib/auth.js';
 import { addRoute, setBeforeEach, setNotFound, initRouter, navigateTo } from './lib/router.js';
 import { showToast } from './lib/toast.js';
+import { supabase } from './lib/supabase.js';
 
 // ── Page Imports ────────────────────────────────────────────
 import { renderLoginPage } from './pages/login.js';
@@ -77,6 +78,44 @@ addRoute('/audit-logs', renderAuditLogsPage, ['admin']);
 addRoute('/system-settings', renderSystemSettingsPage, ['admin']);
 addRoute('/holiday-calendar', renderHolidayCalendarPage, ['admin']);
 
+// ── Security Settings Cache ────────────────────────────────
+let securitySettingsCache = null;
+let settingsCacheTime = 0;
+const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
+
+async function getSecuritySettings() {
+  const now = Date.now();
+
+  // Return cached settings if still valid
+  if (securitySettingsCache && (now - settingsCacheTime) < CACHE_DURATION) {
+    return securitySettingsCache;
+  }
+
+  try {
+    const { data: settings } = await supabase
+      .from('system_settings')
+      .select('*');
+
+    const settingsMap = {};
+    (settings || []).forEach(s => { settingsMap[s.key] = s; });
+
+    const forgotPasswordSettings = settingsMap.enable_forgot_password?.value || {};
+    const adminAccountSettings = settingsMap.enable_admin_account_creation?.value || {};
+
+    securitySettingsCache = {
+      forgotPasswordEnabled: forgotPasswordSettings.enabled !== false,
+      adminAccountEnabled: adminAccountSettings.enabled !== false,
+    };
+
+    settingsCacheTime = now;
+    return securitySettingsCache;
+  } catch (err) {
+    console.error('Failed to fetch security settings:', err);
+    // Return cached version even if outdated, or defaults if no cache
+    return securitySettingsCache || { forgotPasswordEnabled: true, adminAccountEnabled: true };
+  }
+}
+
 // ── Navigation Guard ────────────────────────────────────────
 setBeforeEach(async (path) => {
   const isPublic = PUBLIC_ROUTES.includes(path);
@@ -89,6 +128,21 @@ setBeforeEach(async (path) => {
   if (isPublic && isAuthenticated() && path !== '/admin-setup') {
     navigateTo('/dashboard');
     return false;
+  }
+
+  // Check security settings for disabled features
+  if (path === '/forgot-password' || path === '/admin-setup') {
+    const securitySettings = await getSecuritySettings();
+    if (path === '/forgot-password' && !securitySettings.forgotPasswordEnabled) {
+      showToast('Forgot password feature is disabled', 'error');
+      navigateTo('/login');
+      return false;
+    }
+    if (path === '/admin-setup' && !securitySettings.adminAccountEnabled) {
+      showToast('Admin account creation is disabled', 'error');
+      navigateTo('/login');
+      return false;
+    }
   }
 
   // Role-based access check

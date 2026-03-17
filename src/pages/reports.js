@@ -87,6 +87,20 @@ export async function renderReportsPage() {
         </div>
       </div>
 
+      <!-- DAR PDF Preview (auto-shown when a single intern + week is selected) -->
+      <div id="dar-preview-section" class="mt-4" style="display:none;">
+        <div class="flex items-center justify-between mb-2">
+          <h4 class="text-sm font-semibold text-neutral-700">DAR Preview</h4>
+          <span class="text-xs text-neutral-500 bg-neutral-100 px-2 py-0.5 rounded-full" id="dar-preview-label"></span>
+        </div>
+        <div class="rounded-lg overflow-hidden border border-neutral-200 bg-neutral-50" style="height:540px;">
+          <div id="dar-preview-loading" class="flex items-center justify-center h-full text-neutral-400 text-sm" style="display:none !important;">
+            <span class="spinner mr-2"></span> Generating preview...
+          </div>
+          <iframe id="dar-preview-frame" style="width:100%;height:100%;border:none;"></iframe>
+        </div>
+      </div>
+
       <div class="mt-4 flex flex-wrap gap-3 items-center">
         <button id="generate-btn" class="btn-primary">
           ${icons.filter}
@@ -146,6 +160,9 @@ export async function renderReportsPage() {
 
       if (isDar) populateDarInterns(el);
     });
+
+    // Update preview when week selection changes
+    el.querySelector('#dar-week').addEventListener('change', () => updateDarPreview(el));
 
     el.querySelector('#generate-btn').addEventListener('click', async () => {
       currentType = el.querySelector('#report-type').value;
@@ -269,6 +286,7 @@ async function populateDarWeeks(el) {
 
   if (selectedIds.length === 0) {
     el.querySelector('#dar-week').innerHTML = '<option value="">Select an intern first</option>';
+    updateDarPreview(el);
     return;
   }
 
@@ -283,6 +301,7 @@ async function populateDarWeeks(el) {
 
   if (!records || records.length === 0) {
     el.querySelector('#dar-week').innerHTML = '<option value="">No attendance records found</option>';
+    updateDarPreview(el);
     return;
   }
 
@@ -316,9 +335,60 @@ async function populateDarWeeks(el) {
   weekSelect.innerHTML = weeksArr.map(w =>
     `<option value="${w.monday}|${w.friday}|${w.weekNum}">Week ${w.weekNum} (${formatDateMMDDYYYY(w.monday)} – ${formatDateMMDDYYYY(w.friday)})</option>`
   ).join('');
+
+  // Trigger preview whenever weeks are (re)populated
+  updateDarPreview(el);
 }
 
-// ─── DAR: Fetch all data for one intern's weekly report ─────────────────────
+// ─── DAR: Auto PDF preview ───────────────────────────────────────────────────
+
+async function updateDarPreview(el) {
+  const list = el.querySelector('#dar-intern-list');
+  const weekSelect = el.querySelector('#dar-week');
+  const previewSection = el.querySelector('#dar-preview-section');
+  const previewFrame = el.querySelector('#dar-preview-frame');
+  const previewLabel = el.querySelector('#dar-preview-label');
+
+  const selectedIds = Array.from(list.querySelectorAll('.dar-intern-check:checked')).map(cb => cb.value);
+  const weekValue = weekSelect?.value;
+
+  // Only preview for a single intern selection
+  if (selectedIds.length !== 1 || !weekValue) {
+    previewSection.style.display = 'none';
+    if (previewFrame._blobUrl) {
+      URL.revokeObjectURL(previewFrame._blobUrl);
+      previewFrame._blobUrl = null;
+      previewFrame.src = '';
+    }
+    return;
+  }
+
+  const [mondayDate, fridayDate, weekNumStr] = weekValue.split('|');
+  const weekNum = parseInt(weekNumStr, 10);
+
+  previewSection.style.display = '';
+  previewLabel.textContent = 'Generating preview...';
+  previewFrame.style.opacity = '0.4';
+
+  try {
+    const darData = await fetchDarData(selectedIds[0], mondayDate, fridayDate);
+    const doc = await generateDarPdf(darData, weekNum, mondayDate);
+    const blob = doc.output('blob');
+
+    if (previewFrame._blobUrl) URL.revokeObjectURL(previewFrame._blobUrl);
+    const url = URL.createObjectURL(blob);
+    previewFrame._blobUrl = url;
+    previewFrame.src = url;
+    previewFrame.style.opacity = '1';
+
+    const internName = darData.intern?.full_name || 'Intern';
+    previewLabel.textContent = `${internName} — Week ${weekNum}`;
+  } catch (err) {
+    console.error('DAR preview error:', err);
+    previewLabel.textContent = 'Preview unavailable';
+    previewSection.style.display = 'none';
+  }
+}
 
 export async function fetchDarData(internId, mondayDate, fridayDate) {
   const [
@@ -607,14 +677,16 @@ export async function generateDarPdf(darData, weekNum, mondayDate, existingDoc) 
   const finalY = doc.lastAutoTable.finalY + 6;
   doc.setFontSize(10);
   doc.setFont(undefined, 'bold');
-  doc.text(`TOTAL NUMBER OF HOURS: ${totalHours.toFixed(2)} hours`, margin, finalY);
 
   const appliedHourlyRate = allowancePeriod?.hourly_rate ?? hourlyRate ?? 0;
   const computedAllowance = totalHours * appliedHourlyRate;
   const allowanceTotal = Number.isFinite(allowancePeriod?.total_amount)
     ? allowancePeriod.total_amount
     : (Number.isFinite(computedAllowance) ? computedAllowance : 0);
-  doc.text(`TOTAL ALLOWANCE FOR THIS WEEK: ₱${allowanceTotal.toFixed(2)}`, pageWidth - margin, finalY, { align: 'right' });
+
+  // Place totals on the same row, left and right — use plain ASCII "PHP" to avoid font-encoding issues with the peso sign
+  doc.text(`TOTAL NUMBER OF HOURS: ${totalHours.toFixed(2)} hrs`, margin, finalY);
+  doc.text(`TOTAL ALLOWANCE FOR THIS WEEK: PHP ${allowanceTotal.toFixed(2)}`, pageWidth - margin, finalY, { align: 'right' });
 
   return doc;
 }
