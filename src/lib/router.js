@@ -54,7 +54,8 @@ export function navigateTo(path) {
  */
 export function getCurrentPath() {
   const hash = window.location.hash.slice(1) || '/login';
-  return hash;
+  // Strip query string — query params are read directly from window.location.hash by each page
+  return hash.split('?')[0];
 }
 
 /**
