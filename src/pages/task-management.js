@@ -21,15 +21,31 @@ export async function renderTaskManagementPage() {
 
   // Fetch assignable interns based on role
   let internsQuery = supabase.from('profiles').select('id, full_name, avatar_url').eq('role', 'intern').eq('is_active', true);
-  if (isDeptAdmin) {
+  if (isAdmin && profile.department_id) {
     internsQuery = internsQuery.eq('department_id', profile.department_id);
   } else if (!isAdmin) {
-    // supervisor: own interns only
-    internsQuery = internsQuery.eq('supervisor_id', profile.id);
+    // supervisor: all interns in same department, or own interns if no department set
+    if (profile.department_id) {
+      internsQuery = internsQuery.eq('department_id', profile.department_id);
+    } else {
+      internsQuery = internsQuery.eq('supervisor_id', profile.id);
+    }
   }
   const { data: interns } = canManageTasks ? await internsQuery : { data: [] };
 
-  // Fetch tasks — supervisors see only their own; admins see all
+  // For supervisors in a dept, get all co-supervisor IDs for shared task visibility
+  let deptSupervisorIds = [profile.id];
+  if (!isAdmin && profile.department_id) {
+    const { data: deptSups } = await supabase
+      .from('profiles')
+      .select('id')
+      .eq('department_id', profile.department_id)
+      .eq('role', 'supervisor');
+    deptSupervisorIds = (deptSups || []).map(s => s.id);
+    if (!deptSupervisorIds.includes(profile.id)) deptSupervisorIds.push(profile.id);
+  }
+
+  // Fetch tasks — supervisors see all tasks created by dept co-supervisors; admins see all
   let tasksQuery = supabase
     .from('tasks')
     .select('*, assigned_profile:profiles!tasks_assigned_to_fkey(full_name), creator_profile:profiles!tasks_created_by_fkey(full_name)')
@@ -37,7 +53,9 @@ export async function renderTaskManagementPage() {
     .order('created_at', { ascending: false });
 
   if (!isAdmin) {
-    tasksQuery = tasksQuery.eq('created_by', profile.id);
+    tasksQuery = profile.department_id
+      ? tasksQuery.in('created_by', deptSupervisorIds)
+      : tasksQuery.eq('created_by', profile.id);
   }
 
   const { data: tasks } = await tasksQuery;

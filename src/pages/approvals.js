@@ -22,7 +22,19 @@ export async function renderApprovalsPage() {
     .order('created_at', { ascending: false });
 
   if (!isAdmin) {
-    query = query.eq('supervisor_id', profile.id);
+    if (profile.department_id) {
+      // Show approvals for all supervisors in the same department
+      const { data: deptSups } = await supabase
+        .from('profiles')
+        .select('id')
+        .eq('department_id', profile.department_id)
+        .eq('role', 'supervisor');
+      const deptSupervisorIds = (deptSups || []).map(s => s.id);
+      if (!deptSupervisorIds.includes(profile.id)) deptSupervisorIds.push(profile.id);
+      query = query.in('supervisor_id', deptSupervisorIds);
+    } else {
+      query = query.eq('supervisor_id', profile.id);
+    }
   }
 
   const { data: approvals } = await query;

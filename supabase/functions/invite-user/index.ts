@@ -89,8 +89,26 @@ serve(async (req: Request) => {
       user_metadata: { full_name: fullName, role },
     });
 
-    if (createErr) return json({ error: createErr.message }, 400);
-    const userId = newUser.user.id;
+    let userId: string;
+    if (createErr) {
+      // If the user already exists, look them up and resend the invite
+      const msg = createErr.message.toLowerCase();
+      const isAlreadyExists = msg.includes("already") || msg.includes("duplicate") || msg.includes("registered");
+      if (!isAlreadyExists) return json({ error: createErr.message }, 400);
+
+      const { data: existingProfile, error: lookupErr } = await adminClient
+        .from("profiles")
+        .select("id")
+        .eq("email", email)
+        .single();
+
+      if (lookupErr || !existingProfile) {
+        return json({ error: "User already exists but could not be found." }, 400);
+      }
+      userId = existingProfile.id;
+    } else {
+      userId = newUser.user.id;
+    }
 
     // ── Update profiles row (created by DB trigger) ──────────
     const profileUpdates: Record<string, unknown> = {

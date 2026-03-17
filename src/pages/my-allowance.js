@@ -19,6 +19,23 @@ export async function renderMyAllowancePage() {
     .eq('intern_id', profile.id)
     .order('week_start', { ascending: false });
 
+  // Fetch admin-logged attendance dates for this intern
+  const { data: adminLoggedRecords } = await supabase
+    .from('attendance_records')
+    .select('date')
+    .eq('intern_id', profile.id)
+    .eq('admin_logged', true);
+  const adminLoggedDates = new Set((adminLoggedRecords || []).map(r => r.date));
+
+  function hasAdminLoggedInWeek(weekStart, weekEnd) {
+    const ws = new Date(weekStart + 'T00:00:00');
+    const we = new Date(weekEnd + 'T23:59:59');
+    return [...adminLoggedDates].some(d => {
+      const dt = new Date(d + 'T00:00:00');
+      return dt >= ws && dt <= we;
+    });
+  }
+
   const approved = (periods || []).filter(p => p.status === 'approved');
   const totalEarnings = approved.reduce((s, p) => s + (p.total_amount || 0), 0);
   const totalHours = approved.reduce((s, p) => s + (p.total_hours || 0), 0);
@@ -82,7 +99,7 @@ export async function renderMyAllowancePage() {
               <tr>
                 <td class="font-medium">Week ${getWeekNum(p.week_start)}</td>
                 <td class="whitespace-nowrap">${formatDate(p.week_start)} – ${formatDate(p.week_end)}</td>
-                <td>${formatHoursDisplay(p.total_hours)}</td>
+                <td>${formatHoursDisplay(p.total_hours)}${hasAdminLoggedInWeek(p.week_start, p.week_end) ? ' <span class="badge-secondary text-xs">Admin Logged</span>' : ''}</td>
                 <td>₱${p.hourly_rate?.toFixed(2)}</td>
                 <td class="font-semibold">₱${p.total_amount?.toFixed(2)}</td>
                 <td>

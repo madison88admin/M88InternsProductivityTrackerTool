@@ -218,6 +218,7 @@ export async function renderAttendancePage() {
                 <td>
                   ${record.is_late ? '<span class="badge-pending">Late</span>' : ''}
                   ${record.is_outside_hours ? '<span class="badge-rejected">Outside</span>' : ''}
+                  ${record.admin_logged ? '<span class="badge-secondary">Admin</span>' : ''}
                   ${ipConsistencyBadge(record.ip_consistent, 'sm')}
                 </td>
               </tr>

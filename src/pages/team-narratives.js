@@ -21,8 +21,9 @@ export async function renderTeamNarrativesPage() {
     .eq('is_active', true)
     .order('full_name');
 
-  if (isAdmin && profile.department_id) {
-    internsQuery = internsQuery.or(`department_id.eq.${profile.department_id},supervisor_id.eq.${profile.id}`);
+  // Supervisors and admins in a department see all dept interns; otherwise fall back to supervisor_id
+  if (profile.department_id) {
+    internsQuery = internsQuery.eq('department_id', profile.department_id);
   } else {
     internsQuery = internsQuery.eq('supervisor_id', profile.id);
   }
@@ -109,7 +110,7 @@ export async function renderTeamNarrativesPage() {
     el.querySelector('#narrative-count').textContent = `${filtered.length} narrative${filtered.length !== 1 ? 's' : ''}`;
   }
 
-  const allInternsLabel = isAdmin && profile.department_id
+  const allInternsLabel = profile.department_id
     ? `All Interns — ${profile.departments?.name || 'Department'}`
     : 'All Interns';
 

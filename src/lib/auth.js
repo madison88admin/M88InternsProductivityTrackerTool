@@ -69,7 +69,13 @@ export async function login(email, password) {
   currentSession.user = data.user;
   await loadProfile(data.user.id);
 
-  if (currentSession.profile?.is_active === false) {
+  if (!currentSession.profile) {
+    await supabase.auth.signOut();
+    currentSession = { user: null, profile: null };
+    throw new Error('Your account profile could not be loaded. Please try again or contact an administrator.');
+  }
+
+  if (currentSession.profile.is_active === false) {
     await supabase.auth.signOut();
     currentSession = { user: null, profile: null };
     throw new Error('Your account has been deactivated. Please contact an administrator.');

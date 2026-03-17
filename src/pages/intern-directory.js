@@ -5,7 +5,12 @@
 import { renderLayout } from '../components/layout.js';
 import { supabase } from '../lib/supabase.js';
 import { icons } from '../lib/icons.js';
-import { formatDate, formatHoursDisplay, debounce, renderAvatar, computeEstimatedEndDate } from '../lib/utils.js';
+import { formatDate, formatHoursDisplay, debounce, renderAvatar, computeEstimatedEndDate, getTodayDate } from '../lib/utils.js';
+import { createModal } from '../lib/component.js';
+import { showToast } from '../lib/toast.js';
+import { logAudit } from '../lib/audit.js';
+import { getCurrentUser } from '../lib/auth.js';
+import { extractTextWithPositions, parseDailyActivityReport } from '../lib/pdf-parser.js';
 
 export async function renderInternDirectoryPage() {
   const { data: interns } = await supabase
@@ -102,11 +107,492 @@ export async function renderInternDirectoryPage() {
             <p class="text-xs text-neutral-400 mt-1">${formatHoursDisplay(completed)} / ${formatHoursDisplay(required)}</p>
             ${estEnd ? `<p class="text-xs text-primary-500 mt-1">${icons.calendar} Est. completion: ${formatDate(estEnd)}</p>` : completed >= required && required > 0 ? `<p class="text-xs text-success-500 mt-1">✅ Completed</p>` : ''}
           </div>
+          ${i.is_active ? `
+            <div class="mt-3 pt-3 border-t border-neutral-200 space-y-2">
+              <button class="btn-secondary btn-sm log-past-hours-btn w-full inline-flex items-center justify-center gap-1" data-intern-id="${i.id}" data-intern-name="${i.full_name}" data-ojt-start="${i.ojt_start_date || ''}" data-supervisor-id="${i.supervisor_id || ''}">
+                ${icons.clock} Log Past Hours
+              </button>
+              <button class="btn-secondary btn-sm import-pdf-btn w-full inline-flex items-center justify-center gap-1" data-intern-id="${i.id}" data-intern-name="${i.full_name}" data-ojt-start="${i.ojt_start_date || ''}" data-supervisor-id="${i.supervisor_id || ''}">
+                ${icons.upload} Import from PDF
+              </button>
+            </div>
+          ` : ''}
         </div>
       `;
     }).join('');
 
     el.querySelector('#intern-count').textContent = `${filtered.length} intern${filtered.length !== 1 ? 's' : ''}`;
+
+    // Attach click handlers for Log Past Hours buttons
+    el.querySelectorAll('.log-past-hours-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        openLogPastHoursModal({
+          internId: btn.dataset.internId,
+          internName: btn.dataset.internName,
+          ojtStart: btn.dataset.ojtStart,
+          supervisorId: btn.dataset.supervisorId,
+        });
+      });
+    });
+
+    // Attach click handlers for Import from PDF buttons
+    el.querySelectorAll('.import-pdf-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const intern = {
+          internId: btn.dataset.internId,
+          internName: btn.dataset.internName,
+          ojtStart: btn.dataset.ojtStart,
+          supervisorId: btn.dataset.supervisorId,
+        };
+        // Create a temporary file input
+        const fileInput = document.createElement('input');
+        fileInput.type = 'file';
+        fileInput.accept = 'application/pdf,.pdf';
+        fileInput.classList.add('hidden');
+        fileInput.addEventListener('change', async () => {
+          const file = fileInput.files[0];
+          if (!file) return;
+          fileInput.remove();
+          await handlePdfImport(intern, file);
+        });
+        document.body.appendChild(fileInput);
+        fileInput.click();
+      });
+    });
+  }
+
+  function openLogPastHoursModal(intern) {
+    const today = getTodayDate();
+    const minDate = intern.ojtStart || '';
+
+    createModal(`Log Past Hours — ${intern.internName}`, `
+      <form id="log-past-hours-form" class="space-y-4">
+        <div>
+          <label class="form-label">Date <span class="text-danger-500">*</span></label>
+          <input type="date" id="lph-date" class="form-input" required max="${today}" ${minDate ? `min="${minDate}"` : ''} />
+          <p class="text-xs text-neutral-400 mt-1">Select a past date or today</p>
+        </div>
+
+        <div class="grid grid-cols-2 gap-4">
+          <div>
+            <label class="form-label">Morning In <span class="text-danger-500">*</span></label>
+            <input type="time" id="lph-time-in-1" class="form-input" required />
+          </div>
+          <div>
+            <label class="form-label">Lunch Out <span class="text-danger-500">*</span></label>
+            <input type="time" id="lph-time-out-1" class="form-input" required />
+          </div>
+          <div>
+            <label class="form-label">Afternoon In <span class="text-danger-500">*</span></label>
+            <input type="time" id="lph-time-in-2" class="form-input" required />
+          </div>
+          <div>
+            <label class="form-label">End of Day <span class="text-danger-500">*</span></label>
+            <input type="time" id="lph-time-out-2" class="form-input" required />
+          </div>
+        </div>
+
+        <p class="text-xs text-neutral-400">All times are required. Times must be in chronological order.</p>
+
+        <div class="flex justify-end gap-3 pt-2">
+          <button type="button" id="lph-cancel" class="btn-secondary">Cancel</button>
+          <button type="submit" id="lph-submit" class="btn-primary">Save Attendance</button>
+        </div>
+      </form>
+    `, (el, close) => {
+      el.querySelector('#lph-cancel').addEventListener('click', close);
+
+      el.querySelector('#log-past-hours-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+
+        const date = el.querySelector('#lph-date').value;
+        const timeIn1 = el.querySelector('#lph-time-in-1').value;
+        const timeOut1 = el.querySelector('#lph-time-out-1').value;
+        const timeIn2 = el.querySelector('#lph-time-in-2').value;
+        const timeOut2 = el.querySelector('#lph-time-out-2').value;
+
+        if (!date || !timeIn1 || !timeOut1 || !timeIn2 || !timeOut2) {
+          showToast('Please fill in all fields', 'error');
+          return;
+        }
+
+        // Validate chronological order
+        if (timeIn1 >= timeOut1) {
+          showToast('Morning In must be before Lunch Out', 'error');
+          return;
+        }
+        if (timeOut1 >= timeIn2) {
+          showToast('Lunch Out must be before Afternoon In', 'error');
+          return;
+        }
+        if (timeIn2 >= timeOut2) {
+          showToast('Afternoon In must be before End of Day', 'error');
+          return;
+        }
+
+        const submitBtn = el.querySelector('#lph-submit');
+        submitBtn.disabled = true;
+        submitBtn.innerHTML = '<span class="spinner"></span> Saving...';
+
+        try {
+          const admin = getCurrentUser();
+          const ts = (time) => new Date(`${date}T${time}:00`).toISOString();
+
+          const recordData = {
+            intern_id: intern.internId,
+            date,
+            time_in_1: ts(timeIn1),
+            time_out_1: ts(timeOut1),
+            time_in_2: ts(timeIn2),
+            time_out_2: ts(timeOut2),
+            status: 'approved',
+            approved_at: new Date().toISOString(),
+            admin_logged: true,
+            admin_logged_by: admin.id,
+            supervisor_id: intern.supervisorId || null,
+          };
+
+          // Check for existing record on this date
+          const { data: existing } = await supabase
+            .from('attendance_records')
+            .select('id')
+            .eq('intern_id', intern.internId)
+            .eq('date', date)
+            .maybeSingle();
+
+          let recordId;
+
+          if (existing) {
+            // Overwrite existing record
+            const { data, error } = await supabase
+              .from('attendance_records')
+              .update(recordData)
+              .eq('id', existing.id)
+              .select('id')
+              .single();
+            if (error) throw error;
+            recordId = data.id;
+          } else {
+            // Insert new record
+            const { data, error } = await supabase
+              .from('attendance_records')
+              .insert(recordData)
+              .select('id')
+              .single();
+            if (error) throw error;
+            recordId = data.id;
+          }
+
+          await logAudit('attendance.admin_logged', 'attendance', recordId, {
+            intern_id: intern.internId,
+            intern_name: intern.internName,
+            date,
+            time_in_1: timeIn1,
+            time_out_1: timeOut1,
+            time_in_2: timeIn2,
+            time_out_2: timeOut2,
+            overwrite: !!existing,
+          });
+
+          showToast(`Attendance saved for ${intern.internName} on ${formatDate(date)}`, 'success');
+          close();
+
+          // Refresh the page to update hours
+          renderInternDirectoryPage();
+        } catch (err) {
+          showToast(err.message || 'Failed to save attendance', 'error');
+          submitBtn.disabled = false;
+          submitBtn.innerHTML = 'Save Attendance';
+        }
+      });
+    });
+  }
+
+  async function handlePdfImport(intern, file) {
+    showToast('Parsing PDF...', 'info');
+
+    try {
+      const rows = await extractTextWithPositions(file);
+      const entries = parseDailyActivityReport(rows);
+
+      if (entries.length === 0) {
+        showToast('Could not find attendance data in this PDF. Make sure it contains a table with Date and Time columns.', 'error');
+        return;
+      }
+
+      showToast(`Found ${entries.length} attendance ${entries.length === 1 ? 'entry' : 'entries'}`, 'success');
+      await openPdfReviewModal(intern, entries, file.name);
+    } catch (err) {
+      showToast(err.message || 'Failed to parse PDF', 'error');
+    }
+  }
+
+  async function openPdfReviewModal(intern, entries, fileName) {
+    const today = getTodayDate();
+    const minDate = intern.ojtStart || '';
+
+    // Fetch existing attendance records for this intern to detect conflicts
+    const dates = entries.map(e => e.date).filter(Boolean);
+    let existingDates = new Set();
+    if (dates.length > 0) {
+      const { data: existing } = await supabase
+        .from('attendance_records')
+        .select('date')
+        .eq('intern_id', intern.internId)
+        .in('date', dates);
+      (existing || []).forEach(r => existingDates.add(r.date));
+    }
+
+    const tableRows = entries.map((entry, idx) => {
+      const hasConflict = existingDates.has(entry.date);
+      const isComplete = entry.timeIn1 && entry.timeOut1 && entry.timeIn2 && entry.timeOut2;
+      const isValidOrder = !isComplete || (entry.timeIn1 < entry.timeOut1 && entry.timeOut1 < entry.timeIn2 && entry.timeIn2 < entry.timeOut2);
+      const isDateValid = entry.date && entry.date <= today && (!minDate || entry.date >= minDate);
+
+      let statusBadge;
+      if (!isDateValid) {
+        statusBadge = '<span class="badge-danger text-xs">Invalid Date</span>';
+      } else if (!isComplete) {
+        statusBadge = '<span class="badge-warning text-xs">Incomplete</span>';
+      } else if (!isValidOrder) {
+        statusBadge = '<span class="badge-danger text-xs">Invalid Order</span>';
+      } else if (hasConflict) {
+        statusBadge = '<span class="badge-warning text-xs">Overwrite</span>';
+      } else {
+        statusBadge = '<span class="badge-success text-xs">OK</span>';
+      }
+
+      return `<tr data-row-idx="${idx}">
+        <td class="text-center"><input type="checkbox" class="pdf-row-check w-4 h-4 accent-primary-500" data-idx="${idx}" ${isComplete && isValidOrder && isDateValid ? 'checked' : ''} /></td>
+        <td class="text-center text-xs text-neutral-400">${idx + 1}</td>
+        <td><input type="date" class="form-input text-sm pdf-date" data-idx="${idx}" value="${entry.date || ''}" max="${today}" ${minDate ? `min="${minDate}"` : ''} /></td>
+        <td><input type="time" class="form-input text-sm pdf-time-in1" data-idx="${idx}" value="${entry.timeIn1 || ''}" /></td>
+        <td><input type="time" class="form-input text-sm pdf-time-out1" data-idx="${idx}" value="${entry.timeOut1 || ''}" /></td>
+        <td><input type="time" class="form-input text-sm pdf-time-in2" data-idx="${idx}" value="${entry.timeIn2 || ''}" /></td>
+        <td><input type="time" class="form-input text-sm pdf-time-out2" data-idx="${idx}" value="${entry.timeOut2 || ''}" /></td>
+        <td class="text-center pdf-status" data-idx="${idx}">${statusBadge}</td>
+      </tr>`;
+    }).join('');
+
+    createModal(`Import Attendance — ${intern.internName}`, `
+      <div class="space-y-4">
+        <div class="flex items-center justify-between">
+          <p class="text-sm text-neutral-500">${icons.narrative} ${fileName} — ${entries.length} ${entries.length === 1 ? 'entry' : 'entries'} found</p>
+          <label class="inline-flex items-center gap-2 text-sm cursor-pointer">
+            <input type="checkbox" id="pdf-select-all" class="w-4 h-4 accent-primary-500" checked />
+            Select All
+          </label>
+        </div>
+
+        <div class="overflow-x-auto" style="max-height: 400px; overflow-y: auto;">
+          <table class="data-table text-sm">
+            <thead class="sticky top-0 bg-white z-10">
+              <tr>
+                <th class="w-8"></th>
+                <th class="w-8">#</th>
+                <th>Date</th>
+                <th>Morning In</th>
+                <th>Lunch Out</th>
+                <th>Afternoon In</th>
+                <th>End of Day</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>${tableRows}</tbody>
+          </table>
+        </div>
+
+        <p class="text-xs text-neutral-400">Review and edit the parsed data. Uncheck rows you don't want to import. Rows marked "Overwrite" will replace existing records.</p>
+
+        <div class="flex justify-end gap-3 pt-2">
+          <button type="button" id="pdf-cancel" class="btn-secondary">Cancel</button>
+          <button type="button" id="pdf-save" class="btn-primary">Save Selected</button>
+        </div>
+      </div>
+    `, (el, close) => {
+      el.querySelector('#pdf-cancel').addEventListener('click', close);
+
+      // Update status badges and save button when inputs change
+      function updateRowStatus(idx) {
+        const row = el.querySelector(`tr[data-row-idx="${idx}"]`);
+        if (!row) return;
+
+        const date = row.querySelector('.pdf-date').value;
+        const t1 = row.querySelector('.pdf-time-in1').value;
+        const t2 = row.querySelector('.pdf-time-out1').value;
+        const t3 = row.querySelector('.pdf-time-in2').value;
+        const t4 = row.querySelector('.pdf-time-out2').value;
+        const statusCell = row.querySelector('.pdf-status');
+
+        const isComplete = t1 && t2 && t3 && t4;
+        const isValidOrder = !isComplete || (t1 < t2 && t2 < t3 && t3 < t4);
+        const isDateValid = date && date <= today && (!minDate || date >= minDate);
+        const hasConflict = existingDates.has(date);
+
+        let badge;
+        if (!date || !isDateValid) {
+          badge = '<span class="badge-danger text-xs">Invalid Date</span>';
+        } else if (!isComplete) {
+          badge = '<span class="badge-warning text-xs">Incomplete</span>';
+        } else if (!isValidOrder) {
+          badge = '<span class="badge-danger text-xs">Invalid Order</span>';
+        } else if (hasConflict) {
+          badge = '<span class="badge-warning text-xs">Overwrite</span>';
+        } else {
+          badge = '<span class="badge-success text-xs">OK</span>';
+        }
+        statusCell.innerHTML = badge;
+        updateSaveButton();
+      }
+
+      function updateSaveButton() {
+        const checked = el.querySelectorAll('.pdf-row-check:checked');
+        const saveBtn = el.querySelector('#pdf-save');
+        let validCount = 0;
+
+        checked.forEach(cb => {
+          const idx = cb.dataset.idx;
+          const row = el.querySelector(`tr[data-row-idx="${idx}"]`);
+          const date = row.querySelector('.pdf-date').value;
+          const t1 = row.querySelector('.pdf-time-in1').value;
+          const t2 = row.querySelector('.pdf-time-out1').value;
+          const t3 = row.querySelector('.pdf-time-in2').value;
+          const t4 = row.querySelector('.pdf-time-out2').value;
+
+          const isComplete = date && t1 && t2 && t3 && t4;
+          const isValidOrder = isComplete && t1 < t2 && t2 < t3 && t3 < t4;
+          const isDateValid = date && date <= today && (!minDate || date >= minDate);
+
+          if (isComplete && isValidOrder && isDateValid) validCount++;
+        });
+
+        saveBtn.disabled = validCount === 0;
+        saveBtn.textContent = validCount > 0 ? `Save Selected (${validCount})` : 'Save Selected';
+      }
+
+      // Attach input change listeners to all editable fields
+      el.querySelectorAll('.pdf-date, .pdf-time-in1, .pdf-time-out1, .pdf-time-in2, .pdf-time-out2').forEach(input => {
+        input.addEventListener('change', () => updateRowStatus(input.dataset.idx));
+      });
+
+      // Checkbox handlers
+      el.querySelectorAll('.pdf-row-check').forEach(cb => {
+        cb.addEventListener('change', updateSaveButton);
+      });
+
+      // Select All toggle
+      el.querySelector('#pdf-select-all').addEventListener('change', (e) => {
+        el.querySelectorAll('.pdf-row-check').forEach(cb => { cb.checked = e.target.checked; });
+        updateSaveButton();
+      });
+
+      // Initial button state
+      updateSaveButton();
+
+      // Save handler
+      el.querySelector('#pdf-save').addEventListener('click', async () => {
+        const saveBtn = el.querySelector('#pdf-save');
+        saveBtn.disabled = true;
+        saveBtn.innerHTML = '<span class="spinner"></span> Saving...';
+
+        try {
+          const admin = getCurrentUser();
+          const checkedRows = el.querySelectorAll('.pdf-row-check:checked');
+          let saved = 0;
+          let skipped = 0;
+
+          for (const cb of checkedRows) {
+            const idx = cb.dataset.idx;
+            const row = el.querySelector(`tr[data-row-idx="${idx}"]`);
+            const date = row.querySelector('.pdf-date').value;
+            const timeIn1 = row.querySelector('.pdf-time-in1').value;
+            const timeOut1 = row.querySelector('.pdf-time-out1').value;
+            const timeIn2 = row.querySelector('.pdf-time-in2').value;
+            const timeOut2 = row.querySelector('.pdf-time-out2').value;
+
+            // Skip invalid rows
+            const isComplete = date && timeIn1 && timeOut1 && timeIn2 && timeOut2;
+            const isValidOrder = isComplete && timeIn1 < timeOut1 && timeOut1 < timeIn2 && timeIn2 < timeOut2;
+            const isDateValid = date && date <= today && (!minDate || date >= minDate);
+
+            if (!isComplete || !isValidOrder || !isDateValid) {
+              skipped++;
+              continue;
+            }
+
+            saveBtn.innerHTML = `<span class="spinner"></span> Saving ${saved + 1} of ${checkedRows.length}...`;
+
+            const ts = (time) => new Date(`${date}T${time}:00`).toISOString();
+            const recordData = {
+              intern_id: intern.internId,
+              date,
+              time_in_1: ts(timeIn1),
+              time_out_1: ts(timeOut1),
+              time_in_2: ts(timeIn2),
+              time_out_2: ts(timeOut2),
+              status: 'approved',
+              approved_at: new Date().toISOString(),
+              admin_logged: true,
+              admin_logged_by: admin.id,
+              supervisor_id: intern.supervisorId || null,
+            };
+
+            // Check for existing record on this date
+            const { data: existing } = await supabase
+              .from('attendance_records')
+              .select('id')
+              .eq('intern_id', intern.internId)
+              .eq('date', date)
+              .maybeSingle();
+
+            let recordId;
+            if (existing) {
+              const { data, error } = await supabase
+                .from('attendance_records')
+                .update(recordData)
+                .eq('id', existing.id)
+                .select('id')
+                .single();
+              if (error) throw error;
+              recordId = data.id;
+            } else {
+              const { data, error } = await supabase
+                .from('attendance_records')
+                .insert(recordData)
+                .select('id')
+                .single();
+              if (error) throw error;
+              recordId = data.id;
+            }
+
+            await logAudit('attendance.admin_logged', 'attendance', recordId, {
+              intern_id: intern.internId,
+              intern_name: intern.internName,
+              date,
+              time_in_1: timeIn1,
+              time_out_1: timeOut1,
+              time_in_2: timeIn2,
+              time_out_2: timeOut2,
+              overwrite: !!existing,
+              source: 'pdf_import',
+            });
+
+            saved++;
+          }
+
+          const msg = skipped > 0
+            ? `Imported ${saved} record${saved !== 1 ? 's' : ''} for ${intern.internName} (${skipped} skipped)`
+            : `Imported ${saved} attendance record${saved !== 1 ? 's' : ''} for ${intern.internName}`;
+          showToast(msg, 'success');
+          close();
+          renderInternDirectoryPage();
+        } catch (err) {
+          showToast(err.message || 'Failed to save attendance records', 'error');
+          saveBtn.disabled = false;
+          saveBtn.textContent = 'Save Selected';
+        }
+      });
+    });
   }
 
   renderLayout(`

@@ -717,21 +717,43 @@ function buildPerformanceKPIGrid(att, tasks, narr, weekStart, today) {
 async function buildSupervisorDashboard(profile) {
   const today = getTodayDate();
 
+  // ── Resolve department-level supervisor IDs for shared-dept visibility ───────
+  let deptSupervisorIds = [profile.id];
+  if (profile.department_id) {
+    const { data: deptSups } = await supabase
+      .from('profiles')
+      .select('id')
+      .eq('department_id', profile.department_id)
+      .eq('role', 'supervisor');
+    deptSupervisorIds = (deptSups || []).map(s => s.id);
+    if (!deptSupervisorIds.includes(profile.id)) deptSupervisorIds.push(profile.id);
+  }
+  const hasDept = !!profile.department_id;
+
   // ── Stats + intern list in parallel ─────────────────────────────────────────
+  let approvalsQuery = supabase.from('approvals').select('*', { count: 'exact', head: true }).eq('status', 'pending');
+  let tasksQuery = supabase.from('tasks').select('*', { count: 'exact', head: true }).in('status', ['not_started', 'in_progress']);
+  let internsQuery = supabase.from('profiles')
+    .select('id, full_name, avatar_url, hours_required, hours_rendered, ojt_start_date, is_voluntary, department:departments(name)')
+    .eq('role', 'intern')
+    .eq('is_active', true)
+    .order('full_name');
+
+  if (hasDept) {
+    approvalsQuery = approvalsQuery.in('supervisor_id', deptSupervisorIds);
+    tasksQuery = tasksQuery.in('created_by', deptSupervisorIds);
+    internsQuery = internsQuery.eq('department_id', profile.department_id);
+  } else {
+    approvalsQuery = approvalsQuery.eq('supervisor_id', profile.id);
+    tasksQuery = tasksQuery.eq('created_by', profile.id);
+    internsQuery = internsQuery.eq('supervisor_id', profile.id);
+  }
+
   const [
     { count: pendingApprovals },
     { count: activeTasks },
     { data: interns },
-  ] = await Promise.all([
-    supabase.from('approvals').select('*', { count: 'exact', head: true }).eq('supervisor_id', profile.id).eq('status', 'pending'),
-    supabase.from('tasks').select('*', { count: 'exact', head: true }).eq('created_by', profile.id).in('status', ['not_started', 'in_progress']),
-    supabase.from('profiles')
-      .select('id, full_name, avatar_url, hours_required, hours_rendered, ojt_start_date, is_voluntary, department:departments(name)')
-      .eq('supervisor_id', profile.id)
-      .eq('role', 'intern')
-      .eq('is_active', true)
-      .order('full_name'),
-  ]);
+  ] = await Promise.all([approvalsQuery, tasksQuery, internsQuery]);
 
   const teamSize = (interns || []).length;
   const internIds = (interns || []).map(i => i.id);
@@ -1405,12 +1427,14 @@ async function initDashboardCharts(role, container) {
       const profile = getProfile();
       const today = new Date().toLocaleDateString('en-CA');
 
-      const { data: teamInterns } = await supabase
-        .from('profiles')
-        .select('id')
-        .eq('supervisor_id', profile.id)
-        .eq('role', 'intern')
-        .eq('is_active', true);
+      const hasDeptChart = !!profile.department_id;
+      let teamInternsQuery = supabase.from('profiles').select('id').eq('role', 'intern').eq('is_active', true);
+      if (hasDeptChart) {
+        teamInternsQuery = teamInternsQuery.eq('department_id', profile.department_id);
+      } else {
+        teamInternsQuery = teamInternsQuery.eq('supervisor_id', profile.id);
+      }
+      const { data: teamInterns } = await teamInternsQuery;
 
       const internIds = (teamInterns || []).map(i => i.id);
       let presentIds = [];
