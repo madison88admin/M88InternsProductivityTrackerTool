@@ -80,23 +80,15 @@ export async function login(email, password) {
 
 /**
  * Register the first admin account with a secret key.
+ * Uses an Edge Function with auth.admin.createUser() to bypass signUp() issues.
  */
 export async function registerAdmin(email, password, fullName, secretKey) {
-  const expectedKey = import.meta.env.VITE_ADMIN_SECRET_KEY;
-
-  if (!expectedKey || secretKey !== expectedKey) {
-    throw new Error('Invalid secret key.');
-  }
-
-  const { data, error } = await supabase.auth.signUp({
-    email: email.trim(),
-    password,
-    options: {
-      data: { full_name: fullName, role: 'admin' },
-    },
+  const { data, error } = await supabase.functions.invoke('admin-setup', {
+    body: { secretKey, email: email.trim(), password, fullName },
   });
 
   if (error) throw error;
+  if (!data?.ok) throw new Error(data?.error || 'Failed to create admin account');
 
   return data;
 }

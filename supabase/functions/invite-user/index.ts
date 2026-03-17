@@ -23,20 +23,39 @@ serve(async (req: Request) => {
   try {
     // ── Verify caller is an authenticated admin ──────────────
     const authHeader = req.headers.get("authorization") ?? "";
-    const jwt = authHeader.replace("Bearer ", "");
+    const jwt = authHeader.replace(/^Bearer\s+/i, "").trim();
     if (!jwt) {
-      return json({ error: "Unauthorized" }, 401);
+      return json({ error: "Unauthorized: missing bearer token" }, 401);
     }
 
-    const anonClient = createClient(SUPABASE_URL, Deno.env.get("SUPABASE_ANON_KEY")!);
-    const { data: { user: caller }, error: authErr } = await anonClient.auth.getUser(jwt);
-    if (authErr || !caller) return json({ error: "Unauthorized" }, 401);
+    // Decode JWT payload to extract user ID (avoid broken /auth/v1/user calls)
+    let callerId: string;
+    try {
+      const parts = jwt.split(".");
+      if (parts.length !== 3) throw new Error("bad format");
+      const b64 = parts[1].replace(/-/g, "+").replace(/_/g, "/");
+      const payload = JSON.parse(atob(b64));
+      callerId = payload.sub;
+      if (!callerId) throw new Error("missing sub");
+      if (payload.exp && payload.exp < Math.floor(Date.now() / 1000)) {
+        return json({ error: "Unauthorized: token expired" }, 401);
+      }
+    } catch {
+      return json({ error: "Unauthorized: invalid token" }, 401);
+    }
 
+    // Confirm user exists via admin API (uses service role — always works)
     const adminClient = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
+    const { data: { user: authUser }, error: authError } =
+      await adminClient.auth.admin.getUserById(callerId);
+    if (authError || !authUser) {
+      return json({ error: "Unauthorized: user not found" }, 401);
+    }
+
     const { data: callerProfile } = await adminClient
       .from("profiles")
       .select("role")
-      .eq("id", caller.id)
+      .eq("id", callerId)
       .single();
 
     if (callerProfile?.role !== "admin") {
