@@ -395,6 +395,7 @@ export async function fetchDarData(internId, mondayDate, fridayDate) {
     { data: intern },
     { data: attendance },
     { data: narratives },
+    { data: holidays },
     { data: allowancePeriod },
     { data: allowanceConfig },
   ] = await Promise.all([
@@ -414,6 +415,12 @@ export async function fetchDarData(internId, mondayDate, fridayDate) {
       .from('narratives')
       .select('*, task:tasks(title)')
       .eq('intern_id', internId)
+      .gte('date', mondayDate)
+      .lte('date', fridayDate)
+      .order('date', { ascending: true }),
+    supabase
+      .from('holidays')
+      .select('date, name')
       .gte('date', mondayDate)
       .lte('date', fridayDate)
       .order('date', { ascending: true }),
@@ -447,6 +454,7 @@ export async function fetchDarData(internId, mondayDate, fridayDate) {
     intern,
     attendance: attendance || [],
     narratives: narratives || [],
+    holidays: holidays || [],
     supervisors,
     allowancePeriod,
     hourlyRate: allowanceConfig?.hourly_rate ?? null,
@@ -483,13 +491,17 @@ function calcSessionHours(timeIn, timeOut) {
   return Math.max(0, ms / (1000 * 60 * 60));
 }
 
+function formatHolidayName(name) {
+  return String(name || 'Holiday').toUpperCase();
+}
+
 // ─── DAR: PDF generation ────────────────────────────────────────────────────
 
 export async function generateDarPdf(darData, weekNum, mondayDate, existingDoc) {
   const { default: jsPDF } = await import('jspdf');
   const { default: autoTable } = await import('jspdf-autotable');
 
-  const { intern, attendance, narratives, supervisors, allowancePeriod, hourlyRate } = darData;
+  const { intern, attendance, narratives, holidays, supervisors, allowancePeriod, hourlyRate } = darData;
 
   const doc = existingDoc || new jsPDF({
     orientation: 'portrait',
@@ -583,55 +595,61 @@ export async function generateDarPdf(darData, weekNum, mondayDate, existingDoc) 
   const tableBody = [];
   let totalHours = 0;
   const signatureCells = [];
+  const holidayByDate = new Map((holidays || []).map(h => [h.date, h.name || 'Holiday']));
 
   weekdays.forEach((dateStr, dayIdx) => {
     const att = attendance.find(a => a.date === dateStr);
     const morningNarr = narratives.find(n => n.date === dateStr && n.session === 'morning');
     const afternoonNarr = narratives.find(n => n.date === dateStr && n.session === 'afternoon');
+    const holidayName = holidayByDate.get(dateStr);
+    const isHolidayDate = !!holidayName;
     const isApproved = att?.status === 'approved';
     const supervisorSigDataUrl = att?.supervisor_id
       ? (supervisorSigById.get(att.supervisor_id) || defaultSupervisorSigDataUrl)
       : defaultSupervisorSigDataUrl;
+    const holidayTask = `---NO WORK DUE TO ${formatHolidayName(holidayName)} HOLIDAY---`;
 
-    const mHours = calcSessionHours(att?.time_in_1, att?.time_out_1);
+    const mHours = isHolidayDate ? 0 : calcSessionHours(att?.time_in_1, att?.time_out_1);
     const mTask = morningNarr?.task?.title || '';
     const mContent = stripHtml(morningNarr?.content);
     let mAccomplished = mTask ? `${mTask}${mContent ? ': ' + mContent : ''}` : mContent;
+    if (isHolidayDate) mAccomplished = holidayTask;
     if (mAccomplished.length > 200) mAccomplished = mAccomplished.slice(0, 200) + '...';
 
     tableBody.push([
       formatDateMMDDYYYY(dateStr),
-      att?.time_in_1 ? formatTime(att.time_in_1) : '',
-      att?.time_out_1 ? formatTime(att.time_out_1) : '',
+      isHolidayDate ? '00:00' : (att?.time_in_1 ? formatTime(att.time_in_1) : ''),
+      isHolidayDate ? '00:00' : (att?.time_out_1 ? formatTime(att.time_out_1) : ''),
       mAccomplished,
-      mHours > 0 ? mHours.toFixed(2) : '',
+      isHolidayDate ? '00:00' : (mHours > 0 ? mHours.toFixed(2) : ''),
       '',
       '',
     ]);
 
     const mRowIdx = dayIdx * 2;
-    if (isApproved && internSigDataUrl) signatureCells.push({ row: mRowIdx, col: 5, dataUrl: internSigDataUrl });
-    if (isApproved && supervisorSigDataUrl) signatureCells.push({ row: mRowIdx, col: 6, dataUrl: supervisorSigDataUrl });
+    if ((isApproved || isHolidayDate) && internSigDataUrl) signatureCells.push({ row: mRowIdx, col: 5, dataUrl: internSigDataUrl });
+    if ((isApproved || isHolidayDate) && supervisorSigDataUrl) signatureCells.push({ row: mRowIdx, col: 6, dataUrl: supervisorSigDataUrl });
 
-    const aHours = calcSessionHours(att?.time_in_2, att?.time_out_2);
+    const aHours = isHolidayDate ? 0 : calcSessionHours(att?.time_in_2, att?.time_out_2);
     const aTask = afternoonNarr?.task?.title || '';
     const aContent = stripHtml(afternoonNarr?.content);
     let aAccomplished = aTask ? `${aTask}${aContent ? ': ' + aContent : ''}` : aContent;
+    if (isHolidayDate) aAccomplished = holidayTask;
     if (aAccomplished.length > 200) aAccomplished = aAccomplished.slice(0, 200) + '...';
 
     tableBody.push([
       formatDateMMDDYYYY(dateStr),
-      att?.time_in_2 ? formatTime(att.time_in_2) : '',
-      att?.time_out_2 ? formatTime(att.time_out_2) : '',
+      isHolidayDate ? '00:00' : (att?.time_in_2 ? formatTime(att.time_in_2) : ''),
+      isHolidayDate ? '00:00' : (att?.time_out_2 ? formatTime(att.time_out_2) : ''),
       aAccomplished,
-      aHours > 0 ? aHours.toFixed(2) : '',
+      isHolidayDate ? '00:00' : (aHours > 0 ? aHours.toFixed(2) : ''),
       '',
       '',
     ]);
 
     const aRowIdx = dayIdx * 2 + 1;
-    if (isApproved && internSigDataUrl) signatureCells.push({ row: aRowIdx, col: 5, dataUrl: internSigDataUrl });
-    if (isApproved && supervisorSigDataUrl) signatureCells.push({ row: aRowIdx, col: 6, dataUrl: supervisorSigDataUrl });
+    if ((isApproved || isHolidayDate) && internSigDataUrl) signatureCells.push({ row: aRowIdx, col: 5, dataUrl: internSigDataUrl });
+    if ((isApproved || isHolidayDate) && supervisorSigDataUrl) signatureCells.push({ row: aRowIdx, col: 6, dataUrl: supervisorSigDataUrl });
 
     totalHours += mHours + aHours;
   });
