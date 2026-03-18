@@ -41,6 +41,13 @@ export async function renderAllowanceManagementPage() {
   const internRates = internRatesSetting?.value || {};
   const customRateCount = Object.keys(internRates).length;
 
+  const { data: allowanceModeSetting } = await supabase
+    .from('system_settings')
+    .select('value')
+    .eq('key', 'allowance_rate_mode')
+    .maybeSingle();
+  const allowanceRateMode = allowanceModeSetting?.value?.mode === 'individual' ? 'individual' : 'global';
+
   renderLayout(`
     <div class="flex items-center justify-between page-header animate-fade-in-up">
       <div>
@@ -50,7 +57,7 @@ export async function renderAllowanceManagementPage() {
       <div class="flex gap-2">
         <button id="set-rate-btn" class="btn-secondary">
           ${icons.settings}
-          <span class="ml-2">Set Rate</span>
+          <span class="ml-2">Set Hourly Rate</span>
         </button>
         <button id="compute-btn" class="btn-primary">
           ${icons.php}
@@ -63,12 +70,13 @@ export async function renderAllowanceManagementPage() {
     <div class="card mb-6">
       <div class="flex items-center justify-between">
         <div>
-          <p class="text-sm text-white">Global Hourly Rate</p>
-          <p class="text-3xl font-bold text-white">₱${currentRate?.hourly_rate?.toFixed(2) || '0.00'}</p>
-          ${currentRate ? `<p class="text-xs text-white mt-1">Effective from ${formatDate(currentRate.effective_from)}</p>` : ''}
-          ${customRateCount > 0 ? `<p class="text-xs text-white mt-1 opacity-80">${customRateCount} intern${customRateCount !== 1 ? 's' : ''} have individual rate overrides</p>` : ''}
+          <p class="text-sm text-neutral-500">Global Hourly Rate</p>
+          <p class="text-3xl font-bold text-neutral-900">₱${currentRate?.hourly_rate?.toFixed(2) || '0.00'}</p>
+          ${currentRate ? `<p class="text-xs text-neutral-500 mt-1">Effective from ${formatDate(currentRate.effective_from)}</p>` : ''}
+          <p class="text-xs text-neutral-600 mt-1">Active computation mode: <span class="font-semibold">${allowanceRateMode === 'global' ? 'Global Rate' : 'Per-Intern Rates'}</span></p>
+          ${customRateCount > 0 ? `<p class="text-xs text-neutral-500 mt-1">${customRateCount} intern${customRateCount !== 1 ? 's' : ''} have individual rate overrides</p>` : ''}
         </div>
-        ${currentRate?.notes ? `<p class="text-sm text-white max-w-xs">${currentRate.notes}</p>` : ''}
+        ${currentRate?.notes ? `<p class="text-sm text-neutral-600 max-w-xs">${currentRate.notes}</p>` : ''}
       </div>
     </div>
 
@@ -77,7 +85,10 @@ export async function renderAllowanceManagementPage() {
       <h3 class="text-base font-bold text-neutral-900 mb-4">Pending Review (${pendingPeriods.length})</h3>
       ${pendingPeriods.length > 0 ? `
         <div class="mb-4">
-          <button id="approve-all-btn" class="btn-sm btn-success">Approve All</button>
+          <div class="flex gap-2">
+            <button id="approve-all-btn" class="btn-sm btn-success">Approve All</button>
+            <button id="reject-all-btn" class="btn-sm btn-danger">Reject All</button>
+          </div>
         </div>
         <div class="overflow-x-auto">
           <table class="data-table">
@@ -152,10 +163,10 @@ export async function renderAllowanceManagementPage() {
     </div>
   `, (el) => {
     // Set rate button
-    el.querySelector('#set-rate-btn')?.addEventListener('click', () => openSetRateModal(currentRate, internRates, profile));
+    el.querySelector('#set-rate-btn')?.addEventListener('click', () => openSetRateModal(currentRate, internRates, allowanceRateMode, profile));
 
     // Compute weekly button
-    el.querySelector('#compute-btn')?.addEventListener('click', () => computeWeeklyAllowances(currentRate, internRates, profile));
+    el.querySelector('#compute-btn')?.addEventListener('click', () => computeWeeklyAllowances(currentRate, internRates, allowanceRateMode, profile));
 
     // Approve individual
     el.querySelectorAll('.approve-period-btn').forEach(btn => {
@@ -233,20 +244,74 @@ export async function renderAllowanceManagementPage() {
         }
       }, 'Approve All');
     });
+
+    // Reject all
+    el.querySelector('#reject-all-btn')?.addEventListener('click', () => {
+      createModal('Reject All Pending Allowances', `
+        <form id="reject-all-form" class="space-y-4">
+          <p class="text-sm text-neutral-600">Reject all ${pendingPeriods.length} pending allowances?</p>
+          <div>
+            <label class="form-label">Reason <span class="text-danger-500">*</span></label>
+            <textarea id="reject-all-notes" class="form-input" rows="3" required placeholder="Provide reason for bulk rejection"></textarea>
+          </div>
+          <div class="flex justify-end gap-3">
+            <button type="button" id="reject-all-cancel" class="btn-secondary">Cancel</button>
+            <button type="submit" id="reject-all-confirm" class="btn-danger">Reject All</button>
+          </div>
+        </form>
+      `, (modalEl, close) => {
+        modalEl.querySelector('#reject-all-cancel').addEventListener('click', close);
+        modalEl.querySelector('#reject-all-form').addEventListener('submit', async (e) => {
+          e.preventDefault();
+          const notes = modalEl.querySelector('#reject-all-notes').value.trim();
+          if (!notes) {
+            showToast('Please provide a rejection reason', 'error');
+            return;
+          }
+
+          const submitBtn = modalEl.querySelector('#reject-all-confirm');
+          submitBtn.disabled = true;
+          submitBtn.textContent = 'Rejecting...';
+
+          try {
+            const ids = pendingPeriods.map(p => p.id);
+            for (const id of ids) {
+              await supabase.from('allowance_periods').update({
+                status: 'rejected',
+                reviewed_by: profile.id,
+                reviewed_at: new Date().toISOString(),
+                review_notes: notes,
+              }).eq('id', id);
+            }
+
+            showToast(`${ids.length} allowances rejected`, 'success');
+            close();
+            renderAllowanceManagementPage();
+          } catch (err) {
+            showToast('Failed to reject all', 'error');
+            submitBtn.disabled = false;
+            submitBtn.textContent = 'Reject All';
+          }
+        });
+      });
+    });
   }, '/allowance-management');
 }
 
-function openSetRateModal(currentRate, internRates, profile) {
+function openSetRateModal(currentRate, internRates, allowanceRateMode, profile) {
   createModal('Set Hourly Rate', `
     <div class="space-y-4">
       <!-- Tabs -->
       <div class="flex rounded-lg overflow-hidden border border-neutral-200">
-        <button id="tab-global" class="flex-1 px-4 py-2 text-sm font-medium bg-primary-600 text-white transition-colors">Global Rate</button>
-        <button id="tab-individual" class="flex-1 px-4 py-2 text-sm font-medium bg-white text-neutral-600 hover:bg-neutral-50 transition-colors">Per-Intern Rates</button>
+        <button id="tab-global" class="flex-1 px-4 py-2 text-sm font-medium ${allowanceRateMode === 'global' ? 'bg-primary-600 text-white' : 'bg-white text-neutral-600 hover:bg-neutral-50'} transition-colors">Global Rate ${allowanceRateMode === 'global' ? '(Active)' : ''}</button>
+        <button id="tab-individual" class="flex-1 px-4 py-2 text-sm font-medium ${allowanceRateMode === 'individual' ? 'bg-primary-600 text-white' : 'bg-white text-neutral-600 hover:bg-neutral-50'} transition-colors">Per-Intern Rates ${allowanceRateMode === 'individual' ? '(Active)' : ''}</button>
       </div>
 
       <!-- Global Rate Panel -->
-      <div id="panel-global">
+      <div id="panel-global" class="${allowanceRateMode === 'individual' ? 'hidden' : ''}">
+        <div class="mb-3">
+          <button type="button" id="activate-global-mode" class="btn-sm ${allowanceRateMode === 'global' ? 'btn-primary' : 'btn-secondary'}">${allowanceRateMode === 'global' ? 'Global Rate is Active' : 'Use Global Rate for Computation'}</button>
+        </div>
         <form id="set-rate-form" class="space-y-4">
           <div>
             <label class="form-label">Current Rate</label>
@@ -272,10 +337,12 @@ function openSetRateModal(currentRate, internRates, profile) {
       </div>
 
       <!-- Per-Intern Rates Panel -->
-      <div id="panel-individual" class="hidden space-y-3">
+      <div id="panel-individual" class="${allowanceRateMode === 'individual' ? '' : 'hidden'} space-y-3">
+        <div>
+          <button type="button" id="activate-individual-mode" class="btn-sm ${allowanceRateMode === 'individual' ? 'btn-primary' : 'btn-secondary'}">${allowanceRateMode === 'individual' ? 'Per-Intern Rates are Active' : 'Use Per-Intern Rates for Computation'}</button>
+        </div>
         <p class="text-sm text-neutral-500">
-          Set a custom hourly rate per intern. Leave blank to use the global rate
-          (₱${currentRate?.hourly_rate?.toFixed(2) || '0.00'}/hr).
+          Set a custom hourly rate per intern. Only interns with a set value will be included when Per-Intern mode is active.
         </p>
         <div id="intern-rates-list" class="space-y-1 max-h-72 overflow-y-auto pr-1">
           <p class="text-neutral-400 text-sm text-center py-4">Loading interns…</p>
@@ -305,6 +372,34 @@ function openSetRateModal(currentRate, internRates, profile) {
       panelIndividual.classList.remove('hidden');
       panelGlobal.classList.add('hidden');
       await loadInternRates(el, currentRate, internRates);
+    });
+
+    if (allowanceRateMode === 'individual') {
+      await loadInternRates(el, currentRate, internRates);
+    }
+
+    el.querySelector('#activate-global-mode')?.addEventListener('click', async () => {
+      try {
+        await setAllowanceRateMode('global', profile.id);
+        await logAudit('allowance.rate_mode_set', 'system_settings', null, { mode: 'global' });
+        showToast('Global rate mode activated', 'success');
+        close();
+        renderAllowanceManagementPage();
+      } catch (err) {
+        showToast(err.message || 'Failed to set mode', 'error');
+      }
+    });
+
+    el.querySelector('#activate-individual-mode')?.addEventListener('click', async () => {
+      try {
+        await setAllowanceRateMode('individual', profile.id);
+        await logAudit('allowance.rate_mode_set', 'system_settings', null, { mode: 'individual' });
+        showToast('Per-intern rate mode activated', 'success');
+        close();
+        renderAllowanceManagementPage();
+      } catch (err) {
+        showToast(err.message || 'Failed to set mode', 'error');
+      }
     });
 
     el.querySelector('#rate-cancel').addEventListener('click', close);
@@ -387,9 +482,24 @@ async function loadInternRates(el, currentRate, existingRates) {
   `).join('');
 }
 
-async function computeWeeklyAllowances(currentRate, internRates, profile) {
-  if (!currentRate && Object.keys(internRates).length === 0) {
-    showToast('Please set an hourly rate first', 'error');
+async function setAllowanceRateMode(mode, updatedBy) {
+  const { error } = await supabase
+    .from('system_settings')
+    .upsert(
+      { key: 'allowance_rate_mode', value: { mode }, updated_by: updatedBy },
+      { onConflict: 'key' },
+    );
+  if (error) throw error;
+}
+
+async function computeWeeklyAllowances(currentRate, internRates, allowanceRateMode, profile) {
+  if (allowanceRateMode === 'global' && !currentRate) {
+    showToast('Please set a global hourly rate first', 'error');
+    return;
+  }
+
+  if (allowanceRateMode === 'individual' && Object.keys(internRates).length === 0) {
+    showToast('Please set at least one per-intern rate first', 'error');
     return;
   }
 
@@ -408,10 +518,10 @@ async function computeWeeklyAllowances(currentRate, internRates, profile) {
         <p class="text-xs text-neutral-400 mt-1">The Friday of the selected week will be the end date.</p>
       </div>
       <p class="text-sm text-neutral-500">
-        Global rate: <strong>${currentRate ? `₱${currentRate.hourly_rate.toFixed(2)}/hour` : 'Not set'}</strong>.
-        ${customRateCount > 0
-          ? `<span class="text-primary-600 font-medium">${customRateCount} intern${customRateCount !== 1 ? 's' : ''} will use their individual rate.</span>`
-          : 'All interns will use the global rate.'}
+        Active mode: <strong>${allowanceRateMode === 'global' ? 'Global Rate' : 'Per-Intern Rates'}</strong>.
+        ${allowanceRateMode === 'global'
+          ? `All interns with approved attendance will use <strong>${currentRate ? `₱${currentRate.hourly_rate.toFixed(2)}/hour` : 'N/A'}</strong>.`
+          : `${customRateCount} intern${customRateCount !== 1 ? 's' : ''} with custom rates will be computed.`}
         Only approved attendance records will be counted.
       </p>
       <p id="compute-week-label" class="text-sm text-neutral-600"></p>
@@ -455,17 +565,17 @@ async function computeWeeklyAllowances(currentRate, internRates, profile) {
           .eq('is_active', true);
 
         let computed = 0;
+        let createdCount = 0;
+        let recomputedCount = 0;
+        let skippedNoRate = 0;
 
         for (const intern of (interns || [])) {
-          // Check if already computed for this week
           const { data: existing } = await supabase
             .from('allowance_periods')
             .select('id')
             .eq('intern_id', intern.id)
             .eq('week_start', weekStart)
             .maybeSingle();
-
-          if (existing) continue;
 
           // Get approved hours for the week
           const { data: attendance } = await supabase
@@ -479,14 +589,16 @@ async function computeWeeklyAllowances(currentRate, internRates, profile) {
           const totalHours = (attendance || []).reduce((sum, r) => sum + (r.total_hours || 0), 0);
 
           if (totalHours > 0) {
-            // Use individual rate override if set, otherwise fall back to global rate
-            const rate = internRates[intern.id] !== undefined
+            const rate = allowanceRateMode === 'individual'
               ? internRates[intern.id]
               : currentRate?.hourly_rate;
 
-            if (rate == null) continue; // no rate available for this intern
+            if (rate == null) {
+              skippedNoRate++;
+              continue;
+            }
 
-            await supabase.from('allowance_periods').insert({
+            const payload = {
               intern_id: intern.id,
               week_start: weekStart,
               week_end: weekEnd,
@@ -494,7 +606,26 @@ async function computeWeeklyAllowances(currentRate, internRates, profile) {
               hourly_rate: rate,
               total_amount: Math.round(totalHours * rate * 100) / 100,
               status: 'computed',
-            });
+              reviewed_by: null,
+              reviewed_at: null,
+              review_notes: null,
+            };
+
+            if (existing) {
+              const { error: updateErr } = await supabase
+                .from('allowance_periods')
+                .update(payload)
+                .eq('id', existing.id);
+              if (updateErr) throw updateErr;
+              recomputedCount++;
+            } else {
+              const { error: insertErr } = await supabase
+                .from('allowance_periods')
+                .insert(payload);
+              if (insertErr) throw insertErr;
+              createdCount++;
+            }
+
             computed++;
           }
         }
@@ -503,9 +634,18 @@ async function computeWeeklyAllowances(currentRate, internRates, profile) {
           week_start: weekStart,
           week_end: weekEnd,
           interns_computed: computed,
+          created_count: createdCount,
+          recomputed_count: recomputedCount,
+          mode: allowanceRateMode,
+          skipped_no_rate: skippedNoRate,
         });
 
-        showToast(computed > 0 ? `Allowances computed for ${computed} intern${computed !== 1 ? 's' : ''}` : 'No new allowances to compute (already computed or no approved hours)', computed > 0 ? 'success' : 'info');
+        if (computed > 0) {
+          const extra = skippedNoRate > 0 ? ` (${skippedNoRate} skipped: no active rate)` : '';
+          showToast(`Allowances computed: ${createdCount} new, ${recomputedCount} recomputed${extra}`, 'success');
+        } else {
+          showToast('No allowances computed (no approved hours or no active rate)', 'info');
+        }
         close();
         renderAllowanceManagementPage();
       } catch (err) {

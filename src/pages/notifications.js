@@ -9,6 +9,8 @@ import { showToast } from '../lib/toast.js';
 import { icons } from '../lib/icons.js';
 import { formatDate, formatDateTime } from '../lib/utils.js';
 import { openOjtCompletionModal } from '../lib/ojt-completion.js';
+import { createModal } from '../lib/component.js';
+import { logAudit } from '../lib/audit.js';
 
 export async function renderNotificationsPage() {
   const profile = getProfile();
@@ -145,36 +147,489 @@ export async function renderNotificationsPage() {
       }
     });
 
-    // Individual click → mark as read (or open action modal for OJT notifications)
+    // Individual click → open details modal (or open action modal for OJT notifications)
     el.querySelectorAll('.notification-item').forEach(item => {
       item.addEventListener('click', async () => {
         const notifType = item.dataset.type;
         const entityId = item.dataset.entityId;
+        const notifId = item.dataset.id;
+        const notif = notifs.find(n => n.id === notifId);
+
+        if (!notif) return;
+
+        if (item.dataset.read !== 'true') {
+          await supabase.from('notifications').update({ is_read: true }).eq('id', notif.id);
+          markNotificationAsReadInDom(item);
+        }
 
         // OJT completion notifications open the three-option action modal
         if (notifType === 'ojt_completed' && entityId) {
-          if (item.dataset.read !== 'true') {
-            await supabase.from('notifications').update({ is_read: true }).eq('id', item.dataset.id);
-          }
           openOjtCompletionModal(entityId, renderNotificationsPage);
           return;
         }
 
-        if (item.dataset.read === 'true') return;
-        await supabase.from('notifications').update({ is_read: true }).eq('id', item.dataset.id);
+        if (notifType === 'pending_approval' && (profile.role === 'admin' || profile.role === 'supervisor')) {
+          await openApprovalNotificationModal(notif, profile);
+          return;
+        }
 
-        // Update DOM without re-render
-        item.dataset.read = 'true';
-        item.querySelector('.notif-unread-dot')?.remove();
-        const title = item.querySelector('.notif-title');
-        if (title) { title.classList.remove('font-semibold'); title.classList.add('font-medium'); }
-        item.style.background = 'var(--color-neutral-50)';
-        item.style.borderColor = 'transparent';
-        item.style.boxShadow = 'none';
-        item.style.opacity = '0.75';
+        openNotificationDetailsModal(notif);
       });
     });
   }, '/notifications');
+}
+
+function markNotificationAsReadInDom(item) {
+  item.dataset.read = 'true';
+  item.querySelector('.notif-unread-dot')?.remove();
+  const title = item.querySelector('.notif-title');
+  if (title) {
+    title.classList.remove('font-semibold');
+    title.classList.add('font-medium');
+  }
+  item.style.background = 'var(--color-neutral-50)';
+  item.style.borderColor = 'transparent';
+  item.style.boxShadow = 'none';
+  item.style.opacity = '0.75';
+}
+
+function openNotificationDetailsModal(notification) {
+  createModal('Notification Details', `
+    <div class="space-y-4">
+      <div class="p-3 bg-neutral-50 rounded-lg border border-neutral-200">
+        <p class="text-xs text-neutral-500 mb-1">Title</p>
+        <p class="text-sm font-semibold text-neutral-900">${notification.title || 'Notification'}</p>
+      </div>
+      <div class="p-3 bg-neutral-50 rounded-lg border border-neutral-200">
+        <p class="text-xs text-neutral-500 mb-1">Message</p>
+        <p class="text-sm text-neutral-700 leading-relaxed">${notification.message || 'No additional details.'}</p>
+      </div>
+      <div class="grid grid-cols-2 gap-3">
+        <div class="p-3 bg-neutral-50 rounded-lg border border-neutral-200">
+          <p class="text-xs text-neutral-500 mb-1">Category</p>
+          <p class="text-sm font-medium text-neutral-800">${getTypeLabel(notification.type)}</p>
+        </div>
+        <div class="p-3 bg-neutral-50 rounded-lg border border-neutral-200">
+          <p class="text-xs text-neutral-500 mb-1">Received</p>
+          <p class="text-sm font-medium text-neutral-800">${formatDateTime(notification.created_at)}</p>
+        </div>
+      </div>
+    </div>
+  `);
+}
+
+async function openApprovalNotificationModal(notification, profile) {
+  const approval = await findPendingApprovalForNotification(notification, profile);
+
+  if (!approval) {
+    createModal('Approval Notification', `
+      <div class="space-y-4">
+        <div class="p-3 bg-neutral-50 rounded-lg border border-neutral-200">
+          <p class="text-sm text-neutral-700">${notification.message || 'No details available.'}</p>
+        </div>
+        <p class="text-sm text-warning-600">This item is no longer pending or already reviewed.</p>
+      </div>
+    `);
+    return;
+  }
+
+  const detailsHtml = await getApprovalDetailsHtml(approval);
+
+  createModal('Review Notification', `
+    <div class="space-y-4">
+      <div class="p-3 bg-neutral-50 rounded-lg border border-neutral-200">
+        <p class="text-xs text-neutral-500 mb-1">Submission</p>
+        <p class="text-sm font-semibold text-neutral-900">${approval.type.replace('_', ' ')}</p>
+        <p class="text-xs text-neutral-500 mt-1">Submitted ${formatDateTime(approval.submitted_at)}</p>
+      </div>
+
+      <div class="p-3 bg-neutral-50 rounded-lg border border-neutral-200">
+        <p class="text-xs text-neutral-500 mb-1">Message</p>
+        <p class="text-sm text-neutral-700 leading-relaxed">${notification.message || 'No details available.'}</p>
+      </div>
+
+      ${detailsHtml}
+
+      <form id="notif-reject-form" class="hidden space-y-2 p-3 bg-neutral-50 rounded-lg border border-neutral-200">
+        <label class="text-xs text-neutral-500">Reason for rejection <span class="text-danger-500">*</span></label>
+        <textarea id="notif-reject-reason" class="form-input" rows="3" placeholder="Provide reason for rejection..."></textarea>
+      </form>
+
+      <div class="flex justify-end gap-3 pt-2 border-t border-neutral-200">
+        <button type="button" id="notif-cancel" class="btn-secondary">Close</button>
+        <button type="button" id="notif-show-reject" class="btn-danger">Reject</button>
+        <button type="button" id="notif-approve" class="btn-success">Approve</button>
+      </div>
+      <div id="notif-reject-actions" class="hidden justify-end gap-3">
+        <button type="button" id="notif-reject-back" class="btn-secondary">Back</button>
+        <button type="button" id="notif-reject-submit" class="btn-danger">Confirm Reject</button>
+      </div>
+    </div>
+  `, (modalEl, close) => {
+    const approveBtn = modalEl.querySelector('#notif-approve');
+    const showRejectBtn = modalEl.querySelector('#notif-show-reject');
+    const rejectForm = modalEl.querySelector('#notif-reject-form');
+    const rejectActions = modalEl.querySelector('#notif-reject-actions');
+    const footerRow = modalEl.querySelector('.border-t');
+
+    modalEl.querySelector('#notif-cancel').addEventListener('click', close);
+
+    showRejectBtn.addEventListener('click', () => {
+      rejectForm.classList.remove('hidden');
+      rejectActions.classList.remove('hidden');
+      rejectActions.classList.add('flex');
+      footerRow.classList.add('hidden');
+    });
+
+    modalEl.querySelector('#notif-reject-back').addEventListener('click', () => {
+      rejectForm.classList.add('hidden');
+      rejectActions.classList.add('hidden');
+      rejectActions.classList.remove('flex');
+      footerRow.classList.remove('hidden');
+    });
+
+    approveBtn.addEventListener('click', async () => {
+      approveBtn.disabled = true;
+      showRejectBtn.disabled = true;
+      try {
+        await processApprovalFromNotification(approval, 'approved');
+        showToast('Submission approved', 'success');
+        close();
+        renderNotificationsPage();
+      } catch (err) {
+        showToast(err.message || 'Failed to approve submission', 'error');
+        approveBtn.disabled = false;
+        showRejectBtn.disabled = false;
+      }
+    });
+
+    modalEl.querySelector('#notif-reject-submit').addEventListener('click', async () => {
+      const reason = modalEl.querySelector('#notif-reject-reason').value.trim();
+      if (!reason) {
+        showToast('Please provide a rejection reason', 'error');
+        return;
+      }
+
+      const rejectSubmitBtn = modalEl.querySelector('#notif-reject-submit');
+      rejectSubmitBtn.disabled = true;
+      try {
+        await processApprovalFromNotification(approval, 'rejected', reason);
+        showToast('Submission rejected', 'success');
+        close();
+        renderNotificationsPage();
+      } catch (err) {
+        showToast(err.message || 'Failed to reject submission', 'error');
+        rejectSubmitBtn.disabled = false;
+      }
+    });
+  });
+}
+
+async function findPendingApprovalForNotification(notification, profile) {
+  const role = profile.role;
+  const entityType = notification.entity_type;
+  const types = getApprovalTypesByEntityType(entityType, notification.title);
+
+  if (types.length === 0 || !notification.entity_id) return null;
+
+  let query = supabase
+    .from('approvals')
+    .select('*, intern:profiles!approvals_intern_id_fkey(full_name)')
+    .eq('entity_id', notification.entity_id)
+    .eq('status', 'pending')
+    .in('type', types)
+    .order('created_at', { ascending: false })
+    .limit(1);
+
+  if (role === 'supervisor') {
+    query = query.eq('supervisor_id', profile.id);
+  }
+
+  const { data } = await query;
+  return data?.[0] || null;
+}
+
+function getApprovalTypesByEntityType(entityType, title = '') {
+  if (entityType === 'attendance') return ['attendance'];
+  if (entityType === 'narrative') return ['narrative'];
+  if (entityType === 'attendance_correction') return ['attendance_correction'];
+  if (entityType === 'task') {
+    if (title?.toLowerCase().includes('submission')) return ['task_submission'];
+    return ['task_status', 'task_submission'];
+  }
+  return [];
+}
+
+async function getApprovalDetailsHtml(approval) {
+  if (approval.type === 'attendance') {
+    const { data: record } = await supabase
+      .from('attendance_records')
+      .select('date, total_hours')
+      .eq('id', approval.entity_id)
+      .single();
+
+    if (!record) return '<p class="text-sm text-neutral-500">Attendance details unavailable.</p>';
+
+    return `
+      <div class="grid grid-cols-2 gap-3">
+        <div class="p-3 bg-neutral-50 rounded-lg border border-neutral-200">
+          <p class="text-xs text-neutral-500 mb-1">Date</p>
+          <p class="text-sm font-medium text-neutral-800">${formatDate(record.date)}</p>
+        </div>
+        <div class="p-3 bg-neutral-50 rounded-lg border border-neutral-200">
+          <p class="text-xs text-neutral-500 mb-1">Total Hours</p>
+          <p class="text-sm font-medium text-neutral-800">${record.total_hours || 0}</p>
+        </div>
+      </div>
+    `;
+  }
+
+  if (approval.type === 'narrative') {
+    const { data: narrative } = await supabase
+      .from('narratives')
+      .select('date, session, content, task:tasks(title)')
+      .eq('id', approval.entity_id)
+      .single();
+
+    if (!narrative) return '<p class="text-sm text-neutral-500">Narrative details unavailable.</p>';
+
+    return `
+      <div class="space-y-3">
+        <div class="p-3 bg-neutral-50 rounded-lg border border-neutral-200">
+          <p class="text-xs text-neutral-500 mb-1">Task</p>
+          <p class="text-sm font-medium text-neutral-800">${narrative.task?.title || 'Unknown'}</p>
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <div class="p-3 bg-neutral-50 rounded-lg border border-neutral-200">
+            <p class="text-xs text-neutral-500 mb-1">Date</p>
+            <p class="text-sm font-medium text-neutral-800">${formatDate(narrative.date)}</p>
+          </div>
+          <div class="p-3 bg-neutral-50 rounded-lg border border-neutral-200">
+            <p class="text-xs text-neutral-500 mb-1">Session</p>
+            <p class="text-sm font-medium text-neutral-800">${narrative.session || '—'}</p>
+          </div>
+        </div>
+        <div class="p-3 bg-neutral-50 rounded-lg border border-neutral-200">
+          <p class="text-xs text-neutral-500 mb-1">Content</p>
+          <p class="text-sm text-neutral-700 leading-relaxed">${narrative.content || '—'}</p>
+        </div>
+      </div>
+    `;
+  }
+
+  if (approval.type === 'task_status' || approval.type === 'task_submission') {
+    const { data: task } = await supabase
+      .from('tasks')
+      .select('title, description, status, pending_status, due_date')
+      .eq('id', approval.entity_id)
+      .single();
+
+    if (!task) return '<p class="text-sm text-neutral-500">Task details unavailable.</p>';
+
+    return `
+      <div class="space-y-3">
+        <div class="p-3 bg-neutral-50 rounded-lg border border-neutral-200">
+          <p class="text-xs text-neutral-500 mb-1">Task</p>
+          <p class="text-sm font-medium text-neutral-800">${task.title || '—'}</p>
+        </div>
+        ${task.description ? `
+          <div class="p-3 bg-neutral-50 rounded-lg border border-neutral-200">
+            <p class="text-xs text-neutral-500 mb-1">Description</p>
+            <p class="text-sm text-neutral-700 leading-relaxed">${task.description}</p>
+          </div>
+        ` : ''}
+        <div class="grid grid-cols-2 gap-3">
+          <div class="p-3 bg-neutral-50 rounded-lg border border-neutral-200">
+            <p class="text-xs text-neutral-500 mb-1">Current Status</p>
+            <p class="text-sm font-medium text-neutral-800">${(task.status || '—').replace('_', ' ')}</p>
+          </div>
+          <div class="p-3 bg-neutral-50 rounded-lg border border-neutral-200">
+            <p class="text-xs text-neutral-500 mb-1">Requested Status</p>
+            <p class="text-sm font-medium text-neutral-800">${(task.pending_status || '—').replace('_', ' ')}</p>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  if (approval.type === 'attendance_correction') {
+    const { data: correction } = await supabase
+      .from('attendance_corrections')
+      .select('reason, punch_type, original_value, requested_value, attendance:attendance_records!attendance_id(date)')
+      .eq('id', approval.entity_id)
+      .single();
+
+    if (!correction) return '<p class="text-sm text-neutral-500">Correction details unavailable.</p>';
+
+    return `
+      <div class="space-y-3">
+        <div class="grid grid-cols-2 gap-3">
+          <div class="p-3 bg-neutral-50 rounded-lg border border-neutral-200">
+            <p class="text-xs text-neutral-500 mb-1">Date</p>
+            <p class="text-sm font-medium text-neutral-800">${correction.attendance?.date ? formatDate(correction.attendance.date) : '—'}</p>
+          </div>
+          <div class="p-3 bg-neutral-50 rounded-lg border border-neutral-200">
+            <p class="text-xs text-neutral-500 mb-1">Punch Type</p>
+            <p class="text-sm font-medium text-neutral-800">${correction.punch_type || '—'}</p>
+          </div>
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <div class="p-3 bg-neutral-50 rounded-lg border border-neutral-200">
+            <p class="text-xs text-neutral-500 mb-1">Original</p>
+            <p class="text-sm font-medium text-neutral-800">${correction.original_value || '—'}</p>
+          </div>
+          <div class="p-3 bg-neutral-50 rounded-lg border border-neutral-200">
+            <p class="text-xs text-neutral-500 mb-1">Requested</p>
+            <p class="text-sm font-medium text-neutral-800">${correction.requested_value || '—'}</p>
+          </div>
+        </div>
+        <div class="p-3 bg-neutral-50 rounded-lg border border-neutral-200">
+          <p class="text-xs text-neutral-500 mb-1">Reason</p>
+          <p class="text-sm text-neutral-700 leading-relaxed">${correction.reason || '—'}</p>
+        </div>
+      </div>
+    `;
+  }
+
+  return '<p class="text-sm text-neutral-500">Details unavailable.</p>';
+}
+
+async function processApprovalFromNotification(approval, status, comments = null) {
+  const { data: authData } = await supabase.auth.getUser();
+  const reviewerId = authData?.user?.id || approval.supervisor_id || null;
+
+  const { error: approvalError } = await supabase
+    .from('approvals')
+    .update({
+      status,
+      comments: comments || null,
+      reviewed_at: new Date().toISOString(),
+      reviewed_by: reviewerId,
+    })
+    .eq('id', approval.id);
+
+  if (approvalError) throw new Error(approvalError.message);
+
+  if (approval.type === 'attendance') {
+    const { error } = await supabase
+      .from('attendance_records')
+      .update({
+        status,
+        rejection_reason: status === 'rejected' ? comments : null,
+        approved_at: status === 'approved' ? new Date().toISOString() : null,
+      })
+      .eq('id', approval.entity_id);
+
+    if (error) throw new Error(error.message);
+  } else if (approval.type === 'narrative') {
+    const { error } = await supabase
+      .from('narratives')
+      .update({
+        status,
+        rejection_reason: status === 'rejected' ? comments : null,
+        approved_at: status === 'approved' ? new Date().toISOString() : null,
+      })
+      .eq('id', approval.entity_id);
+
+    if (error) throw new Error(error.message);
+  } else if (approval.type === 'task_status') {
+    if (status === 'approved') {
+      const { data: task } = await supabase
+        .from('tasks')
+        .select('pending_status')
+        .eq('id', approval.entity_id)
+        .single();
+
+      if (task?.pending_status) {
+        const { error } = await supabase
+          .from('tasks')
+          .update({ status: task.pending_status, pending_status: null })
+          .eq('id', approval.entity_id);
+
+        if (error) throw new Error(error.message);
+      }
+    } else {
+      const { error } = await supabase
+        .from('tasks')
+        .update({ pending_status: null })
+        .eq('id', approval.entity_id);
+
+      if (error) throw new Error(error.message);
+    }
+  } else if (approval.type === 'task_submission') {
+    if (status === 'approved') {
+      const { error } = await supabase
+        .from('tasks')
+        .update({ status: 'in_progress', submission_status: 'approved' })
+        .eq('id', approval.entity_id);
+
+      if (error) throw new Error(error.message);
+    } else {
+      const { error } = await supabase
+        .from('tasks')
+        .update({ submission_status: 'rejected' })
+        .eq('id', approval.entity_id);
+
+      if (error) throw new Error(error.message);
+    }
+  } else if (approval.type === 'attendance_correction') {
+    if (status === 'approved') {
+      const { data: correction } = await supabase
+        .from('attendance_corrections')
+        .select('*')
+        .eq('id', approval.entity_id)
+        .single();
+
+      if (correction) {
+        const { error: recError } = await supabase
+          .from('attendance_records')
+          .update({ [correction.punch_type]: correction.requested_value })
+          .eq('id', correction.attendance_id);
+
+        if (recError) throw new Error(recError.message);
+
+        const { error: corrError } = await supabase
+          .from('attendance_corrections')
+          .update({
+            status: 'approved',
+            reviewed_by: reviewerId,
+            reviewed_at: new Date().toISOString(),
+          })
+          .eq('id', correction.id);
+
+        if (corrError) throw new Error(corrError.message);
+      }
+    } else {
+      const { error } = await supabase
+        .from('attendance_corrections')
+        .update({
+          status: 'rejected',
+          review_comment: comments,
+          reviewed_by: reviewerId,
+          reviewed_at: new Date().toISOString(),
+        })
+        .eq('id', approval.entity_id);
+
+      if (error) throw new Error(error.message);
+    }
+  }
+
+  await supabase.from('notifications').insert({
+    user_id: approval.intern_id,
+    type: 'approval_result',
+    title: `${approval.type.replace('_', ' ')} ${status}`,
+    message: status === 'approved'
+      ? `Your ${approval.type.replace('_', ' ')} has been approved.`
+      : `Your ${approval.type.replace('_', ' ')} was rejected. Reason: ${comments || 'No reason provided'}`,
+    entity_type: approval.type,
+    entity_id: approval.entity_id,
+  });
+
+  await logAudit(`approval.${status}`, 'approval', approval.id, {
+    type: approval.type,
+    entity_id: approval.entity_id,
+    comments,
+  });
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────

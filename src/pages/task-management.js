@@ -8,7 +8,7 @@ import { supabase } from '../lib/supabase.js';
 import { showToast } from '../lib/toast.js';
 import { logAudit } from '../lib/audit.js';
 import { icons } from '../lib/icons.js';
-import { formatDate, renderAvatar } from '../lib/utils.js';
+import { formatDate, renderAvatar, getTodayDate } from '../lib/utils.js';
 import { createModal } from '../lib/component.js';
 
 export async function renderTaskManagementPage() {
@@ -59,6 +59,7 @@ export async function renderTaskManagementPage() {
   }
 
   const { data: tasks } = await tasksQuery;
+  const today = getTodayDate();
 
   renderLayout(`
     <div class="flex items-center justify-between page-header animate-fade-in-up">
@@ -110,7 +111,20 @@ export async function renderTaskManagementPage() {
           </thead>
           <tbody>
             ${(tasks || []).map(task => `
-              <tr data-status="${task.status}" data-intern="${task.assigned_to}">
+              ${(() => {
+                const deadlineUrgency = getTaskDeadlineUrgency(task, today);
+                const rowClass = deadlineUrgency === 'red'
+                  ? 'bg-danger-50'
+                  : deadlineUrgency === 'yellow'
+                  ? 'bg-warning-50'
+                  : '';
+                const dueDateClass = deadlineUrgency === 'red'
+                  ? 'text-danger-600 font-semibold'
+                  : deadlineUrgency === 'yellow'
+                  ? 'text-warning-600 font-medium'
+                  : '';
+                return `
+              <tr data-status="${task.status}" data-intern="${task.assigned_to}" class="${rowClass}">
                 <td>
                   <div>
                     <p class="font-medium">${task.title}</p>
@@ -125,12 +139,15 @@ export async function renderTaskManagementPage() {
                   ${task.pending_status ? `<span class="badge-pending ml-1">→ ${task.pending_status.replace('_', ' ')}</span>` : ''}
                 </td>
                 <td>${task.estimated_hours || '—'}</td>
-                <td>${task.due_date ? formatDate(task.due_date) : '—'}</td>
+                <td class="${dueDateClass}">${task.due_date ? formatDate(task.due_date) : '—'}</td>
                 <td>${formatDate(task.created_at)}</td>
                 ${canManageTasks ? `
                 <td>
-                  ${task.created_by === profile.id ? `
                   <div class="flex gap-1">
+                    <button class="btn-sm btn-secondary view-task-btn" data-task-id="${task.id}" title="View full details">
+                      ${icons.eye}
+                    </button>
+                    ${task.created_by === profile.id ? `
                     <button class="btn-sm btn-secondary edit-task-btn" data-task-id="${task.id}" title="Edit">
                       ${icons.edit}
                     </button>
@@ -140,10 +157,12 @@ export async function renderTaskManagementPage() {
                       title="${task.status === 'completed' ? 'Archive task' : 'Only completed tasks can be archived'}"
                       ${task.status !== 'completed' ? 'disabled' : ''}>
                       ${icons.archive}
-                    </button>
-                  </div>` : '<span class="text-xs text-neutral-400">—</span>'}
+                    </button>` : ''}
+                  </div>
                 </td>` : ''}
               </tr>
+                `;
+              })()}
             `).join('')}
             ${(!tasks || tasks.length === 0) ? `<tr><td colspan="${canManageTasks ? 7 : 6}" class="text-center text-neutral-400 py-8">No tasks found</td></tr>` : ''}
           </tbody>
@@ -154,6 +173,14 @@ export async function renderTaskManagementPage() {
     if (canManageTasks) {
       el.querySelector('#create-task-btn')?.addEventListener('click', () => {
         openCreateTaskModal(interns, profile);
+      });
+
+      // View task buttons (available for all tasks)
+      el.querySelectorAll('.view-task-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const task = tasks.find(t => t.id === btn.dataset.taskId);
+          if (task) openViewTaskModal(task);
+        });
       });
 
       // Edit task buttons (only rendered for tasks created by this user)
@@ -196,6 +223,23 @@ export async function renderTaskManagementPage() {
   }, '/task-management');
 }
 
+function getTaskDeadlineUrgency(task, today) {
+  if (!task?.due_date || task.status === 'completed') return 'normal';
+
+  const toMidnight = (dateStr) => {
+    const parsed = new Date(`${dateStr}T00:00:00`);
+    return new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate());
+  };
+
+  const dueDate = toMidnight(task.due_date);
+  const todayDate = toMidnight(today);
+  const diffDays = Math.floor((dueDate - todayDate) / 86400000);
+
+  if (diffDays <= 3) return 'red';
+  if (diffDays <= 7) return 'yellow';
+  return 'normal';
+}
+
 function internPickerHtml(interns, selectedId = '') {
   const selected = selectedId ? interns.find(i => i.id === selectedId) : null;
   return `
@@ -226,6 +270,66 @@ function internPickerHtml(interns, selectedId = '') {
       <input type="hidden" id="task-intern" value="${selectedId}" />
     </div>
   `;
+}
+
+function openViewTaskModal(task) {
+  createModal('Task Details', `
+    <div class="space-y-4">
+      <div>
+        <label class="form-label text-xs text-neutral-500">Title</label>
+        <p class="text-base font-medium text-neutral-900">${task.title}</p>
+      </div>
+
+      ${task.description ? `
+      <div>
+        <label class="form-label text-xs text-neutral-500">Description</label>
+        <p class="text-sm text-neutral-700 whitespace-pre-wrap">${task.description}</p>
+      </div>
+      ` : ''}
+
+      <div class="grid grid-cols-2 gap-4">
+        <div>
+          <label class="form-label text-xs text-neutral-500">Assigned To</label>
+          <p class="text-sm text-neutral-900">${task.assigned_profile?.full_name || '—'}</p>
+        </div>
+        <div>
+          <label class="form-label text-xs text-neutral-500">Created By</label>
+          <p class="text-sm text-neutral-900">${task.creator_profile?.full_name || '—'}</p>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-2 gap-4">
+        <div>
+          <label class="form-label text-xs text-neutral-500">Status</label>
+          <span class="badge bg-${task.status === 'completed' ? 'success' : task.status === 'in_progress' ? 'warning' : 'neutral'}-50 text-${task.status === 'completed' ? 'success' : task.status === 'in_progress' ? 'warning' : 'neutral'}-600">
+            ${task.status.replace('_', ' ')}
+          </span>
+          ${task.pending_status ? `<span class="badge-pending ml-1">→ ${task.pending_status.replace('_', ' ')}</span>` : ''}
+        </div>
+        <div>
+          <label class="form-label text-xs text-neutral-500">Estimated Hours</label>
+          <p class="text-sm text-neutral-900">${task.estimated_hours || '—'}</p>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-2 gap-4">
+        <div>
+          <label class="form-label text-xs text-neutral-500">Due Date</label>
+          <p class="text-sm text-neutral-900">${task.due_date ? formatDate(task.due_date) : '—'}</p>
+        </div>
+        <div>
+          <label class="form-label text-xs text-neutral-500">Created</label>
+          <p class="text-sm text-neutral-900">${formatDate(task.created_at)}</p>
+        </div>
+      </div>
+
+      <div class="flex justify-end gap-3 pt-2">
+        <button type="button" id="view-close" class="btn-secondary">Close</button>
+      </div>
+    </div>
+  `, (el, close) => {
+    el.querySelector('#view-close').addEventListener('click', close);
+  });
 }
 
 function initInternPicker(el, interns) {

@@ -8,7 +8,7 @@ import { supabase } from '../lib/supabase.js';
 import { showToast } from '../lib/toast.js';
 import { logAudit } from '../lib/audit.js';
 import { icons } from '../lib/icons.js';
-import { formatDate, formatTime, formatHoursDisplay, getTodayDate, getPublicIP, isLateArrival, isOutsideAllowedHours } from '../lib/utils.js';
+import { formatDate, formatTime, formatHoursDisplay, getTodayDate, getPublicIP, isLateArrival, isOutsideAllowedHours, getMonday, getFriday } from '../lib/utils.js';
 import { createModal } from '../lib/component.js';
 import { isHoliday } from '../lib/holidays.js';
 
@@ -41,6 +41,9 @@ export async function renderAttendancePage() {
   const profile = getProfile();
   const today = getTodayDate();
   const holidayInfo = await isHoliday(today);
+  const now = new Date();
+  const weekStart = getMonday(now).toISOString().slice(0, 10);
+  const weekEnd = getFriday(now).toISOString().slice(0, 10);
 
   // Fetch today's record
   let { data: todayRecord } = await supabase
@@ -57,6 +60,15 @@ export async function renderAttendancePage() {
     .eq('intern_id', profile.id)
     .order('date', { ascending: false })
     .limit(10);
+
+  const { data: weekRecords } = await supabase
+    .from('attendance_records')
+    .select('total_hours')
+    .eq('intern_id', profile.id)
+    .gte('date', weekStart)
+    .lte('date', weekEnd);
+
+  const totalHoursThisWeek = (weekRecords || []).reduce((sum, record) => sum + (record.total_hours || 0), 0);
 
   const nextPunch = getNextPunch(todayRecord);
 
@@ -141,6 +153,11 @@ export async function renderAttendancePage() {
           ${todayRecord.is_outside_hours ? '<span class="badge-rejected ml-2">Outside Hours</span>' : ''}
         </div>
       ` : ''}
+
+      <div class="flex items-center gap-2 text-sm text-neutral-600 mb-2">
+        ${icons.clock}
+        <span>Total Hours This Week: <strong>${formatHoursDisplay(totalHoursThisWeek)}</strong></span>
+      </div>
 
       ${todayRecord?.ip_consistent != null ? `
         <div class="flex items-center gap-2 text-sm mb-4">
@@ -409,14 +426,18 @@ function openCorrectionModal(record, profile) {
 
       <div class="flex justify-end gap-3">
         <button type="button" id="correction-cancel" class="btn-secondary">Cancel</button>
-        <button type="submit" class="btn-primary">Submit Request</button>
+        <button type="submit" id="correction-submit" class="btn-primary">Submit Request</button>
       </div>
     </form>
   `, (el, close) => {
     el.querySelector('#correction-cancel').addEventListener('click', close);
+    const submitBtn = el.querySelector('#correction-submit');
+    let isSubmitting = false;
 
     el.querySelector('#correction-form').addEventListener('submit', async (e) => {
       e.preventDefault();
+      if (isSubmitting) return;
+
       const punchType = el.querySelector('#correction-punch').value;
       const timeValue = el.querySelector('#correction-time').value;
       const reason = el.querySelector('#correction-reason').value;
@@ -425,6 +446,10 @@ function openCorrectionModal(record, profile) {
         showToast('Please fill all fields', 'error');
         return;
       }
+
+      isSubmitting = true;
+      submitBtn.disabled = true;
+      submitBtn.innerHTML = '<span class="spinner"></span><span class="ml-2">Submitting...</span>';
 
       const correctedTimestamp = new Date(`${record.date}T${timeValue}:00`).toISOString();
 
@@ -491,6 +516,10 @@ function openCorrectionModal(record, profile) {
         close();
       } catch (err) {
         showToast(err.message || 'Failed to submit correction', 'error');
+      } finally {
+        isSubmitting = false;
+        submitBtn.disabled = false;
+        submitBtn.innerHTML = 'Submit Request';
       }
     });
   });

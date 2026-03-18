@@ -374,11 +374,10 @@ export async function renderMyTasksPage() {
 function renderTaskCard(task, isHolidayToday, today) {
   const isPendingReview = task.is_self_submitted && task.submission_status === 'pending';
   const isRejectedSubmission = task.is_self_submitted && task.submission_status === 'rejected';
-  const isOverdue = !!task.due_date && task.due_date < today && task.status !== 'completed' && !isPendingReview;
-  const isDueSoon = !isOverdue && !!task.due_date && task.status !== 'completed' && !isPendingReview && (() => {
-    const diff = (new Date(task.due_date) - new Date(today)) / 86400000;
-    return diff >= 0 && diff <= 2;
-  })();
+  const deadlineUrgency = getTaskDeadlineUrgency(task, today);
+  const isOverdue = deadlineUrgency === 'red' && !!task.due_date && task.due_date < today;
+  const isDueSoon = deadlineUrgency === 'yellow';
+  const isDueCritical = deadlineUrgency === 'red' && !isOverdue;
 
   // Left accent bar color per state
   const accentColor = isPendingReview ? 'var(--color-warning-400)'
@@ -402,6 +401,8 @@ function renderTaskCard(task, isHolidayToday, today) {
   // Urgency badge
   const urgencyBadge = isOverdue
     ? `<span class="inline-block px-2 py-0.5 rounded-full text-xs font-bold bg-danger-500 text-white">Overdue</span>`
+    : isDueCritical
+    ? `<span class="inline-block px-2 py-0.5 rounded-full text-xs font-bold bg-danger-50 text-danger-700">Due in 3 Days</span>`
     : isDueSoon
     ? `<span class="inline-block px-2 py-0.5 rounded-full text-xs font-bold bg-warning-100 text-warning-700">Due Soon</span>`
     : '';
@@ -418,11 +419,23 @@ function renderTaskCard(task, isHolidayToday, today) {
 
   // Due date styling
   const dueDateHtml = task.due_date
-    ? `<span class="flex items-center gap-1 ${isOverdue ? 'text-danger-600 font-semibold' : isDueSoon ? 'text-warning-600 font-medium' : 'text-neutral-400'}">
+    ? `<span class="flex items-center gap-1 ${deadlineUrgency === 'red' ? 'text-danger-600 font-semibold' : deadlineUrgency === 'yellow' ? 'text-warning-600 font-medium' : 'text-neutral-400'}">
         <svg class="w-3 h-3 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
         Due ${formatDate(task.due_date)}
       </span>`
     : '';
+
+  const cardBgClass = deadlineUrgency === 'red'
+    ? 'bg-danger-50'
+    : deadlineUrgency === 'yellow'
+    ? 'bg-warning-50'
+    : 'bg-white';
+
+  const cardBorderClass = deadlineUrgency === 'red'
+    ? 'border-danger-200'
+    : deadlineUrgency === 'yellow'
+    ? 'border-warning-200'
+    : 'border-neutral-200';
 
   // Action buttons
   const actionBtns = (() => {
@@ -447,8 +460,7 @@ function renderTaskCard(task, isHolidayToday, today) {
   })();
 
   return `
-    <div class="task-card border rounded-xl overflow-hidden transition-all hover:shadow-md"
-         style="background: #ffffff; border-color: var(--color-neutral-200);"
+    <div class="task-card border rounded-xl overflow-hidden transition-all hover:shadow-md ${cardBgClass} ${cardBorderClass}"
          data-status="${task.status}" data-id="${task.id}" data-submission-status="${task.submission_status || ''}">
       <div class="flex">
         <!-- Left accent bar -->
@@ -504,4 +516,21 @@ function renderTaskCard(task, isHolidayToday, today) {
       </div>
     </div>
   `;
+}
+
+function getTaskDeadlineUrgency(task, today) {
+  if (!task?.due_date || task.status === 'completed') return 'normal';
+
+  const toMidnight = (dateStr) => {
+    const parsed = new Date(`${dateStr}T00:00:00`);
+    return new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate());
+  };
+
+  const dueDate = toMidnight(task.due_date);
+  const todayDate = toMidnight(today);
+  const diffDays = Math.floor((dueDate - todayDate) / 86400000);
+
+  if (diffDays <= 3) return 'red';
+  if (diffDays <= 7) return 'yellow';
+  return 'normal';
 }

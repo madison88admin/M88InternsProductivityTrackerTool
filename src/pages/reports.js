@@ -431,21 +431,23 @@ export async function fetchDarData(internId, mondayDate, fridayDate) {
       .maybeSingle(),
   ]);
 
-  let supervisor = null;
-  if (intern?.supervisor_id) {
+  const supervisorIds = new Set((attendance || []).map(a => a.supervisor_id).filter(Boolean));
+  if (intern?.supervisor_id) supervisorIds.add(intern.supervisor_id);
+
+  let supervisors = [];
+  if (supervisorIds.size > 0) {
     const { data } = await supabase
       .from('profiles')
       .select('id, full_name, signature_url')
-      .eq('id', intern.supervisor_id)
-      .single();
-    supervisor = data;
+      .in('id', Array.from(supervisorIds));
+    supervisors = data || [];
   }
 
   return {
     intern,
     attendance: attendance || [],
     narratives: narratives || [],
-    supervisor,
+    supervisors,
     allowancePeriod,
     hourlyRate: allowanceConfig?.hourly_rate ?? null,
   };
@@ -487,7 +489,7 @@ export async function generateDarPdf(darData, weekNum, mondayDate, existingDoc) 
   const { default: jsPDF } = await import('jspdf');
   const { default: autoTable } = await import('jspdf-autotable');
 
-  const { intern, attendance, narratives, supervisor, allowancePeriod, hourlyRate } = darData;
+  const { intern, attendance, narratives, supervisors, allowancePeriod, hourlyRate } = darData;
 
   const doc = existingDoc || new jsPDF({
     orientation: 'portrait',
@@ -507,11 +509,17 @@ export async function generateDarPdf(darData, weekNum, mondayDate, existingDoc) 
     internSigDataUrl = await loadImageAsDataUrl(sigUrl);
   }
 
-  let supervisorSigDataUrl = null;
-  if (supervisor?.signature_url) {
+  const supervisorSigById = new Map();
+  for (const supervisor of (supervisors || [])) {
+    if (!supervisor?.signature_url) continue;
     const sigUrl = supabase.storage.from('signatures').getPublicUrl(supervisor.signature_url).data.publicUrl;
-    supervisorSigDataUrl = await loadImageAsDataUrl(sigUrl);
+    const sigDataUrl = await loadImageAsDataUrl(sigUrl);
+    if (sigDataUrl) supervisorSigById.set(supervisor.id, sigDataUrl);
   }
+
+  const defaultSupervisorSigDataUrl = intern?.supervisor_id
+    ? (supervisorSigById.get(intern.supervisor_id) || null)
+    : null;
 
   // Logo at top left
   let y = margin;
@@ -581,6 +589,9 @@ export async function generateDarPdf(darData, weekNum, mondayDate, existingDoc) 
     const morningNarr = narratives.find(n => n.date === dateStr && n.session === 'morning');
     const afternoonNarr = narratives.find(n => n.date === dateStr && n.session === 'afternoon');
     const isApproved = att?.status === 'approved';
+    const supervisorSigDataUrl = att?.supervisor_id
+      ? (supervisorSigById.get(att.supervisor_id) || defaultSupervisorSigDataUrl)
+      : defaultSupervisorSigDataUrl;
 
     const mHours = calcSessionHours(att?.time_in_1, att?.time_out_1);
     const mTask = morningNarr?.task?.title || '';

@@ -112,9 +112,11 @@ export async function renderInternDirectoryPage() {
               <button class="btn-secondary btn-sm log-past-hours-btn w-full inline-flex items-center justify-center gap-1" data-intern-id="${i.id}" data-intern-name="${i.full_name}" data-ojt-start="${i.ojt_start_date || ''}" data-supervisor-id="${i.supervisor_id || ''}">
                 ${icons.clock} Log Past Hours
               </button>
+              <!--
               <button class="btn-secondary btn-sm import-pdf-btn w-full inline-flex items-center justify-center gap-1" data-intern-id="${i.id}" data-intern-name="${i.full_name}" data-ojt-start="${i.ojt_start_date || ''}" data-supervisor-id="${i.supervisor_id || ''}">
                 ${icons.upload} Import from PDF
               </button>
+              -->
             </div>
           ` : ''}
         </div>
@@ -202,6 +204,69 @@ export async function renderInternDirectoryPage() {
     `, (el, close) => {
       el.querySelector('#lph-cancel').addEventListener('click', close);
 
+      const dateInput = el.querySelector('#lph-date');
+      const timeIn1Input = el.querySelector('#lph-time-in-1');
+      const timeOut1Input = el.querySelector('#lph-time-out-1');
+      const timeIn2Input = el.querySelector('#lph-time-in-2');
+      const timeOut2Input = el.querySelector('#lph-time-out-2');
+      let lastRequestedDate = '';
+
+      const toTimeInputValue = (timestamp) => {
+        if (!timestamp) return '';
+        const parsed = new Date(timestamp);
+        if (Number.isNaN(parsed.getTime())) return '';
+        const hh = String(parsed.getHours()).padStart(2, '0');
+        const mm = String(parsed.getMinutes()).padStart(2, '0');
+        return `${hh}:${mm}`;
+      };
+
+      const clearTimeInputs = () => {
+        timeIn1Input.value = '';
+        timeOut1Input.value = '';
+        timeIn2Input.value = '';
+        timeOut2Input.value = '';
+      };
+
+      const loadAttendanceForDate = async (date) => {
+        if (!date) {
+          clearTimeInputs();
+          return;
+        }
+
+        lastRequestedDate = date;
+        const { data, error } = await supabase
+          .from('attendance_records')
+          .select('time_in_1, time_out_1, time_in_2, time_out_2')
+          .eq('intern_id', intern.internId)
+          .eq('date', date)
+          .maybeSingle();
+
+        if (lastRequestedDate !== dateInput.value) return;
+        if (error) return;
+        if (!data) {
+          clearTimeInputs();
+          return;
+        }
+
+        timeIn1Input.value = toTimeInputValue(data.time_in_1);
+        timeOut1Input.value = toTimeInputValue(data.time_out_1);
+        timeIn2Input.value = toTimeInputValue(data.time_in_2);
+        timeOut2Input.value = toTimeInputValue(data.time_out_2);
+      };
+
+      dateInput.addEventListener('change', async (event) => {
+        await loadAttendanceForDate(event.target.value);
+      });
+
+      const resolveSupervisorId = async () => {
+        const { data } = await supabase
+          .from('profiles')
+          .select('supervisor_id')
+          .eq('id', intern.internId)
+          .maybeSingle();
+        return data?.supervisor_id || intern.supervisorId || null;
+      };
+
       el.querySelector('#log-past-hours-form').addEventListener('submit', async (e) => {
         e.preventDefault();
 
@@ -236,6 +301,7 @@ export async function renderInternDirectoryPage() {
 
         try {
           const admin = getCurrentUser();
+          const supervisorId = await resolveSupervisorId();
           const ts = (time) => new Date(`${date}T${time}:00`).toISOString();
 
           const recordData = {
@@ -249,7 +315,7 @@ export async function renderInternDirectoryPage() {
             approved_at: new Date().toISOString(),
             admin_logged: true,
             admin_logged_by: admin.id,
-            supervisor_id: intern.supervisorId || null,
+            supervisor_id: supervisorId,
           };
 
           // Check for existing record on this date
@@ -305,6 +371,10 @@ export async function renderInternDirectoryPage() {
           submitBtn.innerHTML = 'Save Attendance';
         }
       });
+
+      if (dateInput.value) {
+        loadAttendanceForDate(dateInput.value);
+      }
     });
   }
 
@@ -497,6 +567,12 @@ export async function renderInternDirectoryPage() {
 
         try {
           const admin = getCurrentUser();
+          const { data: internProfile } = await supabase
+            .from('profiles')
+            .select('supervisor_id')
+            .eq('id', intern.internId)
+            .maybeSingle();
+          const supervisorId = internProfile?.supervisor_id || intern.supervisorId || null;
           const checkedRows = el.querySelectorAll('.pdf-row-check:checked');
           let saved = 0;
           let skipped = 0;
@@ -534,7 +610,7 @@ export async function renderInternDirectoryPage() {
               approved_at: new Date().toISOString(),
               admin_logged: true,
               admin_logged_by: admin.id,
-              supervisor_id: intern.supervisorId || null,
+              supervisor_id: supervisorId,
             };
 
             // Check for existing record on this date

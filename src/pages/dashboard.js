@@ -494,6 +494,10 @@ async function buildInternDashboard(profile) {
     <div class="card mb-6 animate-fade-in-up" style="animation-delay: 1250ms;">
       <h3 class="text-base font-bold text-neutral-900 mb-1">This Week's Hours</h3>
       <p class="text-sm text-neutral-500 mb-4">Your daily attendance log for the current week</p>
+      <div class="flex items-center gap-2 text-sm text-neutral-600 mb-4">
+        ${icons.clock}
+        <span>Total Hours This Week: <strong id="weekly-hours-total">0h</strong></span>
+      </div>
       <div style="position: relative; height: 220px;">
         <canvas id="weekly-hours-chart"></canvas>
       </div>
@@ -1381,17 +1385,21 @@ async function initDashboardCharts(role, container) {
 
   if (role === 'intern') {
     const canvas = container.querySelector('#weekly-hours-chart');
+    const totalHoursEl = container.querySelector('#weekly-hours-total');
     if (canvas) {
       const profile = getProfile();
       const today = new Date();
       const monday = new Date(today);
       monday.setDate(today.getDate() - today.getDay() + 1);
+      const friday = new Date(monday);
+      friday.setDate(monday.getDate() + 4);
 
       const { data: weeklyData } = await supabase
         .from('attendance_records')
         .select('date, total_hours')
         .eq('intern_id', profile.id)
         .gte('date', monday.toLocaleDateString('en-CA'))
+        .lte('date', friday.toLocaleDateString('en-CA'))
         .order('date');
 
       const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'];
@@ -1402,6 +1410,10 @@ async function initDashboardCharts(role, container) {
         const record = weeklyData?.find(r => r.date === dateStr);
         return record?.total_hours || 0;
       });
+
+      if (totalHoursEl) {
+        totalHoursEl.textContent = formatHoursDisplay(hours.reduce((sum, value) => sum + value, 0));
+      }
 
       createChart(canvas, {
         type: 'bar',

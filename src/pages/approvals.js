@@ -18,7 +18,7 @@ export async function renderApprovalsPage() {
 
   let query = supabase
     .from('approvals')
-    .select('*, intern:profiles!approvals_intern_id_fkey(full_name, email)')
+    .select('*, intern:profiles!approvals_intern_id_fkey(full_name, email), reviewer:profiles!approvals_reviewed_by_fkey(full_name, email)')
     .order('created_at', { ascending: false });
 
   if (!isAdmin) {
@@ -84,6 +84,7 @@ export async function renderApprovalsPage() {
               <th>Comments</th>
               <th>Submitted</th>
               <th>Reviewed</th>
+              <th>Approved By</th>
             </tr>
           </thead>
           <tbody>
@@ -99,9 +100,10 @@ export async function renderApprovalsPage() {
                 <td class="max-w-xs truncate">${a.comments || '—'}</td>
                 <td>${formatDate(a.submitted_at)}</td>
                 <td>${a.reviewed_at ? formatDateTime(a.reviewed_at) : '—'}</td>
+                <td>${a.status === 'approved' ? (a.reviewer?.full_name || '—') : '—'}</td>
               </tr>
             `).join('')}
-            ${reviewedApprovals.length === 0 ? '<tr><td colspan="6" class="text-center text-neutral-400 py-8">No review history</td></tr>' : ''}
+            ${reviewedApprovals.length === 0 ? '<tr><td colspan="7" class="text-center text-neutral-400 py-8">No review history</td></tr>' : ''}
           </tbody>
         </table>
       </div>
@@ -232,6 +234,9 @@ function openRejectModal(approvalId, approvals) {
 }
 
 async function processApproval(approvalId, status, comments, approval) {
+  const { data: authData } = await supabase.auth.getUser();
+  const reviewerId = authData?.user?.id || approval?.supervisor_id || null;
+
   // Update approval record
   const { error: approvalError } = await supabase
     .from('approvals')
@@ -239,6 +244,7 @@ async function processApproval(approvalId, status, comments, approval) {
       status,
       comments: comments || null,
       reviewed_at: new Date().toISOString(),
+      reviewed_by: reviewerId,
     })
     .eq('id', approvalId);
 
@@ -328,7 +334,7 @@ async function processApproval(approvalId, status, comments, approval) {
           .from('attendance_corrections')
           .update({
             status: 'approved',
-            reviewed_by: (await supabase.auth.getUser()).data.user.id,
+            reviewed_by: reviewerId,
             reviewed_at: new Date().toISOString(),
           })
           .eq('id', correction.id);
@@ -341,7 +347,7 @@ async function processApproval(approvalId, status, comments, approval) {
         .update({
           status: 'rejected',
           review_comment: comments,
-          reviewed_by: (await supabase.auth.getUser()).data.user.id,
+          reviewed_by: reviewerId,
           reviewed_at: new Date().toISOString(),
         })
         .eq('id', approval.entity_id);
