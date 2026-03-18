@@ -7,7 +7,7 @@ import { renderLayout } from '../components/layout.js';
 import { supabase } from '../lib/supabase.js';
 import { showToast } from '../lib/toast.js';
 import { icons } from '../lib/icons.js';
-import { formatDate, formatDateTime } from '../lib/utils.js';
+import { formatDate, formatDateTime, formatTime } from '../lib/utils.js';
 import { openOjtCompletionModal } from '../lib/ojt-completion.js';
 import { createModal } from '../lib/component.js';
 import { logAudit } from '../lib/audit.js';
@@ -459,6 +459,13 @@ async function getApprovalDetailsHtml(approval) {
       .eq('id', approval.entity_id)
       .single();
 
+    const punchLabels = {
+      time_in_1: 'Morning Time In',
+      time_out_1: 'Lunch Time Out',
+      time_in_2: 'Afternoon Time In',
+      time_out_2: 'End of Day Time Out',
+    };
+
     if (!correction) return '<p class="text-sm text-neutral-500">Correction details unavailable.</p>';
 
     return `
@@ -470,17 +477,17 @@ async function getApprovalDetailsHtml(approval) {
           </div>
           <div class="p-3 bg-neutral-50 rounded-lg border border-neutral-200">
             <p class="text-xs text-neutral-500 mb-1">Punch Type</p>
-            <p class="text-sm font-medium text-neutral-800">${correction.punch_type || '—'}</p>
+            <p class="text-sm font-medium text-neutral-800">${punchLabels[correction.punch_type] || correction.punch_type || '—'}</p>
           </div>
         </div>
         <div class="grid grid-cols-2 gap-3">
           <div class="p-3 bg-neutral-50 rounded-lg border border-neutral-200">
             <p class="text-xs text-neutral-500 mb-1">Original</p>
-            <p class="text-sm font-medium text-neutral-800">${correction.original_value || '—'}</p>
+            <p class="text-sm font-medium text-neutral-800">${correction.original_value ? formatTime(correction.original_value) : '—'}</p>
           </div>
           <div class="p-3 bg-neutral-50 rounded-lg border border-neutral-200">
             <p class="text-xs text-neutral-500 mb-1">Requested</p>
-            <p class="text-sm font-medium text-neutral-800">${correction.requested_value || '—'}</p>
+            <p class="text-sm font-medium text-neutral-800">${correction.requested_value ? formatTime(correction.requested_value) : '—'}</p>
           </div>
         </div>
         <div class="p-3 bg-neutral-50 rounded-lg border border-neutral-200">

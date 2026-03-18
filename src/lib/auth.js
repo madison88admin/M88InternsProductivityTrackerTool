@@ -7,6 +7,20 @@ import { supabase } from './supabase.js';
 /** @type {{ user: object|null, profile: object|null }} */
 let currentSession = { user: null, profile: null };
 
+async function logAuthAudit(action, userId, details = null) {
+  try {
+    await supabase.from('audit_logs').insert({
+      user_id: userId || null,
+      action,
+      entity_type: 'auth',
+      entity_id: userId || null,
+      details: details || null,
+    });
+  } catch (err) {
+    console.error('Auth audit log failed:', err);
+  }
+}
+
 /**
  * Initialize auth — check for existing session and set up listener.
  */
@@ -81,6 +95,11 @@ export async function login(email, password) {
     throw new Error('Your account has been deactivated. Please contact an administrator.');
   }
 
+  await logAuthAudit('auth.login', data.user.id, {
+    email: data.user.email || email.trim(),
+    role: currentSession.profile?.role || null,
+  });
+
   return data;
 }
 
@@ -120,6 +139,16 @@ export async function inviteUser(email, role, fullName, departmentId, locationId
  * Logout the current user.
  */
 export async function logout() {
+  const userId = currentSession.user?.id || null;
+  const details = {
+    email: currentSession.user?.email || null,
+    role: currentSession.profile?.role || null,
+  };
+
+  if (userId) {
+    await logAuthAudit('auth.logout', userId, details);
+  }
+
   const { error } = await supabase.auth.signOut();
   if (error) throw error;
   currentSession = { user: null, profile: null };

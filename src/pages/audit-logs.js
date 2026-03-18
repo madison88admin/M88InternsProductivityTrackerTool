@@ -15,8 +15,13 @@ const ACTION_GROUPS = [
     actions: [
       'attendance.time_in',
       'attendance.time_out',
+      'attendance.time_in_1',
+      'attendance.time_out_1',
+      'attendance.time_in_2',
+      'attendance.time_out_2',
       'attendance.auto_submitted',
       'attendance.correction_requested',
+      'attendance.admin_logged',
       'attendance.admin_edited',
       'attendance.supervisor_filled_eod',
       'attendance.escalated_to_admin',
@@ -70,9 +75,62 @@ const ACTION_GROUPS = [
     actions: ['holiday.created', 'holiday.updated', 'holiday.deleted'],
   },
   { label: 'Settings', actions: ['settings.updated'] },
+  { label: 'Authentication', actions: ['auth.login', 'auth.logout'] },
+  { label: 'Reports', actions: ['report.export_pdf', 'report.export_xlsx'] },
 ];
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+const ACTION_LABEL_OVERRIDES = {
+  'attendance.time_in': 'Attendance Time In',
+  'attendance.time_out': 'Attendance Time Out',
+  'attendance.time_in_1': 'Attendance Time In 1',
+  'attendance.time_out_1': 'Attendance Time Out 1',
+  'attendance.time_in_2': 'Attendance Time In 2',
+  'attendance.time_out_2': 'Attendance Time Out 2',
+  'attendance.auto_submitted': 'Attendance Auto Submitted',
+  'attendance.correction_requested': 'Attendance Correction Requested',
+  'attendance.admin_logged': 'Attendance Admin Logged',
+  'attendance.admin_edited': 'Attendance Admin Edited',
+  'attendance.supervisor_filled_eod': 'Attendance Supervisor Filled End of Day',
+  'attendance.escalated_to_admin': 'Attendance Escalated To Admin',
+  'task.created': 'Task Created',
+  'task.updated': 'Task Updated',
+  'task.archived': 'Task Archived',
+  'task.unarchived': 'Task Unarchived',
+  'task.started': 'Task Started',
+  'task.self_submitted': 'Task Self Submitted',
+  'task.status_change_requested': 'Task Status Change Requested',
+  'approval.approved': 'Approval Approved',
+  'approval.rejected': 'Approval Rejected',
+  'allowance.approved': 'Allowance Approved',
+  'allowance.rejected': 'Allowance Rejected',
+  'allowance.rate_set': 'Allowance Rate Set',
+  'allowance.individual_rates_set': 'Allowance Individual Rates Set',
+  'allowance.computed': 'Allowance Computed',
+  'narrative.submitted': 'Narrative Submitted',
+  'narrative.resubmitted': 'Narrative Resubmitted',
+  'user.invited': 'User Invited',
+  'user.updated': 'User Updated',
+  'user.activated': 'User Activated',
+  'user.deactivated': 'User Deactivated',
+  'intern.marked_voluntary': 'Intern Marked Voluntary',
+  'profile.updated': 'Profile Updated',
+  'department.created': 'Department Created',
+  'department.updated': 'Department Updated',
+  'department.deleted': 'Department Deleted',
+  'location.created': 'Location Created',
+  'location.updated': 'Location Updated',
+  'location.deleted': 'Location Deleted',
+  'holiday.created': 'Holiday Created',
+  'holiday.updated': 'Holiday Updated',
+  'holiday.deleted': 'Holiday Deleted',
+  'settings.updated': 'Settings Updated',
+  'auth.login': 'User Login',
+  'auth.logout': 'User Logout',
+  'report.export_pdf': 'Report Export PDF',
+  'report.export_xlsx': 'Report Export XLSX',
+};
 
 function weekLabel(start, end) {
   const y = end.getFullYear();
@@ -110,8 +168,8 @@ function generateWeekOptions() {
 function actionBadgeClass(action) {
   const suffix = action.split('.').pop();
   if (['deleted', 'deactivated', 'rejected'].includes(suffix)) return 'badge-danger';
-  if (['created', 'approved', 'activated', 'invited', 'time_in', 'marked_voluntary'].includes(suffix)) return 'badge-success';
-  if (['updated', 'admin_edited', 'resubmitted', 'filled_eod', 'computed', 'rate_set', 'time_out'].includes(suffix)) return 'badge-warning';
+  if (suffix.startsWith('time_in') || ['created', 'approved', 'activated', 'invited', 'marked_voluntary', 'login'].includes(suffix)) return 'badge-success';
+  if (suffix.startsWith('time_out') || ['updated', 'admin_edited', 'resubmitted', 'supervisor_filled_eod', 'computed', 'rate_set', 'logout'].includes(suffix)) return 'badge-warning';
   if (['escalated_to_admin', 'status_change_requested', 'correction_requested', 'auto_submitted'].includes(suffix)) return 'badge-pending';
   const prefix = action.split('.')[0];
   const prefixMap = {
@@ -119,8 +177,51 @@ function actionBadgeClass(action) {
     task: 'badge-primary',
     allowance: 'badge-warning',
     narrative: 'badge-secondary',
+    auth: 'badge-primary',
+    report: 'badge-info',
   };
   return prefixMap[prefix] || 'badge-secondary';
+}
+
+function toTitleWords(text) {
+  return String(text || '')
+    .split(/[_\s]+/)
+    .filter(Boolean)
+    .map(w => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(' ');
+}
+
+function formatActionLabel(action) {
+  if (!action) return 'Unknown Action';
+  if (ACTION_LABEL_OVERRIDES[action]) return ACTION_LABEL_OVERRIDES[action];
+
+  const [domain, ...rest] = action.split('.');
+  if (rest.length === 0) return toTitleWords(domain);
+  return `${toTitleWords(domain)} ${toTitleWords(rest.join(' '))}`;
+}
+
+function formatFieldLabel(key) {
+  return toTitleWords(String(key || '').replace(/\./g, ' '));
+}
+
+function formatDetailValue(value) {
+  if (value === null || value === undefined) {
+    return '<em class="text-neutral-300 font-sans text-xs">null</em>';
+  }
+
+  if (typeof value === 'object') {
+    return `<pre class="text-xs bg-neutral-50 border border-neutral-200 rounded-lg p-2.5 overflow-x-auto whitespace-pre-wrap font-mono">${JSON.stringify(value, null, 2)}</pre>`;
+  }
+
+  if (typeof value === 'string') {
+    const isoDate = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(value);
+    if (isoDate) return `<span class="text-xs">${formatDateTime(value)}</span>`;
+
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+    if (isUuid) return `<span class="font-mono text-xs">${value}</span>`;
+  }
+
+  return `<span class="text-sm">${String(value)}</span>`;
 }
 
 // Handles both legacy double-encoded strings and modern JSONB objects
@@ -130,8 +231,8 @@ function parseDetails(raw) {
   try { return JSON.parse(raw); } catch { return { value: raw }; }
 }
 
-function openDetailsModal(raw) {
-  const details = parseDetails(raw);
+function openDetailsModal(log) {
+  const details = parseDetails(log?.details);
   if (!details) return;
   const entries = Object.entries(details);
 
@@ -146,26 +247,42 @@ function openDetailsModal(raw) {
           </div>
           <div>
             <h3 class="font-semibold text-neutral-800">Log Details</h3>
-            <p class="text-xs text-neutral-400">${entries.length} field${entries.length !== 1 ? 's' : ''}</p>
+            <p class="text-xs text-neutral-400">${entries.length} field${entries.length !== 1 ? 's' : ''} captured</p>
           </div>
         </div>
         <button class="close-modal-btn btn-ghost p-1.5">${icons.x}</button>
       </div>
       <div class="modal-body">
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-4">
+          <div class="p-2.5 bg-neutral-50 border border-neutral-200 rounded-lg">
+            <p class="text-[11px] text-neutral-500 mb-0.5">Action</p>
+            <p class="text-sm font-semibold text-neutral-800">${formatActionLabel(log?.action)}</p>
+          </div>
+          <div class="p-2.5 bg-neutral-50 border border-neutral-200 rounded-lg">
+            <p class="text-[11px] text-neutral-500 mb-0.5">Timestamp</p>
+            <p class="text-sm font-medium text-neutral-800">${log?.created_at ? formatDateTime(log.created_at) : '—'}</p>
+          </div>
+          <div class="p-2.5 bg-neutral-50 border border-neutral-200 rounded-lg">
+            <p class="text-[11px] text-neutral-500 mb-0.5">User</p>
+            <p class="text-sm font-medium text-neutral-800">${log?.user?.full_name || log?.user?.email || 'System'}</p>
+          </div>
+          <div class="p-2.5 bg-neutral-50 border border-neutral-200 rounded-lg">
+            <p class="text-[11px] text-neutral-500 mb-0.5">Entity</p>
+            <p class="text-sm font-medium text-neutral-800">${formatFieldLabel(log?.entity_type || 'unknown')}</p>
+            ${log?.entity_id ? `<p class="text-[11px] text-neutral-500 font-mono mt-0.5">${log.entity_id}</p>` : ''}
+          </div>
+        </div>
+
         ${entries.length === 0
           ? '<p class="text-sm text-neutral-400 text-center py-4">No details recorded.</p>'
           : `<div class="divide-y divide-neutral-100">
               ${entries.map(([key, value]) => `
                 <div class="flex gap-4 py-3">
                   <span class="text-xs font-semibold text-neutral-400 uppercase tracking-wider w-32 shrink-0 pt-0.5">
-                    ${key.replace(/_/g, ' ')}
+                    ${formatFieldLabel(key)}
                   </span>
                   <div class="text-sm text-neutral-800 break-all flex-1">
-                    ${value === null || value === undefined
-                      ? '<em class="text-neutral-300 font-sans text-xs">null</em>'
-                      : typeof value === 'object'
-                        ? `<pre class="text-xs bg-neutral-50 border border-neutral-200 rounded-lg p-2.5 overflow-x-auto whitespace-pre-wrap font-mono">${JSON.stringify(value, null, 2)}</pre>`
-                        : `<span class="font-mono text-xs">${String(value)}</span>`}
+                    ${formatDetailValue(value)}
                   </div>
                 </div>
               `).join('')}
@@ -254,7 +371,7 @@ export async function renderAuditLogsPage() {
               ${ACTION_GROUPS.map(group => `
                 <optgroup label="── ${group.label}">
                   ${group.actions.map(action => `
-                    <option value="${action}" ${actionFilter === action ? 'selected' : ''}>${action}</option>
+                    <option value="${action}" ${actionFilter === action ? 'selected' : ''}>${formatActionLabel(action)}</option>
                   `).join('')}
                 </optgroup>
               `).join('')}
@@ -325,7 +442,7 @@ export async function renderAuditLogsPage() {
                     </td>
                     <td class="align-top">
                       <span class="badge ${actionBadgeClass(log.action)} text-xs">
-                        ${log.action}
+                        ${formatActionLabel(log.action)}
                       </span>
                     </td>
                     <td class="align-top">
@@ -415,7 +532,7 @@ export async function renderAuditLogsPage() {
       el.querySelector('#last-page')?.addEventListener('click', () => { currentPage = totalPages - 1; render(); });
 
       el.querySelectorAll('.view-details-btn').forEach(btn => {
-        btn.addEventListener('click', () => openDetailsModal(logs[parseInt(btn.dataset.idx, 10)].details));
+        btn.addEventListener('click', () => openDetailsModal(logs[parseInt(btn.dataset.idx, 10)]));
       });
     }, '/audit-logs');
   }

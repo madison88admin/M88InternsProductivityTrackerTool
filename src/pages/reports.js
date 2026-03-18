@@ -8,6 +8,7 @@ import { supabase } from '../lib/supabase.js';
 import { showToast } from '../lib/toast.js';
 import { icons } from '../lib/icons.js';
 import { formatDate, formatTime, formatHoursDisplay, getMonday, getFriday } from '../lib/utils.js';
+import { logAudit } from '../lib/audit.js';
 
 let chartInstance = null;
 
@@ -754,6 +755,15 @@ async function handleDarGeneration(el) {
         const fileName = `DAR_${darData.intern?.full_name?.replace(/\s+/g, '_') || 'intern'}_Week${weekNum}.pdf`;
         doc.save(fileName);
       }
+      await logAudit('report.export_pdf', 'report', null, {
+        report_type: 'dar',
+        format: 'pdf',
+        mode: selectedInternIds.length === 1 ? 'single' : 'multiple_single',
+        intern_count: selectedInternIds.length,
+        week: weekNum,
+        date_from: mondayDate,
+        date_to: fridayDate,
+      });
       showToast(`${selectedInternIds.length} DAR PDF(s) generated`, 'success');
 
     } else if (bulkMode === 'zip') {
@@ -777,6 +787,15 @@ async function handleDarGeneration(el) {
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
+      await logAudit('report.export_pdf', 'report', null, {
+        report_type: 'dar',
+        format: 'zip',
+        mode: 'zip',
+        intern_count: selectedInternIds.length,
+        week: weekNum,
+        date_from: mondayDate,
+        date_to: fridayDate,
+      });
       showToast('DAR ZIP downloaded', 'success');
 
     } else if (bulkMode === 'combined') {
@@ -794,6 +813,15 @@ async function handleDarGeneration(el) {
 
       if (doc) {
         doc.save(`DAR_Combined_Week${weekNum}_${new Date().toISOString().slice(0, 10)}.pdf`);
+        await logAudit('report.export_pdf', 'report', null, {
+          report_type: 'dar',
+          format: 'pdf',
+          mode: 'combined',
+          intern_count: selectedInternIds.length,
+          week: weekNum,
+          date_from: mondayDate,
+          date_to: fridayDate,
+        });
         showToast('Combined DAR PDF generated', 'success');
       }
     }
@@ -1315,6 +1343,10 @@ async function exportXlsx(data, type) {
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Report');
     XLSX.writeFile(wb, `report_${type}_${new Date().toISOString().slice(0, 10)}.xlsx`);
+    await logAudit('report.export_xlsx', 'report', null, {
+      report_type: type,
+      row_count: rows.length,
+    });
     showToast('XLSX exported successfully', 'success');
   } catch (err) {
     console.error('XLSX export error:', err);
@@ -1499,6 +1531,12 @@ async function exportPdf(data, type, dateFrom, dateTo) {
     }
 
     doc.save(`report_${type}_${new Date().toISOString().slice(0, 10)}.pdf`);
+    await logAudit('report.export_pdf', 'report', null, {
+      report_type: type,
+      row_count: data.length,
+      date_from: dateFrom,
+      date_to: dateTo,
+    });
     showToast('PDF exported successfully', 'success');
   } catch (err) {
     console.error('PDF export error:', err);
