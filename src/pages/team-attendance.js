@@ -6,7 +6,7 @@ import { getProfile } from '../lib/auth.js';
 import { renderLayout } from '../components/layout.js';
 import { supabase } from '../lib/supabase.js';
 import { icons } from '../lib/icons.js';
-import { formatDate, formatTime, formatHoursDisplay, getMonday, getFriday, getTodayDate } from '../lib/utils.js';
+import { formatDate, formatDateKey, formatTime, formatHoursDisplay, getMonday, getFriday, getTodayDate } from '../lib/utils.js';
 import { showToast } from '../lib/toast.js';
 import { logAudit } from '../lib/audit.js';
 import { createModal } from '../lib/component.js';
@@ -45,8 +45,8 @@ export async function renderTeamAttendancePage() {
   const now = new Date();
   const monday = getMonday(now);
   const friday = getFriday(monday);
-  const weekStart = monday.toISOString().slice(0, 10);
-  const weekEnd = friday.toISOString().slice(0, 10);
+  const weekStart = formatDateKey(monday);
+  const weekEnd = formatDateKey(friday);
 
   let attendance = [];
   if (internIds.length > 0) {

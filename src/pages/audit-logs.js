@@ -5,7 +5,7 @@
 import { renderLayout } from '../components/layout.js';
 import { supabase } from '../lib/supabase.js';
 import { icons } from '../lib/icons.js';
-import { formatDateTime } from '../lib/utils.js';
+import { formatDateKey, formatDateTime } from '../lib/utils.js';
 
 const PAGE_SIZE = 50;
 
@@ -154,8 +154,8 @@ function generateWeekOptions() {
     start.setDate(monday.getDate() - i * 7);
     const end = new Date(start);
     end.setDate(start.getDate() + 6);
-    const from = start.toISOString().slice(0, 10);
-    const to = end.toISOString().slice(0, 10);
+    const from = formatDateKey(start);
+    const to = formatDateKey(end);
     const label =
       i === 0 ? `This week (${weekLabel(start, end)})`
       : i === 1 ? `Last week (${weekLabel(start, end)})`

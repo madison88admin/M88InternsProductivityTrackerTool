@@ -6,9 +6,10 @@ import { renderLayout } from '../components/layout.js';
 import { supabase } from '../lib/supabase.js';
 import { showToast } from '../lib/toast.js';
 import { icons } from '../lib/icons.js';
-import { formatDate, formatHoursDisplay, formatTime } from '../lib/utils.js';
+import { formatDate, formatDateKey, formatHoursDisplay, formatTime } from '../lib/utils.js';
 import { createModal } from '../lib/component.js';
 import { logAudit } from '../lib/audit.js';
+import { getCurrentUser } from '../lib/auth.js';
 
 export async function renderAttendanceOverviewPage() {
   const { data: departments } = await supabase
@@ -282,7 +283,7 @@ function getWeekRanges(count = 16) {
   monday.setDate(today.getDate() + diff);
   monday.setHours(0, 0, 0, 0);
 
-  const fmt = d => d.toISOString().slice(0, 10);
+  const fmt = d => formatDateKey(d);
   const label = (mon, fri) => {
     const opts = { month: 'short', day: 'numeric' };
     return `${mon.toLocaleDateString('en-US', opts)} – ${fri.toLocaleDateString('en-US', { ...opts, year: 'numeric' })}`;
@@ -306,6 +307,12 @@ function toTimeInput(ts) {
 function openEditAttendanceModal(record, onSaved) {
   const internName = record.intern?.full_name || 'Unknown';
 
+  // Pre-calculate values outside modal HTML to improve rendering speed
+  const timeIn1 = toTimeInput(record.time_in_1);
+  const timeOut1 = toTimeInput(record.time_out_1);
+  const timeIn2 = toTimeInput(record.time_in_2);
+  const timeOut2 = toTimeInput(record.time_out_2);
+
   createModal(`Edit Attendance — ${internName}`, `
     <form id="edit-attendance-form" class="space-y-4">
       <div class="p-3 bg-neutral-50 rounded-lg text-sm text-neutral-600">
@@ -316,19 +323,19 @@ function openEditAttendanceModal(record, onSaved) {
       <div class="grid grid-cols-2 gap-4">
         <div>
           <label class="form-label">AM Time In</label>
-          <input type="time" id="edit-time-in-1" class="form-input" value="${toTimeInput(record.time_in_1)}">
+          <input type="time" id="edit-time-in-1" class="form-input" value="${timeIn1}">
         </div>
         <div>
           <label class="form-label">AM Time Out</label>
-          <input type="time" id="edit-time-out-1" class="form-input" value="${toTimeInput(record.time_out_1)}">
+          <input type="time" id="edit-time-out-1" class="form-input" value="${timeOut1}">
         </div>
         <div>
           <label class="form-label">PM Time In</label>
-          <input type="time" id="edit-time-in-2" class="form-input" value="${toTimeInput(record.time_in_2)}">
+          <input type="time" id="edit-time-in-2" class="form-input" value="${timeIn2}">
         </div>
         <div>
           <label class="form-label">PM Time Out</label>
-          <input type="time" id="edit-time-out-2" class="form-input" value="${toTimeInput(record.time_out_2)}">
+          <input type="time" id="edit-time-out-2" class="form-input" value="${timeOut2}">
         </div>
       </div>
       <div class="flex justify-end gap-3 pt-2">
@@ -336,7 +343,7 @@ function openEditAttendanceModal(record, onSaved) {
         <button type="submit" id="edit-att-submit" class="btn-primary">Save Changes</button>
       </div>
     </form>
-  `, async (el, close) => {
+  `, (el, close) => {
     el.querySelector('#edit-att-cancel').addEventListener('click', close);
 
     el.querySelector('#edit-attendance-form').addEventListener('submit', async (e) => {
@@ -367,11 +374,24 @@ function openEditAttendanceModal(record, onSaved) {
         time_out_2: toTs(timeOut2),
       };
 
+      const hasCompletePunches = Boolean(
+        updates.time_in_1 &&
+        updates.time_out_1 &&
+        updates.time_in_2 &&
+        updates.time_out_2
+      );
+
+      updates.status = hasCompletePunches ? 'approved' : 'pending';
+      updates.approved_at = hasCompletePunches ? new Date().toISOString() : null;
+      updates.rejection_reason = null;
+
       const submitBtn = el.querySelector('#edit-att-submit');
       submitBtn.disabled = true;
       submitBtn.textContent = 'Saving...';
 
       try {
+        const reviewerId = getCurrentUser()?.id || null;
+
         const { error } = await supabase
           .from('attendance_records')
           .update(updates)
@@ -379,19 +399,51 @@ function openEditAttendanceModal(record, onSaved) {
 
         if (error) throw error;
 
-        await logAudit('attendance.admin_edited', 'attendance_record', record.id, {
-          intern: internName,
-          date: record.date,
-          previous: {
-            time_in_1: record.time_in_1, time_out_1: record.time_out_1,
-            time_in_2: record.time_in_2, time_out_2: record.time_out_2,
-          },
-          updated: updates,
-        });
-
         showToast('Attendance updated successfully', 'success');
         close();
         onSaved();
+
+        const followUps = [];
+
+        if (hasCompletePunches) {
+          followUps.push(
+            supabase
+              .from('approvals')
+              .update({
+                status: 'approved',
+                comments: 'Auto-approved after admin attendance edit',
+                reviewed_at: new Date().toISOString(),
+                reviewed_by: reviewerId,
+              })
+              .eq('type', 'attendance')
+              .eq('entity_id', record.id)
+              .eq('status', 'pending')
+          );
+        }
+
+        followUps.push(
+          logAudit('attendance.admin_edited', 'attendance_record', record.id, {
+            intern: internName,
+            date: record.date,
+            previous: {
+              time_in_1: record.time_in_1, time_out_1: record.time_out_1,
+              time_in_2: record.time_in_2, time_out_2: record.time_out_2,
+              status: record.status,
+            },
+            updated: updates,
+            auto_approved: hasCompletePunches,
+          })
+        );
+
+        Promise.allSettled(followUps).then((results) => {
+          const approvalResult = hasCompletePunches ? results[0] : null;
+          if (approvalResult?.status === 'fulfilled' && approvalResult.value?.error) {
+            console.error('Failed to sync attendance approval status:', approvalResult.value.error);
+          }
+          if (approvalResult?.status === 'rejected') {
+            console.error('Failed to sync attendance approval status:', approvalResult.reason);
+          }
+        });
       } catch (err) {
         showToast(err.message || 'Failed to update attendance', 'error');
         submitBtn.disabled = false;

@@ -1,19 +1,51 @@
 // @ts-nocheck — Deno runtime (Supabase Edge Functions), not Node.js
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 
-const BREVO_API_KEY = Deno.env.get("BREVO_API_KEY")!;
-const SENDER_EMAIL = Deno.env.get("SENDER_EMAIL")!;
+const BREVO_API_KEY = Deno.env.get("BREVO_API_KEY");
+const SENDER_EMAIL = Deno.env.get("SENDER_EMAIL");
 const SENDER_NAME = Deno.env.get("SENDER_NAME") || "M88 Tracker";
 
+const CORS_HEADERS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+};
+
 serve(async (req: Request) => {
+  if (req.method === "OPTIONS") {
+    return new Response(null, { status: 204, headers: CORS_HEADERS });
+  }
+
+  if (req.method !== "POST") {
+    return json({ error: "Method not allowed" }, 405);
+  }
+
   try {
+    if (!BREVO_API_KEY || !SENDER_EMAIL) {
+      return json(
+        { error: "Missing required secrets: BREVO_API_KEY and/or SENDER_EMAIL" },
+        500,
+      );
+    }
+
     const { to, subject, html } = await req.json();
 
     if (!to || !subject || !html) {
-      return new Response(
-        JSON.stringify({ error: "Missing required fields: to, subject, html" }),
-        { status: 400, headers: { "Content-Type": "application/json" } }
-      );
+      return json({ error: "Missing required fields: to, subject, html" }, 400);
+    }
+
+    const recipients = Array.isArray(to)
+      ? to
+          .map((value) => {
+            if (typeof value === "string") return { email: value };
+            if (value && typeof value.email === "string") return { email: value.email };
+            return null;
+          })
+          .filter(Boolean)
+      : [{ email: to }];
+
+    if (!recipients.length || !recipients[0]?.email) {
+      return json({ error: "Invalid recipient format for 'to'" }, 400);
     }
 
     const res = await fetch("https://api.brevo.com/v3/smtp/email", {
@@ -24,22 +56,29 @@ serve(async (req: Request) => {
       },
       body: JSON.stringify({
         sender: { name: SENDER_NAME, email: SENDER_EMAIL },
-        to: [{ email: to }],
+        to: recipients,
         subject,
         htmlContent: html,
       }),
     });
 
-    const data = await res.json();
+    const raw = await res.text();
+    let data: unknown = raw;
+    try {
+      data = raw ? JSON.parse(raw) : null;
+    } catch {
+      data = raw;
+    }
 
-    return new Response(JSON.stringify({ ok: res.ok, data }), {
-      status: res.ok ? 200 : 502,
-      headers: { "Content-Type": "application/json" },
-    });
+    return json({ ok: res.ok, data }, res.ok ? 200 : 502);
   } catch (err) {
-    return new Response(
-      JSON.stringify({ error: err.message }),
-      { status: 500, headers: { "Content-Type": "application/json" } }
-    );
+    return json({ error: err.message }, 500);
   }
 });
+
+function json(body: unknown, status = 200) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
+  });
+}

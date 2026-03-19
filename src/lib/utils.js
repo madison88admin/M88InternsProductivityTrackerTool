@@ -3,6 +3,8 @@
  */
 import { supabase } from './supabase.js';
 
+export const PH_TIMEZONE = 'Asia/Manila';
+
 /**
  * Format a date to a readable string.
  * @param {string|Date} date
@@ -134,11 +136,32 @@ export function formatHoursDisplay(hours) {
 }
 
 /**
+ * Format a date as YYYY-MM-DD in a given timezone.
+ * @param {string|Date} date
+ * @param {string} [timeZone]
+ * @returns {string}
+ */
+export function formatDateKey(date, timeZone = PH_TIMEZONE) {
+  const d = new Date(date);
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(d);
+
+  const year = parts.find(p => p.type === 'year')?.value;
+  const month = parts.find(p => p.type === 'month')?.value;
+  const day = parts.find(p => p.type === 'day')?.value;
+  return `${year}-${month}-${day}`;
+}
+
+/**
  * Get today's date as YYYY-MM-DD string.
  * @returns {string}
  */
 export function getTodayDate() {
-  return new Date().toISOString().slice(0, 10);
+  return formatDateKey(new Date());
 }
 
 /**

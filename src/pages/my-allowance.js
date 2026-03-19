@@ -107,15 +107,18 @@ export async function renderMyAllowancePage() {
                   ${p.status === 'rejected' && p.review_notes ? `<p class="text-xs text-danger-600 mt-1">${p.review_notes}</p>` : ''}
                 </td>
                 <td>
-                  <button
-                    class="btn-secondary btn-sm dar-report-btn inline-flex items-center gap-1"
-                    data-week-start="${p.week_start}"
-                    data-week-end="${p.week_end}"
-                    data-week-num="${getWeekNum(p.week_start)}"
-                    title="Download Daily Activity Report for this week"
-                  >
-                    ${icons.download} DAR
-                  </button>
+                  ${p.status === 'approved' ? `
+                    <button
+                      class="btn-secondary btn-sm dar-report-btn inline-flex items-center gap-1"
+                      data-week-start="${p.week_start}"
+                      data-week-end="${p.week_end}"
+                      data-week-num="${getWeekNum(p.week_start)}"
+                      data-status="${p.status}"
+                      title="Download Daily Activity Report for this week"
+                    >
+                      ${icons.download} DAR
+                    </button>
+                  ` : '<span class="text-xs text-neutral-500">Available after admin approval</span>'}
                 </td>
               </tr>
             `).join('')}
@@ -132,6 +135,12 @@ export async function renderMyAllowancePage() {
       const weekStart = btn.dataset.weekStart;
       const weekEnd = btn.dataset.weekEnd;
       const weekNum = parseInt(btn.dataset.weekNum, 10) || 1;
+      const status = btn.dataset.status;
+
+      if (status !== 'approved') {
+        showToast('DAR is available only after admin approval', 'info');
+        return;
+      }
 
       btn.disabled = true;
       const original = btn.innerHTML;

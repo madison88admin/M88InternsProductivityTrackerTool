@@ -401,19 +401,28 @@ export async function renderInternDirectoryPage() {
     const today = getTodayDate();
     const minDate = intern.ojtStart || '';
 
-    // Fetch existing attendance records for this intern to detect conflicts
-    const dates = entries.map(e => e.date).filter(Boolean);
-    let existingDates = new Set();
-    if (dates.length > 0) {
-      const { data: existing } = await supabase
-        .from('attendance_records')
-        .select('date')
-        .eq('intern_id', intern.internId)
-        .in('date', dates);
-      (existing || []).forEach(r => existingDates.add(r.date));
-    }
+    // Open modal immediately with loading state
+    createModal(`Import Attendance — ${intern.internName}`, `
+      <div class="flex items-center justify-center py-12">
+        <div class="text-center">
+          <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600 mb-3"></div>
+          <p class="text-sm text-neutral-500">Preparing import...</p>
+        </div>
+      </div>
+    `, async (modalEl, close) => {
+      // Fetch existing attendance records for this intern to detect conflicts
+      const dates = entries.map(e => e.date).filter(Boolean);
+      let existingDates = new Set();
+      if (dates.length > 0) {
+        const { data: existing } = await supabase
+          .from('attendance_records')
+          .select('date')
+          .eq('intern_id', intern.internId)
+          .in('date', dates);
+        (existing || []).forEach(r => existingDates.add(r.date));
+      }
 
-    const tableRows = entries.map((entry, idx) => {
+      const tableRows = entries.map((entry, idx) => {
       const hasConflict = existingDates.has(entry.date);
       const isComplete = entry.timeIn1 && entry.timeOut1 && entry.timeIn2 && entry.timeOut2;
       const isValidOrder = !isComplete || (entry.timeIn1 < entry.timeOut1 && entry.timeOut1 < entry.timeIn2 && entry.timeIn2 < entry.timeOut2);
@@ -444,47 +453,50 @@ export async function renderInternDirectoryPage() {
       </tr>`;
     }).join('');
 
-    createModal(`Import Attendance — ${intern.internName}`, `
-      <div class="space-y-4">
-        <div class="flex items-center justify-between">
-          <p class="text-sm text-neutral-500">${icons.narrative} ${fileName} — ${entries.length} ${entries.length === 1 ? 'entry' : 'entries'} found</p>
-          <label class="inline-flex items-center gap-2 text-sm cursor-pointer">
-            <input type="checkbox" id="pdf-select-all" class="w-4 h-4 accent-primary-500" checked />
-            Select All
-          </label>
-        </div>
+      // Replace loading state with actual content
+      modalEl.querySelector('.modal-body').innerHTML = `
+        <div class="space-y-4">
+          <div class="flex items-center justify-between">
+            <p class="text-sm text-neutral-500">${icons.narrative} ${fileName} — ${entries.length} ${entries.length === 1 ? 'entry' : 'entries'} found</p>
+            <label class="inline-flex items-center gap-2 text-sm cursor-pointer">
+              <input type="checkbox" id="pdf-select-all" class="w-4 h-4 accent-primary-500" checked />
+              Select All
+            </label>
+          </div>
 
-        <div class="overflow-x-auto" style="max-height: 400px; overflow-y: auto;">
-          <table class="data-table text-sm">
-            <thead class="sticky top-0 bg-white z-10">
-              <tr>
-                <th class="w-8"></th>
-                <th class="w-8">#</th>
-                <th>Date</th>
-                <th>Morning In</th>
-                <th>Lunch Out</th>
-                <th>Afternoon In</th>
-                <th>End of Day</th>
-                <th>Status</th>
-              </tr>
-            </thead>
-            <tbody>${tableRows}</tbody>
-          </table>
-        </div>
+          <div class="overflow-x-auto" style="max-height: 400px; overflow-y: auto;">
+            <table class="data-table text-sm">
+              <thead class="sticky top-0 bg-white z-10">
+                <tr>
+                  <th class="w-8"></th>
+                  <th class="w-8">#</th>
+                  <th>Date</th>
+                  <th>Morning In</th>
+                  <th>Lunch Out</th>
+                  <th>Afternoon In</th>
+                  <th>End of Day</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>${tableRows}</tbody>
+            </table>
+          </div>
 
-        <p class="text-xs text-neutral-400">Review and edit the parsed data. Uncheck rows you don't want to import. Rows marked "Overwrite" will replace existing records.</p>
+          <p class="text-xs text-neutral-400">Review and edit the parsed data. Uncheck rows you don't want to import. Rows marked "Overwrite" will replace existing records.</p>
 
-        <div class="flex justify-end gap-3 pt-2">
-          <button type="button" id="pdf-cancel" class="btn-secondary">Cancel</button>
-          <button type="button" id="pdf-save" class="btn-primary">Save Selected</button>
+          <div class="flex justify-end gap-3 pt-2">
+            <button type="button" id="pdf-cancel" class="btn-secondary">Cancel</button>
+            <button type="button" id="pdf-save" class="btn-primary">Save Selected</button>
+          </div>
         </div>
-      </div>
-    `, (el, close) => {
-      el.querySelector('#pdf-cancel').addEventListener('click', close);
+      `;
+
+      // Attach event listeners after content is replaced
+      modalEl.querySelector('#pdf-cancel').addEventListener('click', close);
 
       // Update status badges and save button when inputs change
       function updateRowStatus(idx) {
-        const row = el.querySelector(`tr[data-row-idx="${idx}"]`);
+        const row = modalEl.querySelector(`tr[data-row-idx="${idx}"]`);
         if (!row) return;
 
         const date = row.querySelector('.pdf-date').value;
@@ -516,13 +528,13 @@ export async function renderInternDirectoryPage() {
       }
 
       function updateSaveButton() {
-        const checked = el.querySelectorAll('.pdf-row-check:checked');
-        const saveBtn = el.querySelector('#pdf-save');
+        const checked = modalEl.querySelectorAll('.pdf-row-check:checked');
+        const saveBtn = modalEl.querySelector('#pdf-save');
         let validCount = 0;
 
         checked.forEach(cb => {
           const idx = cb.dataset.idx;
-          const row = el.querySelector(`tr[data-row-idx="${idx}"]`);
+          const row = modalEl.querySelector(`tr[data-row-idx="${idx}"]`);
           const date = row.querySelector('.pdf-date').value;
           const t1 = row.querySelector('.pdf-time-in1').value;
           const t2 = row.querySelector('.pdf-time-out1').value;
@@ -541,18 +553,18 @@ export async function renderInternDirectoryPage() {
       }
 
       // Attach input change listeners to all editable fields
-      el.querySelectorAll('.pdf-date, .pdf-time-in1, .pdf-time-out1, .pdf-time-in2, .pdf-time-out2').forEach(input => {
+      modalEl.querySelectorAll('.pdf-date, .pdf-time-in1, .pdf-time-out1, .pdf-time-in2, .pdf-time-out2').forEach(input => {
         input.addEventListener('change', () => updateRowStatus(input.dataset.idx));
       });
 
       // Checkbox handlers
-      el.querySelectorAll('.pdf-row-check').forEach(cb => {
+      modalEl.querySelectorAll('.pdf-row-check').forEach(cb => {
         cb.addEventListener('change', updateSaveButton);
       });
 
       // Select All toggle
-      el.querySelector('#pdf-select-all').addEventListener('change', (e) => {
-        el.querySelectorAll('.pdf-row-check').forEach(cb => { cb.checked = e.target.checked; });
+      modalEl.querySelector('#pdf-select-all').addEventListener('change', (e) => {
+        modalEl.querySelectorAll('.pdf-row-check').forEach(cb => { cb.checked = e.target.checked; });
         updateSaveButton();
       });
 
@@ -560,8 +572,8 @@ export async function renderInternDirectoryPage() {
       updateSaveButton();
 
       // Save handler
-      el.querySelector('#pdf-save').addEventListener('click', async () => {
-        const saveBtn = el.querySelector('#pdf-save');
+      modalEl.querySelector('#pdf-save').addEventListener('click', async () => {
+        const saveBtn = modalEl.querySelector('#pdf-save');
         saveBtn.disabled = true;
         saveBtn.innerHTML = '<span class="spinner"></span> Saving...';
 
@@ -573,13 +585,13 @@ export async function renderInternDirectoryPage() {
             .eq('id', intern.internId)
             .maybeSingle();
           const supervisorId = internProfile?.supervisor_id || intern.supervisorId || null;
-          const checkedRows = el.querySelectorAll('.pdf-row-check:checked');
+          const checkedRows = modalEl.querySelectorAll('.pdf-row-check:checked');
           let saved = 0;
           let skipped = 0;
 
           for (const cb of checkedRows) {
             const idx = cb.dataset.idx;
-            const row = el.querySelector(`tr[data-row-idx="${idx}"]`);
+            const row = modalEl.querySelector(`tr[data-row-idx="${idx}"]`);
             const date = row.querySelector('.pdf-date').value;
             const timeIn1 = row.querySelector('.pdf-time-in1').value;
             const timeOut1 = row.querySelector('.pdf-time-out1').value;

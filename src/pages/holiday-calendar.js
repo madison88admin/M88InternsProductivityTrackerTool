@@ -8,7 +8,7 @@ import { supabase } from '../lib/supabase.js';
 import { showToast } from '../lib/toast.js';
 import { logAudit } from '../lib/audit.js';
 import { icons } from '../lib/icons.js';
-import { formatDate } from '../lib/utils.js';
+import { formatDate, getTodayDate } from '../lib/utils.js';
 import { createModal, confirmDialog } from '../lib/component.js';
 import { getHolidaysForMonth, invalidateHolidayCache } from '../lib/holidays.js';
 
@@ -23,7 +23,7 @@ export async function renderHolidayCalendarPage() {
   let currentYear = new Date().getFullYear();
   let currentMonth = new Date().getMonth();
 
-  const todayStr = new Date().toISOString().slice(0, 10);
+  const todayStr = getTodayDate();
 
   // Fetch upcoming holidays for the sidebar list
   const { data: upcomingHolidays } = await supabase
@@ -106,7 +106,7 @@ async function renderCalendar(el, year, month, profile) {
 
   const firstDay = new Date(year, month, 1).getDay();
   const daysInMonth = new Date(year, month + 1, 0).getDate();
-  const todayStr = new Date().toISOString().slice(0, 10);
+  const todayStr = getTodayDate();
 
   let html = '<div class="grid grid-cols-7 gap-1 mb-1">';
   DAY_HEADERS.forEach(d => {

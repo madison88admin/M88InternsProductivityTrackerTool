@@ -8,8 +8,9 @@ import { supabase } from '../lib/supabase.js';
 import { showToast } from '../lib/toast.js';
 import { logAudit } from '../lib/audit.js';
 import { icons } from '../lib/icons.js';
-import { formatDate, formatTime, formatDateTime, formatHoursDisplay } from '../lib/utils.js';
+import { formatDate, formatTime, formatDateTime, formatHoursDisplay, getTodayDate } from '../lib/utils.js';
 import { createModal } from '../lib/component.js';
+import { sendEmailNotification, getApprovalResultTemplate } from '../lib/email-notifications.js';
 
 export async function renderApprovalsPage() {
   const profile = getProfile();
@@ -128,7 +129,7 @@ export async function renderApprovalsPage() {
 
     // Bulk approve
     el.querySelector('#bulk-approve-btn')?.addEventListener('click', async () => {
-      const today = new Date().toISOString().slice(0, 10);
+      const today = getTodayDate();
       const todayPending = pendingApprovals.filter(a =>
         a.submitted_at?.slice(0, 10) === today &&
         (isAdmin || a.type !== 'attendance_correction')
@@ -139,11 +140,18 @@ export async function renderApprovalsPage() {
         return;
       }
 
-      for (const approval of todayPending) {
-        await processApproval(approval.id, 'approved', 'Bulk approved', approval);
-      }
+      const results = await Promise.allSettled(
+        todayPending.map(approval => processApproval(approval.id, 'approved', 'Bulk approved', approval))
+      );
 
-      showToast(`${todayPending.length} items approved`, 'success');
+      const successCount = results.filter(r => r.status === 'fulfilled').length;
+      const failedCount = results.length - successCount;
+
+      if (failedCount === 0) {
+        showToast(`${successCount} items approved`, 'success');
+      } else {
+        showToast(`${successCount} approved, ${failedCount} failed`, successCount > 0 ? 'info' : 'error');
+      }
       renderApprovalsPage();
     });
   }, '/approvals');
@@ -356,22 +364,45 @@ async function processApproval(approvalId, status, comments, approval) {
     }
   }
 
-  // Notify intern
-  await supabase.from('notifications').insert({
+  const notificationTitle = `${approval.type.replace('_', ' ')} ${status}`;
+  const notificationMessage = status === 'approved'
+    ? `Your ${approval.type.replace('_', ' ')} has been approved.`
+    : `Your ${approval.type.replace('_', ' ')} was rejected. Reason: ${comments || 'No reason provided'}`;
+
+  const notificationPromise = supabase.from('notifications').insert({
     user_id: approval.intern_id,
     type: 'approval_result',
-    title: `${approval.type.replace('_', ' ')} ${status}`,
-    message: status === 'approved'
-      ? `Your ${approval.type.replace('_', ' ')} has been approved.`
-      : `Your ${approval.type.replace('_', ' ')} was rejected. Reason: ${comments || 'No reason provided'}`,
+    title: notificationTitle,
+    message: notificationMessage,
     entity_type: approval.type,
     entity_id: approval.entity_id,
   });
 
-  await logAudit(`approval.${status}`, 'approval', approvalId, {
+  // Send email notification
+  let emailPromise = Promise.resolve();
+  const internEmail = approval.intern?.email || null;
+  if (internEmail) {
+    const emailHtml = getApprovalResultTemplate(approval.type, status, comments);
+    emailPromise = sendEmailNotification(
+      internEmail,
+      notificationTitle,
+      emailHtml
+    );
+  }
+
+  Promise.allSettled([notificationPromise, emailPromise]).then((results) => {
+    const [notificationResult] = results;
+    if (notificationResult?.status === 'rejected') {
+      console.error('Failed to create approval result notification:', notificationResult.reason);
+    }
+  });
+
+  logAudit(`approval.${status}`, 'approval', approvalId, {
     type: approval.type,
     entity_id: approval.entity_id,
     comments,
+  }).catch(err => {
+    console.error('Audit log failed:', err);
   });
 }
 
@@ -379,18 +410,35 @@ async function openTaskSubmissionReviewModal(approvalId, approvals) {
   const approval = approvals.find(a => a.id === approvalId);
   if (!approval) return;
 
-  const { data: task } = await supabase
-    .from('tasks')
-    .select('*')
-    .eq('id', approval.entity_id)
-    .single();
-
-  if (!task) {
-    showToast('Task not found', 'error');
-    return;
-  }
-
+  // Open modal immediately with loading state
   createModal('Review Submitted Task', `
+    <div class="flex items-center justify-center py-12">
+      <div class="text-center">
+        <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600 mb-3"></div>
+        <p class="text-sm text-neutral-500">Loading task details...</p>
+      </div>
+    </div>
+  `, async (el, close) => {
+    // Fetch task data AFTER modal is open
+    const { data: task, error: fetchError } = await supabase
+      .from('tasks')
+      .select('*')
+      .eq('id', approval.entity_id)
+      .single();
+
+    if (fetchError || !task) {
+      el.querySelector('.modal-body').innerHTML = `
+        <div class="text-center py-8">
+          <p class="text-danger-600">Failed to load task details</p>
+          <button id="close-error" class="btn-secondary mt-4">Close</button>
+        </div>
+      `;
+      el.querySelector('#close-error').addEventListener('click', close);
+      return;
+    }
+
+    // Replace loading state with actual form
+    el.querySelector('.modal-body').innerHTML = `
     <form id="review-task-form" class="space-y-4">
       <p class="text-sm text-neutral-500">Review and optionally edit the task details before approving.</p>
       <div>
@@ -417,7 +465,9 @@ async function openTaskSubmissionReviewModal(approvalId, approvals) {
         <button type="submit" class="btn-success">Approve & Set In Progress</button>
       </div>
     </form>
-  `, (el, close) => {
+  `;
+
+    // Attach event listeners after content is replaced
     el.querySelector('#review-task-cancel').addEventListener('click', close);
 
     el.querySelector('#review-task-reject').addEventListener('click', () => {
@@ -469,7 +519,17 @@ async function viewApprovalDetails(approvalId, approvals) {
   const approval = approvals.find(a => a.id === approvalId);
   if (!approval) return;
 
-  let detailHtml = '';
+  // Open modal immediately with loading state
+  const modalTitle = `${approval.type.replace('_', ' ')} Details`;
+  createModal(modalTitle, `
+    <div class="flex items-center justify-center py-12">
+      <div class="text-center">
+        <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600 mb-3"></div>
+        <p class="text-sm text-neutral-500">Loading details...</p>
+      </div>
+    </div>
+  `, async (el, close) => {
+    let detailHtml = '';
 
   if (approval.type === 'attendance') {
     const { data: record } = await supabase
@@ -669,5 +729,7 @@ async function viewApprovalDetails(approvalId, approvals) {
     }
   }
 
-  createModal(`${approval.type.replace('_', ' ')} Details`, detailHtml || '<p class="text-neutral-400">No details available</p>');
+    // Replace loading state with actual details
+    el.querySelector('.modal-body').innerHTML = detailHtml || '<p class="text-neutral-400 text-center py-8">No details available</p>';
+  });
 }

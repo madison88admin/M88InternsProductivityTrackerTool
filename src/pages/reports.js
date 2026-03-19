@@ -7,7 +7,7 @@ import { renderLayout } from '../components/layout.js';
 import { supabase } from '../lib/supabase.js';
 import { showToast } from '../lib/toast.js';
 import { icons } from '../lib/icons.js';
-import { formatDate, formatTime, formatHoursDisplay, getMonday, getFriday } from '../lib/utils.js';
+import { formatDate, formatDateKey, formatTime, formatHoursDisplay, getMonday, getFriday, getTodayDate } from '../lib/utils.js';
 import { logAudit } from '../lib/audit.js';
 
 let chartInstance = null;
@@ -139,8 +139,8 @@ export async function renderReportsPage() {
   `, (el) => {
     const now = new Date();
     const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
-    el.querySelector('#date-from').value = thirtyDaysAgo.toISOString().slice(0, 10);
-    el.querySelector('#date-to').value = now.toISOString().slice(0, 10);
+    el.querySelector('#date-from').value = formatDateKey(thirtyDaysAgo);
+    el.querySelector('#date-to').value = formatDateKey(now);
 
     let reportData = null;
     let currentType = 'attendance';
@@ -608,7 +608,7 @@ export async function generateDarPdf(darData, weekNum, mondayDate, existingDoc) 
     const supervisorSigDataUrl = att?.supervisor_id
       ? (supervisorSigById.get(att.supervisor_id) || defaultSupervisorSigDataUrl)
       : defaultSupervisorSigDataUrl;
-    const holidayTask = `---NO WORK DUE TO ${formatHolidayName(holidayName)} HOLIDAY---`;
+    const holidayTask = `---SUSPENSION OF WORK DUE TO ${formatHolidayName(holidayName)} HOLIDAY---`;
 
     const mHours = isHolidayDate ? 0 : calcSessionHours(att?.time_in_1, att?.time_out_1);
     const mTask = morningNarr?.task?.title || '';
@@ -782,7 +782,7 @@ async function handleDarGeneration(el) {
       const url = URL.createObjectURL(zipBlob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `DAR_Week${weekNum}_${new Date().toISOString().slice(0, 10)}.zip`;
+      a.download = `DAR_Week${weekNum}_${getTodayDate()}.zip`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
@@ -812,7 +812,7 @@ async function handleDarGeneration(el) {
       }
 
       if (doc) {
-        doc.save(`DAR_Combined_Week${weekNum}_${new Date().toISOString().slice(0, 10)}.pdf`);
+        doc.save(`DAR_Combined_Week${weekNum}_${getTodayDate()}.pdf`);
         await logAudit('report.export_pdf', 'report', null, {
           report_type: 'dar',
           format: 'pdf',
@@ -1342,7 +1342,7 @@ async function exportXlsx(data, type) {
     const ws = XLSX.utils.json_to_sheet(rows);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Report');
-    XLSX.writeFile(wb, `report_${type}_${new Date().toISOString().slice(0, 10)}.xlsx`);
+    XLSX.writeFile(wb, `report_${type}_${getTodayDate()}.xlsx`);
     await logAudit('report.export_xlsx', 'report', null, {
       report_type: type,
       row_count: rows.length,
@@ -1530,7 +1530,7 @@ async function exportPdf(data, type, dateFrom, dateTo) {
       }
     }
 
-    doc.save(`report_${type}_${new Date().toISOString().slice(0, 10)}.pdf`);
+    doc.save(`report_${type}_${getTodayDate()}.pdf`);
     await logAudit('report.export_pdf', 'report', null, {
       report_type: type,
       row_count: data.length,

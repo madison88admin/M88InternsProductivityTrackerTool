@@ -8,9 +8,12 @@ import { supabase } from '../lib/supabase.js';
 import { showToast } from '../lib/toast.js';
 import { logAudit } from '../lib/audit.js';
 import { icons } from '../lib/icons.js';
-import { formatDate, formatTime, formatHoursDisplay, getTodayDate, getPublicIP, isLateArrival, isOutsideAllowedHours, getMonday, getFriday } from '../lib/utils.js';
+import { formatDate, formatTime, formatHoursDisplay, getPublicIP, isLateArrival, isOutsideAllowedHours } from '../lib/utils.js';
 import { createModal } from '../lib/component.js';
 import { isHoliday } from '../lib/holidays.js';
+
+const PH_TIMEZONE = 'Asia/Manila';
+let phMidnightRefreshTimer = null;
 
 function ipConsistencyBadge(ip_consistent, size = 'normal') {
   if (ip_consistent == null) return '';
@@ -28,8 +31,55 @@ const PUNCH_CUTOFFS = {
   time_out_2: 19 * 60 + 30,  // 7:30 PM
 };
 
+function getNowInPH() {
+  return new Date(new Date().toLocaleString('en-US', { timeZone: PH_TIMEZONE }));
+}
+
+function toDateKey(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function getTodayDateInPH() {
+  return toDateKey(getNowInPH());
+}
+
+function getWeekRangeInPH() {
+  const nowPH = getNowInPH();
+  const day = nowPH.getDay();
+  const mondayOffset = day === 0 ? -6 : 1 - day;
+
+  const monday = new Date(nowPH);
+  monday.setDate(nowPH.getDate() + mondayOffset);
+  monday.setHours(0, 0, 0, 0);
+
+  const friday = new Date(monday);
+  friday.setDate(monday.getDate() + 4);
+  friday.setHours(23, 59, 59, 999);
+
+  return {
+    weekStart: toDateKey(monday),
+    weekEnd: toDateKey(friday),
+  };
+}
+
+function schedulePhMidnightRefresh() {
+  if (phMidnightRefreshTimer) clearTimeout(phMidnightRefreshTimer);
+
+  const nowPH = getNowInPH();
+  const nextMidnightPH = new Date(nowPH);
+  nextMidnightPH.setHours(24, 0, 0, 0);
+
+  const msUntilRefresh = Math.max(1000, nextMidnightPH.getTime() - nowPH.getTime() + 500);
+  phMidnightRefreshTimer = setTimeout(() => {
+    window.location.reload();
+  }, msUntilRefresh);
+}
+
 function getCurrentMinutes() {
-  const now = new Date();
+  const now = getNowInPH();
   return now.getHours() * 60 + now.getMinutes();
 }
 
@@ -39,11 +89,11 @@ function isPunchLocked(punchType) {
 
 export async function renderAttendancePage() {
   const profile = getProfile();
-  const today = getTodayDate();
+  const today = getTodayDateInPH();
   const holidayInfo = await isHoliday(today);
-  const now = new Date();
-  const weekStart = getMonday(now).toISOString().slice(0, 10);
-  const weekEnd = getFriday(now).toISOString().slice(0, 10);
+  const { weekStart, weekEnd } = getWeekRangeInPH();
+
+  schedulePhMidnightRefresh();
 
   // Fetch today's record
   let { data: todayRecord } = await supabase
@@ -134,7 +184,7 @@ export async function renderAttendancePage() {
     <!-- Today's Punch Card -->
     <div class="card mb-6">
       <div class="flex items-center justify-between mb-4">
-        <h3 class="text-base font-bold text-neutral-900">Today — ${formatDate(new Date(), { weekday: 'long', month: 'long', day: 'numeric' })}</h3>
+        <h3 class="text-base font-bold text-neutral-900">Today — ${formatDate(new Date(), { weekday: 'long', month: 'long', day: 'numeric', timeZone: PH_TIMEZONE })}</h3>
         ${todayRecord?.status ? `<span class="badge-${todayRecord.status === 'approved' ? 'approved' : todayRecord.status === 'rejected' ? 'rejected' : 'pending'}">${todayRecord.status}</span>` : ''}
       </div>
 
@@ -184,14 +234,16 @@ export async function renderAttendancePage() {
         ` : `
           <p class="text-sm text-neutral-500">No punches available at this time</p>
         `}
+      </div>
 
-        ${!holidayInfo.isHoliday && todayRecord && !isAllPunchesComplete(todayRecord) ? `
+      ${!holidayInfo.isHoliday && todayRecord && !isAllPunchesComplete(todayRecord) ? `
+        <div class="mt-3">
           <button id="correction-btn" class="btn-secondary">
             ${icons.edit}
             <span class="ml-2">Request Correction</span>
           </button>
-        ` : ''}
-      </div>
+        </div>
+      ` : ''}
 
       ${!holidayInfo.isHoliday ? `
         <p class="text-xs text-neutral-400 mt-3">Punch cutoffs: Morning In by 10:30 AM · Lunch Out by 1:00 PM · Afternoon In by 3:00 PM · End of Day by 7:30 PM</p>
@@ -251,6 +303,10 @@ export async function renderAttendancePage() {
     if (punchBtn) {
       punchBtn.addEventListener('click', async () => {
         const punchType = punchBtn.dataset.punch;
+        const punchLabel = getPunchLabel(punchType);
+
+        const shouldLogPunch = window.confirm(`Are you sure you want to log your time for "${punchLabel}"?`);
+        if (!shouldLogPunch) return;
 
         // Re-validate cutoff at click time (guard against race condition)
         if (isPunchLocked(punchType)) {
@@ -314,7 +370,7 @@ export async function renderAttendancePage() {
             flags,
           });
 
-          showToast(`${getPunchLabel(punchType)} recorded successfully`, 'success');
+          showToast(`${punchLabel} recorded successfully`, 'success');
 
           // Create approval entry when all 4 punches are done
           if (punchType === 'time_out_2' && profile.supervisor_id) {
@@ -340,7 +396,7 @@ export async function renderAttendancePage() {
         } catch (err) {
           showToast(err.message || 'Failed to log attendance', 'error');
           punchBtn.disabled = false;
-          punchBtn.innerHTML = `${icons.clock}<span class="ml-2">${getPunchLabel(punchType)}</span>`;
+          punchBtn.innerHTML = `${icons.clock}<span class="ml-2">${punchLabel}</span>`;
         }
       });
     }
@@ -465,51 +521,53 @@ function openCorrectionModal(record, profile) {
 
         if (error) throw error;
 
+        const baseNotif = {
+          type: 'pending_approval',
+          title: 'Attendance Correction Request',
+          message: `${profile.full_name} has requested an attendance correction for ${formatDate(record.date)}`,
+          entity_type: 'attendance_correction',
+          entity_id: correctionData.id,
+        };
+
         // Create approval entry so supervisor/admin can act on it from the Approvals page
         if (profile.supervisor_id) {
-          await supabase.from('approvals').insert({
-            type: 'attendance_correction',
-            entity_id: correctionData.id,
-            intern_id: profile.id,
-            supervisor_id: profile.supervisor_id,
-          });
-
-          await supabase.from('notifications').insert({
-            user_id: profile.supervisor_id,
-            type: 'pending_approval',
-            title: 'Attendance Correction Request',
-            message: `${profile.full_name} has requested an attendance correction for ${formatDate(record.date)}`,
-            entity_type: 'attendance_correction',
-            entity_id: correctionData.id,
-          });
+          await Promise.all([
+            supabase.from('approvals').insert({
+              type: 'attendance_correction',
+              entity_id: correctionData.id,
+              intern_id: profile.id,
+              supervisor_id: profile.supervisor_id,
+            }),
+            supabase.from('notifications').insert({
+              user_id: profile.supervisor_id,
+              ...baseNotif,
+            }),
+          ]);
         }
 
         // Also notify all active admins since only admins can approve corrections
-        const { data: admins } = await supabase
+        supabase
           .from('profiles')
           .select('id')
           .eq('role', 'admin')
-          .eq('is_active', true);
+          .eq('is_active', true)
+          .then(({ data: admins }) => {
+            if (!admins || admins.length === 0) return;
+            const adminNotifs = admins
+              .filter(a => a.id !== profile.supervisor_id)
+              .map(a => ({ user_id: a.id, ...baseNotif }));
+            if (adminNotifs.length === 0) return;
+            return supabase.from('notifications').insert(adminNotifs);
+          })
+          .catch((adminNotifErr) => {
+            console.error('Failed to send admin correction notifications:', adminNotifErr);
+          });
 
-        if (admins && admins.length > 0) {
-          const adminNotifs = admins
-            .filter(a => a.id !== profile.supervisor_id)
-            .map(a => ({
-              user_id: a.id,
-              type: 'pending_approval',
-              title: 'Attendance Correction Request',
-              message: `${profile.full_name} has requested an attendance correction for ${formatDate(record.date)}`,
-              entity_type: 'attendance_correction',
-              entity_id: correctionData.id,
-            }));
-          if (adminNotifs.length > 0) {
-            await supabase.from('notifications').insert(adminNotifs);
-          }
-        }
-
-        await logAudit('attendance.correction_requested', 'attendance_correction', record.id, {
+        logAudit('attendance.correction_requested', 'attendance_correction', record.id, {
           punch_type: punchType,
           reason,
+        }).catch(err => {
+          console.error('Failed to write correction audit log:', err);
         });
 
         showToast('Correction request submitted', 'success');

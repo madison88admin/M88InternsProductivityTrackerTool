@@ -7,11 +7,20 @@ import { getCurrentUser } from './auth.js';
 
 // Cache the client IP for the session — fetched once, reused on every log call
 let cachedIp = null;
+const AUDIT_INSERT_TIMEOUT_MS = 1500;
+
+function withTimeout(promise, timeoutMs) {
+  return Promise.race([
+    promise,
+    new Promise(resolve => setTimeout(() => resolve(null), timeoutMs)),
+  ]);
+}
 
 async function getClientIp() {
   if (cachedIp) return cachedIp;
   try {
-    const res = await fetch('https://api.ipify.org?format=json');
+    const res = await withTimeout(fetch('https://api.ipify.org?format=json'), 1200);
+    if (!res) return null;
     const { ip } = await res.json();
     cachedIp = ip;
     return ip;
@@ -19,6 +28,9 @@ async function getClientIp() {
     return null;
   }
 }
+
+// Warm IP cache early without blocking user actions
+getClientIp().catch(() => {});
 
 /**
  * Log an action to the audit trail.
@@ -29,18 +41,35 @@ async function getClientIp() {
  */
 export async function logAudit(action, entityType, entityId = null, details = null) {
   const user = getCurrentUser();
-  const ip = await getClientIp();
+  const ip = cachedIp || null;
 
   try {
-    await supabase.from('audit_logs').insert({
-      user_id: user?.id || null,
-      action,
-      entity_type: entityType,
-      entity_id: entityId,
-      details: details || null,
-      ip_address: ip,
-    });
+    const result = await withTimeout(
+      supabase.from('audit_logs').insert({
+        user_id: user?.id || null,
+        action,
+        entity_type: entityType,
+        entity_id: entityId,
+        details: details || null,
+        ip_address: ip,
+      }),
+      AUDIT_INSERT_TIMEOUT_MS,
+    );
+
+    if (!result) {
+      return;
+    }
+
+    if (result.error) {
+      throw result.error;
+    }
   } catch (err) {
     console.error('Audit log failed:', err);
   }
+}
+
+export function queueAudit(action, entityType, entityId = null, details = null) {
+  logAudit(action, entityType, entityId, details).catch((err) => {
+    console.error('Audit log failed:', err);
+  });
 }

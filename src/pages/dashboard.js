@@ -6,7 +6,7 @@ import { getUserRole, getProfile, refreshProfile } from '../lib/auth.js';
 import { renderLayout } from '../components/layout.js';
 import { supabase } from '../lib/supabase.js';
 import { icons } from '../lib/icons.js';
-import { formatDate, formatHoursDisplay, getTodayDate, computeEstimatedEndDate, renderAvatar, getMonday } from '../lib/utils.js';
+import { formatDate, formatDateKey, formatHoursDisplay, getTodayDate, computeEstimatedEndDate, renderAvatar, getMonday } from '../lib/utils.js';
 import { openOjtCompletionModal } from '../lib/ojt-completion.js';
 
 export async function renderDashboard() {
@@ -1554,7 +1554,7 @@ async function initDashboardCharts(role, container) {
         const d = new Date();
         d.setDate(d.getDate() - i);
         days.push(d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }));
-        const dateStr = d.toISOString().slice(0, 10);
+        const dateStr = formatDateKey(d);
         counts.push(auditData?.filter(r => r.created_at.slice(0, 10) === dateStr).length || 0);
       }
 

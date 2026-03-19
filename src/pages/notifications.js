@@ -11,6 +11,7 @@ import { formatDate, formatDateTime, formatTime } from '../lib/utils.js';
 import { openOjtCompletionModal } from '../lib/ojt-completion.js';
 import { createModal } from '../lib/component.js';
 import { logAudit } from '../lib/audit.js';
+import { sendEmailNotification, getApprovalResultTemplate } from '../lib/email-notifications.js';
 
 export async function renderNotificationsPage() {
   const profile = getProfile();
@@ -24,6 +25,10 @@ export async function renderNotificationsPage() {
 
   const notifs = notifications || [];
   const unreadCount = notifs.filter(n => !n.is_read).length;
+  const notifTypes = [...new Set(notifs.map(n => getTypeLabel(n)))].sort((a, b) => a.localeCompare(b));
+  const typeOptionsHtml = notifTypes
+    .map(type => `<option value="${type}">${type}</option>`)
+    .join('');
 
   // Group notifications by relative date bucket
   const groupOrder = ['Today', 'Yesterday', 'This Week', 'Older'];
@@ -63,7 +68,7 @@ export async function renderNotificationsPage() {
     </div>
 
     <!-- Filter tabs -->
-    <div class="flex items-center gap-3 mb-6 animate-fade-in-up" style="animation-delay: 100ms;">
+    <div class="flex items-center justify-between gap-3 mb-6 animate-fade-in-up" style="animation-delay: 100ms;">
       <div class="flex gap-1 p-1 rounded-xl" style="background: var(--color-neutral-100);">
         <button class="filter-tab px-4 py-1.5 rounded-lg text-sm font-semibold transition-all bg-white shadow-sm text-neutral-800" data-filter="all">
           All
@@ -73,6 +78,14 @@ export async function renderNotificationsPage() {
           Unread
           ${unreadCount > 0 ? `<span class="ml-1.5 inline-block px-1.5 py-0.5 rounded-full text-xs font-bold text-white" style="background: var(--color-primary-600);">${unreadCount}</span>` : ''}
         </button>
+      </div>
+
+      <div class="flex items-center gap-2">
+        <label for="notif-type-filter" class="text-sm text-neutral-500 font-medium">Type</label>
+        <select id="notif-type-filter" class="form-input py-2 px-3 text-sm min-w-45">
+          <option value="all">All Types</option>
+          ${typeOptionsHtml}
+        </select>
       </div>
     </div>
 
@@ -89,6 +102,48 @@ export async function renderNotificationsPage() {
       ` : notifListHtml}
     </div>
   `, (el) => {
+    let activeReadFilter = 'all';
+    let activeTypeFilter = 'all';
+
+    const applyFilters = () => {
+      let visibleCount = 0;
+
+      el.querySelectorAll('.notification-item').forEach(item => {
+        const isRead = item.dataset.read === 'true';
+        const itemType = item.dataset.typeLabel || 'System';
+        const matchesRead = activeReadFilter !== 'unread' || !isRead;
+        const matchesType = activeTypeFilter === 'all' || activeTypeFilter === itemType;
+        const isVisible = matchesRead && matchesType;
+
+        item.style.display = isVisible ? '' : 'none';
+        if (isVisible) visibleCount += 1;
+      });
+
+      // Hide group headers when all their items are hidden
+      el.querySelectorAll('.notif-group').forEach(group => {
+        const anyVisible = [...group.querySelectorAll('.notification-item')]
+          .some(i => i.style.display !== 'none');
+        group.style.display = anyVisible ? '' : 'none';
+      });
+
+      let emptyState = el.querySelector('#no-filter-results-msg');
+      if (visibleCount === 0 && notifs.length > 0) {
+        if (!emptyState) {
+          emptyState = document.createElement('div');
+          emptyState.id = 'no-filter-results-msg';
+          emptyState.className = 'card flex flex-col items-center justify-center py-16 text-center';
+          emptyState.innerHTML = `
+            <div class="w-14 h-14 rounded-2xl flex items-center justify-center mb-4 text-neutral-400" style="background: var(--color-neutral-100);">${icons.bell}</div>
+            <p class="text-base font-semibold text-neutral-600">No matching notifications</p>
+            <p class="text-sm text-neutral-400 mt-1">Try changing your filters to see more results.</p>
+          `;
+          el.querySelector('#notification-list').appendChild(emptyState);
+        }
+        emptyState.style.display = '';
+      } else if (emptyState) {
+        emptyState.style.display = 'none';
+      }
+    };
 
     // Filter tabs — toggle visibility
     el.querySelectorAll('.filter-tab').forEach(tab => {
@@ -100,36 +155,14 @@ export async function renderNotificationsPage() {
         tab.classList.add('bg-white', 'shadow-sm', 'text-neutral-800');
         tab.classList.remove('text-neutral-500');
 
-        const filter = tab.dataset.filter;
-        el.querySelectorAll('.notification-item').forEach(item => {
-          const isRead = item.dataset.read === 'true';
-          item.style.display = (filter === 'unread' && isRead) ? 'none' : '';
-        });
-        // Hide group headers when all their items are hidden
-        el.querySelectorAll('.notif-group').forEach(group => {
-          const anyVisible = [...group.querySelectorAll('.notification-item')]
-            .some(i => i.style.display !== 'none');
-          group.style.display = anyVisible ? '' : 'none';
-        });
-        // Show inline empty state when no unread
-        let noUnreadMsg = el.querySelector('#no-unread-msg');
-        if (filter === 'unread' && unreadCount === 0) {
-          if (!noUnreadMsg) {
-            noUnreadMsg = document.createElement('div');
-            noUnreadMsg.id = 'no-unread-msg';
-            noUnreadMsg.className = 'card flex flex-col items-center justify-center py-16 text-center';
-            noUnreadMsg.innerHTML = `
-              <div class="w-14 h-14 rounded-2xl flex items-center justify-center mb-4 text-neutral-400" style="background: var(--color-neutral-100);">${icons.check}</div>
-              <p class="text-base font-semibold text-neutral-600">No unread notifications</p>
-              <p class="text-sm text-neutral-400 mt-1">You've read everything — great job!</p>
-            `;
-            el.querySelector('#notification-list').appendChild(noUnreadMsg);
-          }
-          noUnreadMsg.style.display = '';
-        } else if (noUnreadMsg) {
-          noUnreadMsg.style.display = 'none';
-        }
+        activeReadFilter = tab.dataset.filter || 'all';
+        applyFilters();
       });
+    });
+
+    el.querySelector('#notif-type-filter')?.addEventListener('change', (event) => {
+      activeTypeFilter = event.target.value;
+      applyFilters();
     });
 
     // Mark all read
@@ -160,6 +193,7 @@ export async function renderNotificationsPage() {
         if (item.dataset.read !== 'true') {
           await supabase.from('notifications').update({ is_read: true }).eq('id', notif.id);
           markNotificationAsReadInDom(item);
+          applyFilters();
         }
 
         // OJT completion notifications open the three-option action modal
@@ -207,7 +241,7 @@ function openNotificationDetailsModal(notification) {
       <div class="grid grid-cols-2 gap-3">
         <div class="p-3 bg-neutral-50 rounded-lg border border-neutral-200">
           <p class="text-xs text-neutral-500 mb-1">Category</p>
-          <p class="text-sm font-medium text-neutral-800">${getTypeLabel(notification.type)}</p>
+          <p class="text-sm font-medium text-neutral-800">${getTypeLabel(notification)}</p>
         </div>
         <div class="p-3 bg-neutral-50 rounded-lg border border-neutral-200">
           <p class="text-xs text-neutral-500 mb-1">Received</p>
@@ -219,23 +253,34 @@ function openNotificationDetailsModal(notification) {
 }
 
 async function openApprovalNotificationModal(notification, profile) {
-  const approval = await findPendingApprovalForNotification(notification, profile);
-
-  if (!approval) {
-    createModal('Approval Notification', `
-      <div class="space-y-4">
-        <div class="p-3 bg-neutral-50 rounded-lg border border-neutral-200">
-          <p class="text-sm text-neutral-700">${notification.message || 'No details available.'}</p>
-        </div>
-        <p class="text-sm text-warning-600">This item is no longer pending or already reviewed.</p>
-      </div>
-    `);
-    return;
-  }
-
-  const detailsHtml = await getApprovalDetailsHtml(approval);
-
+  // Open modal immediately with loading state
   createModal('Review Notification', `
+    <div class="flex items-center justify-center py-12">
+      <div class="text-center">
+        <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600 mb-3"></div>
+        <p class="text-sm text-neutral-500">Loading details...</p>
+      </div>
+    </div>
+  `, async (modalEl, close) => {
+    // Fetch data AFTER modal is open
+    const approval = await findPendingApprovalForNotification(notification, profile);
+
+    if (!approval) {
+      modalEl.querySelector('.modal-body').innerHTML = `
+        <div class="space-y-4">
+          <div class="p-3 bg-neutral-50 rounded-lg border border-neutral-200">
+            <p class="text-sm text-neutral-700">${notification.message || 'No details available.'}</p>
+          </div>
+          <p class="text-sm text-warning-600">This item is no longer pending or already reviewed.</p>
+        </div>
+      `;
+      return;
+    }
+
+    const detailsHtml = await getApprovalDetailsHtml(approval);
+
+    // Replace loading state with actual content
+    modalEl.querySelector('.modal-body').innerHTML = `
     <div class="space-y-4">
       <div class="p-3 bg-neutral-50 rounded-lg border border-neutral-200">
         <p class="text-xs text-neutral-500 mb-1">Submission</p>
@@ -265,7 +310,9 @@ async function openApprovalNotificationModal(notification, profile) {
         <button type="button" id="notif-reject-submit" class="btn-danger">Confirm Reject</button>
       </div>
     </div>
-  `, (modalEl, close) => {
+  `;
+
+    // Attach event listeners after content is replaced
     const approveBtn = modalEl.querySelector('#notif-approve');
     const showRejectBtn = modalEl.querySelector('#notif-show-reject');
     const rejectForm = modalEl.querySelector('#notif-reject-form');
@@ -621,16 +668,35 @@ async function processApprovalFromNotification(approval, status, comments = null
     }
   }
 
+  const notificationTitle = `${approval.type.replace('_', ' ')} ${status}`;
+  const notificationMessage = status === 'approved'
+    ? `Your ${approval.type.replace('_', ' ')} has been approved.`
+    : `Your ${approval.type.replace('_', ' ')} was rejected. Reason: ${comments || 'No reason provided'}`;
+
   await supabase.from('notifications').insert({
     user_id: approval.intern_id,
     type: 'approval_result',
-    title: `${approval.type.replace('_', ' ')} ${status}`,
-    message: status === 'approved'
-      ? `Your ${approval.type.replace('_', ' ')} has been approved.`
-      : `Your ${approval.type.replace('_', ' ')} was rejected. Reason: ${comments || 'No reason provided'}`,
+    title: notificationTitle,
+    message: notificationMessage,
     entity_type: approval.type,
     entity_id: approval.entity_id,
   });
+
+  // Send email notification
+  const { data: internData } = await supabase
+    .from('profiles')
+    .select('email')
+    .eq('id', approval.intern_id)
+    .single();
+
+  if (internData?.email) {
+    const emailHtml = getApprovalResultTemplate(approval.type, status, comments);
+    await sendEmailNotification(
+      internData.email,
+      notificationTitle,
+      emailHtml
+    );
+  }
 
   await logAudit(`approval.${status}`, 'approval', approval.id, {
     type: approval.type,
@@ -642,6 +708,7 @@ async function processApprovalFromNotification(approval, status, comments = null
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function renderNotifItem(n) {
+  const category = getTypeLabel(n);
   const isRead = !!n.is_read;
   const itemStyle = isRead
     ? 'background: var(--color-neutral-50); border-color: transparent; opacity: 0.75;'
@@ -653,6 +720,7 @@ function renderNotifItem(n) {
          data-id="${n.id}"
          data-read="${isRead}"
          data-type="${n.type || ''}"
+         data-type-label="${category}"
          data-entity-id="${n.entity_id || ''}">
       <!-- Type icon -->
       <div class="shrink-0 w-10 h-10 rounded-full flex items-center justify-center ${getNotifColor(n.type)}">
@@ -670,7 +738,7 @@ function renderNotifItem(n) {
         </div>
         ${n.message ? `<p class="text-xs text-neutral-500 mt-1 leading-relaxed">${n.message}</p>` : ''}
         <div class="flex items-center flex-wrap gap-2 mt-2">
-          ${getTypeBadge(n.type)}
+          ${getTypeBadge(category)}
           <span class="text-neutral-300 text-xs">·</span>
           <span class="text-xs text-neutral-400">${formatDateTime(n.created_at)}</span>
         </div>
@@ -704,29 +772,26 @@ function getDateGroup(dateStr) {
   return 'Older';
 }
 
-function getTypeLabel(type) {
-  const labels = {
-    attendance_submitted: 'Attendance',
-    attendance_approved: 'Attendance',
-    attendance_rejected: 'Attendance',
-    task_assigned: 'Task',
-    task_status_change: 'Task',
-    narrative_submitted: 'Narrative',
-    narrative_approved: 'Narrative',
-    narrative_rejected: 'Narrative',
-    allowance_approved: 'Allowance',
-    correction_submitted: 'Correction',
-    escalation: 'Escalation',
-    ojt_completed: 'OJT',
-  };
-  return labels[type] || 'System';
+function getTypeLabel(notification) {
+  const type = notification?.type || '';
+  const entityType = notification?.entity_type || '';
+
+  if (type === 'pending_approval' || type === 'approval_result') return 'Approval';
+  if (type === 'ojt_completed') return 'OJT';
+  if (type === 'escalation') return 'Escalation';
+  if (type?.includes('allowance') || entityType?.includes('allowance')) return 'Allowance';
+  if (type?.includes('attendance') || entityType?.includes('attendance')) return 'Attendance';
+  if (type?.includes('narrative') || entityType?.includes('narrative')) return 'Narrative';
+  if (type?.includes('task') || entityType?.includes('task')) return 'Task';
+
+  return 'System';
 }
 
-function getTypeBadge(type) {
-  const label = getTypeLabel(type);
+function getTypeBadge(label) {
   const colorMap = {
     Attendance: 'bg-primary-50 text-primary-700',
     Task: 'bg-warning-50 text-warning-700',
+    Approval: 'bg-primary-50 text-primary-700',
     Narrative: 'bg-success-50 text-success-700',
     Allowance: 'bg-success-50 text-success-700',
     Correction: 'bg-warning-50 text-warning-700',

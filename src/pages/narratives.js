@@ -13,10 +13,28 @@ import { formatDate, formatDateTime, formatHoursDisplay, getTodayDate } from '..
 import { createModal } from '../lib/component.js';
 import { isHoliday } from '../lib/holidays.js';
 
+// Pre-load Quill to avoid dynamic import delays in modal
+let QuillModule = null;
+let quillLoadPromise = null;
+
+function getQuill() {
+  if (QuillModule) return Promise.resolve(QuillModule);
+  if (!quillLoadPromise) {
+    quillLoadPromise = import('quill').then(module => {
+      QuillModule = module.default;
+      return QuillModule;
+    });
+  }
+  return quillLoadPromise;
+}
+
 export async function renderNarrativesPage() {
   const profile = getProfile();
   const today = getTodayDate();
   const todayHolidayInfo = await isHoliday(today);
+
+  // Pre-load Quill in background for faster modal opening
+  getQuill().catch(() => {});
 
   // Fetch intern's active tasks (not completed, or completed but not yet approved by supervisor)
   const { data: allTasks } = await supabase
@@ -400,8 +418,8 @@ function openNarrativeModal(tasks, profile, today) {
       </div>
     </form>
   `, async (el, close) => {
-    // Initialize Quill editors
-    const Quill = (await import('quill')).default;
+    // Use pre-loaded Quill module
+    const Quill = await getQuill();
 
     const quillConfig = {
       theme: 'snow',
@@ -451,6 +469,7 @@ function openNarrativeModal(tasks, profile, today) {
         morningQuill.deleteText(CHAR_LIMIT, text.length);
       }
       updateCharCount(morningQuill, 'morning-char-count');
+      scheduleDraftSave();
     });
 
     afternoonQuill.on('text-change', () => {
@@ -459,12 +478,94 @@ function openNarrativeModal(tasks, profile, today) {
         afternoonQuill.deleteText(CHAR_LIMIT, text.length);
       }
       updateCharCount(afternoonQuill, 'afternoon-char-count');
+      scheduleDraftSave();
     });
 
     let currentAttendance = null;
     let morningHours = 0;
     let afternoonHours = 0;
     let existingNarratives = [];
+    const draftStorageKey = `narrative_draft_${profile.id}`;
+    const draftVersion = 1;
+    let draftSaveTimer = null;
+
+    function hasSelectOption(selectEl, value) {
+      return !!selectEl.querySelector(`option[value="${value}"]`);
+    }
+
+    function getDraftPayload() {
+      return {
+        version: draftVersion,
+        date: el.querySelector('#narrative-date').value,
+        morningTaskId: el.querySelector('#morning-task').value || null,
+        afternoonTaskId: el.querySelector('#afternoon-task').value || null,
+        morningContent: morningQuill.root.innerHTML,
+        afternoonContent: afternoonQuill.root.innerHTML,
+      };
+    }
+
+    function saveDraft() {
+      try {
+        localStorage.setItem(draftStorageKey, JSON.stringify(getDraftPayload()));
+      } catch {
+        // Ignore storage errors (e.g. browser storage blocked/full)
+      }
+    }
+
+    function scheduleDraftSave() {
+      if (draftSaveTimer) clearTimeout(draftSaveTimer);
+      draftSaveTimer = setTimeout(saveDraft, 250);
+    }
+
+    function readDraft() {
+      try {
+        const raw = localStorage.getItem(draftStorageKey);
+        if (!raw) return null;
+        const parsed = JSON.parse(raw);
+        if (!parsed || parsed.version !== draftVersion) return null;
+        return parsed;
+      } catch {
+        return null;
+      }
+    }
+
+    function clearDraft() {
+      if (draftSaveTimer) clearTimeout(draftSaveTimer);
+      localStorage.removeItem(draftStorageKey);
+    }
+
+    function restoreDraft() {
+      const draft = readDraft();
+      if (!draft) return false;
+
+      const dateInput = el.querySelector('#narrative-date');
+      const morningTaskSelect = el.querySelector('#morning-task');
+      const afternoonTaskSelect = el.querySelector('#afternoon-task');
+      const restoredDate = draft.date && draft.date <= today ? draft.date : today;
+
+      dateInput.value = restoredDate;
+
+      if (draft.morningTaskId && hasSelectOption(morningTaskSelect, draft.morningTaskId)) {
+        morningTaskSelect.value = draft.morningTaskId;
+      }
+
+      if (draft.afternoonTaskId && hasSelectOption(afternoonTaskSelect, draft.afternoonTaskId)) {
+        afternoonTaskSelect.value = draft.afternoonTaskId;
+      }
+
+      if (typeof draft.morningContent === 'string') {
+        morningQuill.root.innerHTML = draft.morningContent;
+      }
+
+      if (typeof draft.afternoonContent === 'string') {
+        afternoonQuill.root.innerHTML = draft.afternoonContent;
+      }
+
+      updateCharCount(morningQuill, 'morning-char-count');
+      updateCharCount(afternoonQuill, 'afternoon-char-count');
+
+      return true;
+    }
 
     // Update session info and hours when date changes
     async function updateSessionInfo() {
@@ -570,11 +671,22 @@ function openNarrativeModal(tasks, profile, today) {
       }
     }
 
+    // Restore any saved draft first, then update session availability state
+    const draftRestored = restoreDraft();
+
     // Initialize session info
     await updateSessionInfo();
+    if (draftRestored) {
+      showToast('Draft restored. You can continue editing your narrative.', 'info');
+    }
 
     // Listen for date changes
-    el.querySelector('#narrative-date').addEventListener('change', updateSessionInfo);
+    el.querySelector('#narrative-date').addEventListener('change', async () => {
+      await updateSessionInfo();
+      scheduleDraftSave();
+    });
+    el.querySelector('#morning-task').addEventListener('change', scheduleDraftSave);
+    el.querySelector('#afternoon-task').addEventListener('change', scheduleDraftSave);
 
     el.querySelector('#narrative-cancel').addEventListener('click', close);
 
@@ -718,6 +830,7 @@ function openNarrativeModal(tasks, profile, today) {
         }
 
         showToast(`${data.length} narrative${data.length > 1 ? 's' : ''} submitted successfully`, 'success');
+        clearDraft();
         close();
         renderNarrativesPage();
       } catch (err) {
@@ -773,7 +886,7 @@ function openEditNarrativeModal(narrative, tasks, profile) {
       </div>
     </form>
   `, async (el, close) => {
-    const Quill = (await import('quill')).default;
+    const Quill = await getQuill();
     const quill = new Quill('#edit-narrative-editor', {
       theme: 'snow',
       modules: {
