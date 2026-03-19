@@ -604,53 +604,71 @@ export async function generateDarPdf(darData, weekNum, mondayDate, existingDoc) 
     const afternoonNarr = narratives.find(n => n.date === dateStr && n.session === 'afternoon');
     const holidayName = holidayByDate.get(dateStr);
     const isHolidayDate = !!holidayName;
+    const isNoLog = !att && !isHolidayDate;  // No attendance AND not a holiday
     const isApproved = att?.status === 'approved';
     const supervisorSigDataUrl = att?.supervisor_id
       ? (supervisorSigById.get(att.supervisor_id) || defaultSupervisorSigDataUrl)
       : defaultSupervisorSigDataUrl;
     const holidayTask = `---SUSPENSION OF WORK DUE TO ${formatHolidayName(holidayName)} HOLIDAY---`;
+    const noLogTask = '---NO RECORDED LOG FOR THIS DAY---';
 
-    const mHours = isHolidayDate ? 0 : calcSessionHours(att?.time_in_1, att?.time_out_1);
+    // Morning session
+    const mHours = isHolidayDate ? 0 : (isNoLog ? 0 : calcSessionHours(att?.time_in_1, att?.time_out_1));
     const mTask = morningNarr?.task?.title || '';
     const mContent = stripHtml(morningNarr?.content);
     let mAccomplished = mTask ? `${mTask}${mContent ? ': ' + mContent : ''}` : mContent;
     if (isHolidayDate) mAccomplished = holidayTask;
+    if (isNoLog) mAccomplished = noLogTask;
     if (mAccomplished.length > 200) mAccomplished = mAccomplished.slice(0, 200) + '...';
 
     tableBody.push([
       formatDateMMDDYYYY(dateStr),
-      isHolidayDate ? '00:00' : (att?.time_in_1 ? formatTime(att.time_in_1) : ''),
-      isHolidayDate ? '00:00' : (att?.time_out_1 ? formatTime(att.time_out_1) : ''),
+      isHolidayDate || isNoLog ? '00:00' : (att?.time_in_1 ? formatTime(att.time_in_1) : '00:00'),
+      isHolidayDate || isNoLog ? '00:00' : (att?.time_out_1 ? formatTime(att.time_out_1) : '00:00'),
       mAccomplished,
-      isHolidayDate ? '00:00' : (mHours > 0 ? mHours.toFixed(2) : ''),
+      '00:00',  // Always 00:00 for no logs
       '',
       '',
     ]);
 
     const mRowIdx = dayIdx * 2;
-    if ((isApproved || isHolidayDate) && internSigDataUrl) signatureCells.push({ row: mRowIdx, col: 5, dataUrl: internSigDataUrl });
-    if ((isApproved || isHolidayDate) && supervisorSigDataUrl) signatureCells.push({ row: mRowIdx, col: 6, dataUrl: supervisorSigDataUrl });
+    // Add intern signature for approved, holiday, or no-log entries
+    if ((isApproved || isHolidayDate || isNoLog) && internSigDataUrl) {
+      signatureCells.push({ row: mRowIdx, col: 5, dataUrl: internSigDataUrl });
+    }
+    // Add supervisor signature only for approved or holiday (not for no-log)
+    if ((isApproved || isHolidayDate) && supervisorSigDataUrl) {
+      signatureCells.push({ row: mRowIdx, col: 6, dataUrl: supervisorSigDataUrl });
+    }
 
-    const aHours = isHolidayDate ? 0 : calcSessionHours(att?.time_in_2, att?.time_out_2);
+    // Afternoon session
+    const aHours = isHolidayDate ? 0 : (isNoLog ? 0 : calcSessionHours(att?.time_in_2, att?.time_out_2));
     const aTask = afternoonNarr?.task?.title || '';
     const aContent = stripHtml(afternoonNarr?.content);
     let aAccomplished = aTask ? `${aTask}${aContent ? ': ' + aContent : ''}` : aContent;
     if (isHolidayDate) aAccomplished = holidayTask;
+    if (isNoLog) aAccomplished = noLogTask;
     if (aAccomplished.length > 200) aAccomplished = aAccomplished.slice(0, 200) + '...';
 
     tableBody.push([
       formatDateMMDDYYYY(dateStr),
-      isHolidayDate ? '00:00' : (att?.time_in_2 ? formatTime(att.time_in_2) : ''),
-      isHolidayDate ? '00:00' : (att?.time_out_2 ? formatTime(att.time_out_2) : ''),
+      isHolidayDate || isNoLog ? '00:00' : (att?.time_in_2 ? formatTime(att.time_in_2) : '00:00'),
+      isHolidayDate || isNoLog ? '00:00' : (att?.time_out_2 ? formatTime(att.time_out_2) : '00:00'),
       aAccomplished,
-      isHolidayDate ? '00:00' : (aHours > 0 ? aHours.toFixed(2) : ''),
+      '00:00',  // Always 00:00 for no logs
       '',
       '',
     ]);
 
     const aRowIdx = dayIdx * 2 + 1;
-    if ((isApproved || isHolidayDate) && internSigDataUrl) signatureCells.push({ row: aRowIdx, col: 5, dataUrl: internSigDataUrl });
-    if ((isApproved || isHolidayDate) && supervisorSigDataUrl) signatureCells.push({ row: aRowIdx, col: 6, dataUrl: supervisorSigDataUrl });
+    // Add intern signature for approved, holiday, or no-log entries
+    if ((isApproved || isHolidayDate || isNoLog) && internSigDataUrl) {
+      signatureCells.push({ row: aRowIdx, col: 5, dataUrl: internSigDataUrl });
+    }
+    // Add supervisor signature only for approved or holiday (not for no-log)
+    if ((isApproved || isHolidayDate) && supervisorSigDataUrl) {
+      signatureCells.push({ row: aRowIdx, col: 6, dataUrl: supervisorSigDataUrl });
+    }
 
     totalHours += mHours + aHours;
   });
