@@ -1,7 +1,7 @@
 /**
  * Forgot Password Page
  */
-import { resetPassword } from '../lib/auth.js';
+import { supabase } from '../lib/supabase.js';
 import { renderPage } from '../lib/component.js';
 import { showToast } from '../lib/toast.js';
 
@@ -89,10 +89,17 @@ export function renderForgotPasswordPage() {
       btn.textContent = 'Sending...';
 
       try {
-        await resetPassword(email);
-        showToast('Password reset link sent! Check your email.', 'success');
+        const { error } = await supabase.functions.invoke('request-password-reset', {
+          body: { email: email.trim() },
+        });
+
+        if (error) throw error;
+
+        showToast('If an account exists with this email, a password reset link has been sent.', 'success');
+        // Clear the form
+        document.getElementById('reset-form').reset();
       } catch (err) {
-        showToast(err.message || 'Failed to send reset link', 'error');
+        showToast(err.message || 'An error occurred. Please try again.', 'error');
       } finally {
         btn.disabled = false;
         btn.textContent = 'Send Reset Link';

@@ -12,6 +12,7 @@ import { icons } from '../lib/icons.js';
 import { formatDate, formatDateTime, formatHoursDisplay, getTodayDate } from '../lib/utils.js';
 import { createModal } from '../lib/component.js';
 import { isHoliday } from '../lib/holidays.js';
+import { sendEmailNotification } from '../lib/email-notifications.js';
 
 // Pre-load Quill to avoid dynamic import delays in modal
 let QuillModule = null;
@@ -805,6 +806,52 @@ function openNarrativeModal(tasks, profile, today) {
               entity_type: 'narrative',
               entity_id: narrative.id,
             });
+
+            // Send email notification to supervisor
+            const { data: supervisor } = await supabase
+              .from('profiles')
+              .select('full_name, email')
+              .eq('id', profile.supervisor_id)
+              .single();
+
+            if (supervisor?.email) {
+              const emailHtml = `
+                <!DOCTYPE html>
+                <html>
+                  <head>
+                    <style>
+                      body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+                      .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+                      .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px; border-radius: 5px 5px 0 0; }
+                      .content { background: #f9f9f9; padding: 20px; border: 1px solid #ddd; border-radius: 0 0 5px 5px; }
+                      .badge { display: inline-block; background: #f59e0b; color: white; padding: 6px 12px; border-radius: 4px; font-weight: bold; font-size: 12px; margin-left: 8px; }
+                      .late-badge { background: #ef4444; }
+                      .footer { margin-top: 20px; padding-top: 20px; border-top: 1px solid #ddd; font-size: 12px; color: #666; }
+                    </style>
+                  </head>
+                  <body>
+                    <div class="container">
+                      <div class="header">
+                        <h1>Narrative Pending Review</h1>
+                      </div>
+                      <div class="content">
+                        <p><strong>${profile.full_name}</strong> submitted a <strong>${narrative.session === 'morning' ? 'Morning' : 'Afternoon'}</strong> narrative for <strong>${formatDate(selectedDate)}</strong>${isLate ? ' <span class="badge late-badge">LATE SUBMISSION</span>' : ''}</p>
+                        <p>The narrative is awaiting your review and approval.</p>
+                        <p><a href="${window.location.origin}/#/approvals" style="background: #667eea; color: white; padding: 10px 20px; text-decoration: none; border-radius: 4px; display: inline-block; margin-top: 10px;">View in System</a></p>
+                      </div>
+                      <div class="footer">
+                        <p>This is an automated notification. Please do not reply to this email.</p>
+                      </div>
+                    </div>
+                  </body>
+                </html>
+              `;
+              sendEmailNotification(
+                supervisor.email,
+                `Narrative Pending Review - ${profile.full_name} (${narrative.session === 'morning' ? 'Morning' : 'Afternoon'})`,
+                emailHtml
+              ).catch(err => console.error('Failed to send narrative email:', err));
+            }
           }
 
           // Also notify all active admins
@@ -820,6 +867,56 @@ function openNarrativeModal(tasks, profile, today) {
                 entity_id: narrative.id,
               }));
             if (adminNotifs.length > 0) await supabase.from('notifications').insert(adminNotifs);
+
+            // Send email notifications to admins
+            for (const admin of adminsForNotif) {
+              if (admin.id !== profile.supervisor_id) {
+                const { data: adminProfile } = await supabase
+                  .from('profiles')
+                  .select('full_name, email')
+                  .eq('id', admin.id)
+                  .single();
+
+                if (adminProfile?.email) {
+                  const emailHtml = `
+                    <!DOCTYPE html>
+                    <html>
+                      <head>
+                        <style>
+                          body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+                          .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+                          .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px; border-radius: 5px 5px 0 0; }
+                          .content { background: #f9f9f9; padding: 20px; border: 1px solid #ddd; border-radius: 0 0 5px 5px; }
+                          .badge { display: inline-block; background: #f59e0b; color: white; padding: 6px 12px; border-radius: 4px; font-weight: bold; font-size: 12px; margin-left: 8px; }
+                          .late-badge { background: #ef4444; }
+                          .footer { margin-top: 20px; padding-top: 20px; border-top: 1px solid #ddd; font-size: 12px; color: #666; }
+                        </style>
+                      </head>
+                      <body>
+                        <div class="container">
+                          <div class="header">
+                            <h1>Narrative Pending Review</h1>
+                          </div>
+                          <div class="content">
+                            <p><strong>${profile.full_name}</strong> submitted a <strong>${narrative.session === 'morning' ? 'Morning' : 'Afternoon'}</strong> narrative for <strong>${formatDate(selectedDate)}</strong>${isLate ? ' <span class="badge late-badge">LATE SUBMISSION</span>' : ''}</p>
+                            <p>The narrative is awaiting review and approval.</p>
+                            <p><a href="${window.location.origin}/#/approvals" style="background: #667eea; color: white; padding: 10px 20px; text-decoration: none; border-radius: 4px; display: inline-block; margin-top: 10px;">View in System</a></p>
+                          </div>
+                          <div class="footer">
+                            <p>This is an automated notification. Please do not reply to this email.</p>
+                          </div>
+                        </div>
+                      </body>
+                    </html>
+                  `;
+                  sendEmailNotification(
+                    adminProfile.email,
+                    `Narrative Pending Review - ${profile.full_name} (${narrative.session === 'morning' ? 'Morning' : 'Afternoon'})`,
+                    emailHtml
+                  ).catch(err => console.error('Failed to send admin narrative email:', err));
+                }
+              }
+            }
           }
 
           await logAudit('narrative.submitted', 'narrative', narrative.id, {

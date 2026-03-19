@@ -18,7 +18,17 @@ export async function sendEmailNotification(userEmail, subject, htmlContent) {
       return { ok: false, error: 'No email address' };
     }
 
+    // Get the current session to include the auth token
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) {
+      console.warn('No active session for email notification');
+      return { ok: false, error: 'No active session' };
+    }
+
     const { data, error } = await supabase.functions.invoke('send-notification', {
+      headers: {
+        Authorization: `Bearer ${session.access_token}`,
+      },
       body: {
         to: userEmail,
         subject,

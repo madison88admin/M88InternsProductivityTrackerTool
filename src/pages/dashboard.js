@@ -103,11 +103,14 @@ async function buildInternDashboard(profile) {
   profile = getProfile();
 
   const today = getTodayDate();
+  const ninetyDaysAgo = new Date();
+  ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
+  const dateFrom = ninetyDaysAgo.toLocaleDateString('en-CA');
 
   // ── Parallel data fetch ───────────────────────────────────────────────────
   const [attTodayRes, allAttRes, allTasksRes, allNarrativesRes, notifsRes] = await Promise.all([
     supabase.from('attendance_records').select('*').eq('intern_id', profile.id).eq('date', today).maybeSingle(),
-    supabase.from('attendance_records').select('total_hours, is_late, status, date').eq('intern_id', profile.id),
+    supabase.from('attendance_records').select('total_hours, is_late, status, date').eq('intern_id', profile.id).gte('date', dateFrom),
     supabase.from('tasks').select('status, due_date, is_archived').eq('assigned_to', profile.id),
     supabase.from('narratives').select('status, date').eq('intern_id', profile.id),
     supabase.from('notifications').select('*', { count: 'exact', head: true }).eq('user_id', profile.id).eq('is_read', false),

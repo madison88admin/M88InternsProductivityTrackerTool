@@ -77,11 +77,33 @@ function getNavSections(role, profile) {
   return sections[role] || [];
 }
 
+// ─ Global notification debounce timer ─────────────────────
+let notificationCheckTimer = null;
+const NOTIFICATION_CHECK_DEBOUNCE = 1000; // 1 second
+
+// ─ Global layout cleanup handler ───────────────────────────
+let layoutCleanup = null;
+
+function cleanupLayoutListeners() {
+  if (layoutCleanup) {
+    layoutCleanup();
+    layoutCleanup = null;
+  }
+  if (notificationCheckTimer) {
+    clearTimeout(notificationCheckTimer);
+    notificationCheckTimer = null;
+  }
+}
+
 /**
  * Render the main app layout with sidebar.
  */
 export function renderLayout(contentHtml, init, guardPath) {
   if (guardPath && window.location.hash !== `#${guardPath}`) return;
+
+  // Clean up old listeners before rendering new layout
+  cleanupLayoutListeners();
+
   const role = getUserRole();
   const profile = getProfile();
   const navSections = getNavSections(role, profile);
@@ -112,7 +134,7 @@ export function renderLayout(contentHtml, init, guardPath) {
         ${navSections.map(section => `
           <div class="sidebar-section">${section.label}</div>
           ${section.items.map(item => `
-            <a href="#${item.path}" 
+            <a href="#${item.path}"
                class="sidebar-link ${currentPath === item.path ? 'active' : ''}"
                data-path="${item.path}">
               ${item.icon}
@@ -150,22 +172,23 @@ export function renderLayout(contentHtml, init, guardPath) {
     </main>
   `;
 
-  // Event bindings
+  // Event handlers with proper cleanup
   const mobileBtn = document.getElementById('mobile-menu-btn');
   const sidebar = document.getElementById('sidebar');
   const overlay = document.getElementById('sidebar-overlay');
+  const logoutBtn = document.getElementById('logout-btn');
 
-  mobileBtn?.addEventListener('click', () => {
+  const handleMobileMenuToggle = () => {
     sidebar.classList.toggle('-translate-x-full');
     overlay.classList.toggle('hidden');
-  });
+  };
 
-  overlay?.addEventListener('click', () => {
+  const handleOverlayClick = () => {
     sidebar.classList.add('-translate-x-full');
     overlay.classList.add('hidden');
-  });
+  };
 
-  sidebar?.addEventListener('click', (e) => {
+  const handleSidebarNavigation = (e) => {
     const link = e.target.closest('a[href^="#"]');
     if (link) {
       e.preventDefault();
@@ -178,9 +201,9 @@ export function renderLayout(contentHtml, init, guardPath) {
         window.location.reload();
       }
     }
-  });
+  };
 
-  document.getElementById('logout-btn')?.addEventListener('click', async (e) => {
+  const handleLogout = async (e) => {
     const btn = e.currentTarget;
     if (btn.disabled) return;
     btn.disabled = true;
@@ -192,24 +215,44 @@ export function renderLayout(contentHtml, init, guardPath) {
       showToast('Failed to sign out', 'error');
       btn.disabled = false;
     }
-  });
+  };
+
+  // Attach event listeners
+  mobileBtn?.addEventListener('click', handleMobileMenuToggle);
+  overlay?.addEventListener('click', handleOverlayClick);
+  sidebar?.addEventListener('click', handleSidebarNavigation);
+  logoutBtn?.addEventListener('click', handleLogout);
+
+  // Store cleanup function
+  layoutCleanup = () => {
+    mobileBtn?.removeEventListener('click', handleMobileMenuToggle);
+    overlay?.removeEventListener('click', handleOverlayClick);
+    sidebar?.removeEventListener('click', handleSidebarNavigation);
+    logoutBtn?.removeEventListener('click', handleLogout);
+  };
 
   if (init) {
     requestAnimationFrame(() => init(document.getElementById('page-content')));
   }
 
-  // Show red dot on Notifications link if there are unread notifications
+  // Debounced notification check: only run once per second max
   const notifDot = document.getElementById('notif-dot');
   if (notifDot && profile?.id) {
-    supabase
-      .from('notifications')
-      .select('id', { count: 'exact', head: true })
-      .eq('user_id', profile.id)
-      .eq('is_read', false)
-      .then(({ count }) => {
-        if (count && count > 0) {
+    if (notificationCheckTimer) clearTimeout(notificationCheckTimer);
+    notificationCheckTimer = setTimeout(async () => {
+      try {
+        const { count } = await supabase
+          .from('notifications')
+          .select('id', { count: 'exact', head: true })
+          .eq('user_id', profile.id)
+          .eq('is_read', false);
+        if (count && count > 0 && notifDot) {
           notifDot.classList.remove('hidden');
         }
-      });
+      } catch (err) {
+        console.error('Failed to fetch notification count:', err);
+      }
+      notificationCheckTimer = null;
+    }, NOTIFICATION_CHECK_DEBOUNCE);
   }
 }

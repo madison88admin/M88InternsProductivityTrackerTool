@@ -12,13 +12,32 @@ import { formatDate, renderAvatar } from '../lib/utils.js';
 import { createModal, confirmDialog } from '../lib/component.js';
 import { openOjtCompletionModal } from '../lib/ojt-completion.js';
 
+const USERS_PER_PAGE = 50;
+
 export async function renderUserManagementPage() {
   const profile = getProfile();
+  let currentPage = 1;
+  let totalUsers = 0;
+  let allUsers = [];
 
-  const { data: users } = await supabase
+  // Fetch total count of users
+  const { count: totalCount } = await supabase
     .from('profiles')
-    .select('*, departments(name), locations(name)')
-    .order('created_at', { ascending: false });
+    .select('id', { count: 'exact', head: true });
+  totalUsers = totalCount || 0;
+
+  // Fetch initial page of users
+  async function fetchUsersPage(page) {
+    const offset = (page - 1) * USERS_PER_PAGE;
+    const { data: users } = await supabase
+      .from('profiles')
+      .select('*, departments(name), locations(name)')
+      .order('created_at', { ascending: false })
+      .range(offset, offset + USERS_PER_PAGE - 1);
+    return users || [];
+  }
+
+  allUsers = await fetchUsersPage(currentPage);
 
   const { data: departments } = await supabase.from('departments').select('id, name').eq('is_active', true);
   const { data: locations } = await supabase.from('locations').select('id, name').eq('is_active', true);
@@ -29,106 +48,137 @@ export async function renderUserManagementPage() {
     .eq('is_active', true)
     .order('full_name');
 
-  renderLayout(`
-    <div class="flex items-center justify-between page-header animate-fade-in-up">
-      <div>
-        <h1 class="page-title">User Maintenance</h1>
-        <p class="page-subtitle">Manage system users and accounts</p>
+  const totalPages = Math.ceil(totalUsers / USERS_PER_PAGE);
+
+  async function renderPage() {
+    allUsers = await fetchUsersPage(currentPage);
+    const startNum = (currentPage - 1) * USERS_PER_PAGE + 1;
+    const endNum = Math.min(currentPage * USERS_PER_PAGE, totalUsers);
+
+    const html = `
+      <div class="flex items-center justify-between page-header animate-fade-in-up">
+        <div>
+          <h1 class="page-title">User Maintenance</h1>
+          <p class="page-subtitle">Manage system users and accounts</p>
+        </div>
+        <button id="invite-user-btn" class="btn-primary">
+          ${icons.plus}
+          <span class="ml-2">Invite User</span>
+        </button>
       </div>
-      <button id="invite-user-btn" class="btn-primary">
-        ${icons.plus}
-        <span class="ml-2">Invite User</span>
-      </button>
-    </div>
 
-    <!-- Filters -->
-    <div class="flex flex-wrap gap-2 mb-6">
-      <select id="filter-role" class="form-input w-auto">
-        <option value="">All Roles</option>
-        <option value="admin">Admin</option>
-        <option value="supervisor">Supervisor</option>
-        <option value="intern">Intern</option>
-      </select>
-      <select id="filter-status" class="form-input w-auto">
-        <option value="">All Status</option>
-        <option value="active">Active</option>
-        <option value="inactive">Inactive</option>
-      </select>
-      <input type="text" id="filter-search" class="form-input w-auto" placeholder="Search by name or email..." />
-    </div>
+      <!-- Filters -->
+      <div class="flex flex-wrap gap-2 mb-6">
+        <select id="filter-role" class="form-input w-auto">
+          <option value="">All Roles</option>
+          <option value="admin">Admin</option>
+          <option value="supervisor">Supervisor</option>
+          <option value="intern">Intern</option>
+        </select>
+        <select id="filter-status" class="form-input w-auto">
+          <option value="">All Status</option>
+          <option value="active">Active</option>
+          <option value="inactive">Inactive</option>
+        </select>
+        <input type="text" id="filter-search" class="form-input w-auto" placeholder="Search by name or email..." />
+      </div>
 
-    <!-- Users Table -->
-    <div class="card">
-      <div class="overflow-x-auto">
-        <table class="data-table" id="users-table">
-          <thead>
-            <tr>
-              <th>User</th>
-              <th>Role</th>
-              <th>Department</th>
-              <th>Location</th>
-              <th>Status</th>
-              <th>Created</th>
-              <th>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${(users || []).map(user => `
-              <tr data-role="${user.role}" data-active="${user.is_active}" data-name="${(user.full_name || '').toLowerCase()}" data-email="${(user.email || '').toLowerCase()}">
-                <td>
-                  <div class="flex items-center gap-3">
-                    ${renderAvatar(user, 'w-8 h-8', 'text-sm')}
-                    <div>
-                      <p class="font-medium">${user.full_name || 'Unknown'}</p>
-                      <p class="text-xs text-neutral-400">${user.email}</p>
-                    </div>
-                  </div>
-                </td>
-                <td><span class="badge-info capitalize">${user.role}</span></td>
-                <td>${user.departments?.name || '—'}</td>
-                <td>${user.locations?.name || '—'}</td>
-                <td>
-                  <div class="flex flex-col gap-1 items-start">
-                    <span class="badge-${user.is_active ? 'approved' : 'rejected'}">
-                      ${user.is_active ? 'Active' : 'Inactive'}
-                    </span>
-                    ${user.role === 'intern' && user.is_voluntary ? `<span class="badge-info">Voluntary</span>` : ''}
-                  </div>
-                </td>
-                <td>${formatDate(user.created_at)}</td>
-                <td>
-                  <div class="flex gap-1">
-                    <button class="btn-sm btn-secondary edit-user-btn" data-user-id="${user.id}" title="Edit">
-                      ${icons.edit}
-                    </button>
-                    ${user.role === 'intern' && user.is_active && (user.hours_required || 0) > 0 && (user.hours_rendered || 0) >= user.hours_required ? `
-                    <button class="btn-sm btn-primary ojt-review-btn" data-user-id="${user.id}" title="Review OJT Completion">
-                      ${icons.approval}
-                    </button>` : ''}
-                    <button class="btn-sm ${user.is_active ? 'btn-warning' : 'btn-success'} toggle-user-btn"
-                            data-user-id="${user.id}" data-active="${user.is_active}"
-                            title="${user.is_active ? 'Deactivate' : 'Activate'}"
-                            ${user.id === profile.id ? 'disabled' : ''}>
-                      ${user.is_active ? icons.x : icons.check}
-                    </button>
-                  </div>
-                </td>
+      <!-- Users Table -->
+      <div class="card">
+        <div class="overflow-x-auto">
+          <table class="data-table" id="users-table">
+            <thead>
+              <tr>
+                <th>User</th>
+                <th>Role</th>
+                <th>Department</th>
+                <th>Location</th>
+                <th>Status</th>
+                <th>Created</th>
+                <th>Actions</th>
               </tr>
-            `).join('')}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              ${(allUsers || []).map(user => `
+                <tr data-role="${user.role}" data-active="${user.is_active}" data-name="${(user.full_name || '').toLowerCase()}" data-email="${(user.email || '').toLowerCase()}">
+                  <td>
+                    <div class="flex items-center gap-3">
+                      ${renderAvatar(user, 'w-8 h-8', 'text-sm')}
+                      <div>
+                        <p class="font-medium">${user.full_name || 'Unknown'}</p>
+                        <p class="text-xs text-neutral-400">${user.email}</p>
+                      </div>
+                    </div>
+                  </td>
+                  <td><span class="badge-info capitalize">${user.role}</span></td>
+                  <td>${user.departments?.name || '—'}</td>
+                  <td>${user.locations?.name || '—'}</td>
+                  <td>
+                    <div class="flex flex-col gap-1 items-start">
+                      <span class="badge-${user.is_active ? 'approved' : 'rejected'}">
+                        ${user.is_active ? 'Active' : 'Inactive'}
+                      </span>
+                      ${user.role === 'intern' && user.is_voluntary ? `<span class="badge-info">Voluntary</span>` : ''}
+                    </div>
+                  </td>
+                  <td>${formatDate(user.created_at)}</td>
+                  <td>
+                    <div class="flex gap-1">
+                      <button class="btn-sm btn-secondary edit-user-btn" data-user-id="${user.id}" title="Edit">
+                        ${icons.edit}
+                      </button>
+                      ${user.role === 'intern' && user.is_active && (user.hours_required || 0) > 0 && (user.hours_rendered || 0) >= user.hours_required ? `
+                      <button class="btn-sm btn-primary ojt-review-btn" data-user-id="${user.id}" title="Review OJT Completion">
+                        ${icons.approval}
+                      </button>` : ''}
+                      <button class="btn-sm ${user.is_active ? 'btn-warning' : 'btn-success'} toggle-user-btn"
+                              data-user-id="${user.id}" data-active="${user.is_active}"
+                              title="${user.is_active ? 'Deactivate' : 'Activate'}"
+                              ${user.id === profile.id ? 'disabled' : ''}>
+                        ${user.is_active ? icons.x : icons.check}
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
       </div>
-    </div>
-  `, (el) => {
+
+      <!-- Pagination -->
+      <div class="flex items-center justify-between mt-6">
+        <p class="text-sm text-neutral-600">Showing ${startNum}–${endNum} of ${totalUsers} users</p>
+        <div class="flex gap-2">
+          <button id="prev-page" class="btn-secondary" ${currentPage === 1 ? 'disabled' : ''}>← Previous</button>
+          <div class="flex items-center gap-2">
+            <p class="text-sm text-neutral-600">Page <strong>${currentPage}</strong> of <strong>${totalPages}</strong></p>
+          </div>
+          <button id="next-page" class="btn-secondary" ${currentPage === totalPages ? 'disabled' : ''}>Next →</button>
+        </div>
+      </div>
+    `;
+
+    const app = document.getElementById('app');
+    const pageContent = app.querySelector('#page-content');
+    if (pageContent) {
+      pageContent.innerHTML = html;
+      setupEventListeners();
+    }
+  }
+
+  function setupEventListeners() {
+    const el = document.getElementById('page-content');
+
     // Invite user
-    el.querySelector('#invite-user-btn').addEventListener('click', () => {
+    el.querySelector('#invite-user-btn')?.addEventListener('click', () => {
       openInviteModal(departments, locations, supervisors);
     });
 
     // Edit user
     el.querySelectorAll('.edit-user-btn').forEach(btn => {
       btn.addEventListener('click', () => {
-        const user = users.find(u => u.id === btn.dataset.userId);
+        const user = allUsers.find(u => u.id === btn.dataset.userId);
         if (user) openEditUserModal(user, departments, locations, supervisors);
       });
     });
@@ -145,9 +195,8 @@ export async function renderUserManagementPage() {
       btn.addEventListener('click', async () => {
         const userId = btn.dataset.userId;
         const isActive = btn.dataset.active === 'true';
-        const user = users.find(u => u.id === userId);
+        const user = allUsers.find(u => u.id === userId);
 
-        // If activating, proceed directly
         if (!isActive) {
           confirmDialog(
             `Are you sure you want to activate ${user?.full_name}?`,
@@ -156,7 +205,8 @@ export async function renderUserManagementPage() {
                 await supabase.from('profiles').update({ is_active: true }).eq('id', userId);
                 await logAudit('user.activated', 'user', userId);
                 showToast(`User activated`, 'success');
-                renderUserManagementPage();
+                currentPage = 1;
+                await renderPage();
               } catch (err) {
                 showToast('Failed to update user', 'error');
               }
@@ -166,10 +216,8 @@ export async function renderUserManagementPage() {
           return;
         }
 
-        // If deactivating, validate based on role
         try {
           if (user.role === 'supervisor') {
-            // Check for assigned interns
             const { data: assignedInterns, error: internError } = await supabase
               .from('profiles')
               .select('id, full_name')
@@ -187,7 +235,6 @@ export async function renderUserManagementPage() {
               return;
             }
           } else if (user.role === 'intern') {
-            // Check for assigned or in-progress tasks
             const { data: activeTasks, error: taskError } = await supabase
               .from('tasks')
               .select('id, title, status')
@@ -208,7 +255,6 @@ export async function renderUserManagementPage() {
             }
           }
 
-          // Validation passed, proceed with deactivation
           confirmDialog(
             `Are you sure you want to deactivate ${user?.full_name}?`,
             async () => {
@@ -216,7 +262,7 @@ export async function renderUserManagementPage() {
                 await supabase.from('profiles').update({ is_active: false }).eq('id', userId);
                 await logAudit('user.deactivated', 'user', userId);
                 showToast(`User deactivated`, 'success');
-                renderUserManagementPage();
+                await renderPage();
               } catch (err) {
                 showToast('Failed to update user', 'error');
               }
@@ -227,6 +273,24 @@ export async function renderUserManagementPage() {
           showToast('Failed to validate deactivation', 'error');
         }
       });
+    });
+
+    // Pagination
+    const prevBtn = el.querySelector('#prev-page');
+    const nextBtn = el.querySelector('#next-page');
+
+    prevBtn?.addEventListener('click', async () => {
+      if (currentPage > 1) {
+        currentPage--;
+        await renderPage();
+      }
+    });
+
+    nextBtn?.addEventListener('click', async () => {
+      if (currentPage < totalPages) {
+        currentPage++;
+        await renderPage();
+      }
     });
 
     // Filters
@@ -250,7 +314,9 @@ export async function renderUserManagementPage() {
     filterRole.addEventListener('change', applyFilters);
     filterStatus.addEventListener('change', applyFilters);
     filterSearch.addEventListener('input', applyFilters);
-  }, '/user-management');
+  }
+
+  renderLayout('', () => renderPage(), '/user-management');
 }
 
 /**

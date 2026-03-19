@@ -35,14 +35,18 @@ export async function renderAttendanceOverviewPage() {
 
     if (dateFrom) query = query.gte('date', dateFrom);
     if (dateTo) query = query.lte('date', dateTo);
-
     if (statusFilter) query = query.eq('status', statusFilter);
 
     const { data } = await query;
     let records = data || [];
 
-    if (departmentFilter) {
-      records = records.filter(r => r.intern?.department_id === departmentFilter);
+    // Client-side search only (text search can't be done server-side efficiently)
+    if (searchQuery) {
+      const lowerSearch = searchQuery.toLowerCase();
+      records = records.filter(r =>
+        r.intern?.full_name?.toLowerCase().includes(lowerSearch) ||
+        r.intern?.email?.toLowerCase().includes(lowerSearch)
+      );
     }
 
     return records;

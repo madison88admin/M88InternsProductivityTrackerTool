@@ -11,6 +11,7 @@ import { icons } from '../lib/icons.js';
 import { formatDate, formatTime, formatHoursDisplay, getPublicIP, isLateArrival, isOutsideAllowedHours } from '../lib/utils.js';
 import { createModal } from '../lib/component.js';
 import { isHoliday } from '../lib/holidays.js';
+import { sendEmailNotification } from '../lib/email-notifications.js';
 
 const PH_TIMEZONE = 'Asia/Manila';
 let phMidnightRefreshTimer = null;
@@ -109,7 +110,7 @@ export async function renderAttendancePage() {
     .select('*')
     .eq('intern_id', profile.id)
     .order('date', { ascending: false })
-    .limit(10);
+    .limit(30);
 
   const { data: weekRecords } = await supabase
     .from('attendance_records')
@@ -152,6 +153,48 @@ export async function renderAttendancePage() {
           entity_type: 'attendance',
           entity_id: todayRecord.id,
         });
+
+        // Send email notification to supervisor
+        const { data: supervisor } = await supabase
+          .from('profiles')
+          .select('full_name, email')
+          .eq('id', profile.supervisor_id)
+          .single();
+
+        if (supervisor?.email) {
+          const emailHtml = `
+            <!DOCTYPE html>
+            <html>
+              <head>
+                <style>
+                  body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+                  .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+                  .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px; border-radius: 5px 5px 0 0; }
+                  .content { background: #f9f9f9; padding: 20px; border: 1px solid #ddd; border-radius: 0 0 5px 5px; }
+                  .badge { display: inline-block; background: #f59e0b; color: white; padding: 6px 12px; border-radius: 4px; font-weight: bold; font-size: 12px; }
+                  .footer { margin-top: 20px; padding-top: 20px; border-top: 1px solid #ddd; font-size: 12px; color: #666; }
+                </style>
+              </head>
+              <body>
+                <div class="container">
+                  <div class="header">
+                    <h1>Attendance Pending Review</h1>
+                  </div>
+                  <div class="content">
+                    <p><strong>${profile.full_name}</strong> has submitted attendance for <strong>${formatDate(today)}</strong> <span class="badge">AUTO-SUBMITTED</span></p>
+                    <p>The attendance was auto-submitted at end of day due to incomplete punches. Please review and approve or reject.</p>
+                    <p><a href="${window.location.origin}/#/approvals" style="background: #667eea; color: white; padding: 10px 20px; text-decoration: none; border-radius: 4px; display: inline-block; margin-top: 10px;">View in System</a></p>
+                  </div>
+                  <div class="footer">
+                    <p>This is an automated notification. Please do not reply to this email.</p>
+                  </div>
+                </div>
+              </body>
+            </html>
+          `;
+          await sendEmailNotification(supervisor.email, 'Attendance Auto-Submitted - Review Required', emailHtml).catch(err => console.error('Failed to send attendance email:', err));
+        }
+
 
         await logAudit('attendance.auto_submitted', 'attendance', todayRecord.id, {
           reason: 'End of day cutoff reached (7:30 PM)',
@@ -389,6 +432,47 @@ export async function renderAttendancePage() {
               entity_type: 'attendance',
               entity_id: todayRecord.id,
             });
+
+            // Send email notification to supervisor
+            const { data: supervisor } = await supabase
+              .from('profiles')
+              .select('full_name, email')
+              .eq('id', profile.supervisor_id)
+              .single();
+
+            if (supervisor?.email) {
+              const emailHtml = `
+                <!DOCTYPE html>
+                <html>
+                  <head>
+                    <style>
+                      body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+                      .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+                      .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px; border-radius: 5px 5px 0 0; }
+                      .content { background: #f9f9f9; padding: 20px; border: 1px solid #ddd; border-radius: 0 0 5px 5px; }
+                      .badge { display: inline-block; background: #10b981; color: white; padding: 6px 12px; border-radius: 4px; font-weight: bold; font-size: 12px; }
+                      .footer { margin-top: 20px; padding-top: 20px; border-top: 1px solid #ddd; font-size: 12px; color: #666; }
+                    </style>
+                  </head>
+                  <body>
+                    <div class="container">
+                      <div class="header">
+                        <h1>Attendance Pending Review</h1>
+                      </div>
+                      <div class="content">
+                        <p><strong>${profile.full_name}</strong> has completed attendance for <strong>${formatDate(today)}</strong> <span class="badge">PENDING</span></p>
+                        <p>All punches have been recorded and are awaiting your review and approval.</p>
+                        <p><a href="${window.location.origin}/#/approvals" style="background: #667eea; color: white; padding: 10px 20px; text-decoration: none; border-radius: 4px; display: inline-block; margin-top: 10px;">View in System</a></p>
+                      </div>
+                      <div class="footer">
+                        <p>This is an automated notification. Please do not reply to this email.</p>
+                      </div>
+                    </div>
+                  </body>
+                </html>
+              `;
+              await sendEmailNotification(supervisor.email, 'Attendance Pending Review', emailHtml).catch(err => console.error('Failed to send attendance email:', err));
+            }
           }
 
           // Re-render the page

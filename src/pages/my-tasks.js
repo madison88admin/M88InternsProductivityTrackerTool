@@ -11,6 +11,7 @@ import { icons } from '../lib/icons.js';
 import { formatDate, getTodayDate } from '../lib/utils.js';
 import { createModal } from '../lib/component.js';
 import { isHoliday } from '../lib/holidays.js';
+import { sendEmailNotification } from '../lib/email-notifications.js';
 
 export async function renderMyTasksPage() {
   const profile = getProfile();
@@ -242,6 +243,48 @@ export async function renderMyTasksPage() {
                 entity_type: 'task',
                 entity_id: newTask.id,
               });
+
+              // Send email notification to supervisor
+              const { data: supervisor } = await supabase
+                .from('profiles')
+                .select('full_name, email')
+                .eq('id', profile.supervisor_id)
+                .single();
+
+              if (supervisor?.email) {
+                const emailHtml = `
+                  <!DOCTYPE html>
+                  <html>
+                    <head>
+                      <style>
+                        body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+                        .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+                        .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px; border-radius: 5px 5px 0 0; }
+                        .content { background: #f9f9f9; padding: 20px; border: 1px solid #ddd; border-radius: 0 0 5px 5px; }
+                        .task-title { background: white; border-left: 4px solid #667eea; padding: 12px; margin: 15px 0; border-radius: 4px; font-weight: bold; }
+                        .footer { margin-top: 20px; padding-top: 20px; border-top: 1px solid #ddd; font-size: 12px; color: #666; }
+                      </style>
+                    </head>
+                    <body>
+                      <div class="container">
+                        <div class="header">
+                          <h1>Task Submission for Review</h1>
+                        </div>
+                        <div class="content">
+                          <p><strong>${profile.full_name}</strong> submitted a task for your review:</p>
+                          <div class="task-title">${title}</div>
+                          <p>Please review and approve or reject the submission.</p>
+                          <p><a href="${window.location.origin}/#/approvals" style="background: #667eea; color: white; padding: 10px 20px; text-decoration: none; border-radius: 4px; display: inline-block; margin-top: 10px;">View in System</a></p>
+                        </div>
+                        <div class="footer">
+                          <p>This is an automated notification. Please do not reply to this email.</p>
+                        </div>
+                      </div>
+                    </body>
+                  </html>
+                `;
+                await sendEmailNotification(supervisor.email, `Task Submission for Review - ${title}`, emailHtml).catch(err => console.error('Failed to send task email:', err));
+              }
             }
 
             await logAudit('task.self_submitted', 'task', newTask.id, { title });
@@ -295,12 +338,53 @@ export async function renderMyTasksPage() {
 
             if (profile.supervisor_id) {
               await supabase.from('notifications').insert({ user_id: profile.supervisor_id, ...taskStartNotif });
+
+              // Send email notification to supervisor
+              const { data: supervisor } = await supabase
+                .from('profiles')
+                .select('full_name, email')
+                .eq('id', profile.supervisor_id)
+                .single();
+
+              if (supervisor?.email) {
+                const emailHtml = `
+                  <!DOCTYPE html>
+                  <html>
+                    <head>
+                      <style>
+                        body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+                        .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+                        .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px; border-radius: 5px 5px 0 0; }
+                        .content { background: #f9f9f9; padding: 20px; border: 1px solid #ddd; border-radius: 0 0 5px 5px; }
+                        .badge { display: inline-block; background: #10b981; color: white; padding: 6px 12px; border-radius: 4px; font-weight: bold; font-size: 12px; }
+                        .footer { margin-top: 20px; padding-top: 20px; border-top: 1px solid #ddd; font-size: 12px; color: #666; }
+                      </style>
+                    </head>
+                    <body>
+                      <div class="container">
+                        <div class="header">
+                          <h1>Task In Progress</h1>
+                        </div>
+                        <div class="content">
+                          <p><strong>${profile.full_name}</strong> has started working on a task <span class="badge">IN PROGRESS</span></p>
+                          <p><strong>Task:</strong> ${taskData?.title || 'A task'}</p>
+                          <p><a href="${window.location.origin}/#/task-management" style="background: #667eea; color: white; padding: 10px 20px; text-decoration: none; border-radius: 4px; display: inline-block; margin-top: 10px;">View in System</a></p>
+                        </div>
+                        <div class="footer">
+                          <p>This is an automated notification. Please do not reply to this email.</p>
+                        </div>
+                      </div>
+                    </body>
+                  </html>
+                `;
+                await sendEmailNotification(supervisor.email, `Task In Progress - ${taskData?.title || 'A task'}`, emailHtml).catch(err => console.error('Failed to send task email:', err));
+              }
             }
 
             // Also notify all active admins
             const { data: admins } = await supabase
               .from('profiles')
-              .select('id')
+              .select('id, email, full_name')
               .eq('role', 'admin')
               .eq('is_active', true);
 
@@ -309,6 +393,44 @@ export async function renderMyTasksPage() {
                 .filter(a => a.id !== profile.supervisor_id)
                 .map(a => ({ user_id: a.id, ...taskStartNotif }));
               if (adminNotifs.length > 0) await supabase.from('notifications').insert(adminNotifs);
+
+              // Send email to all other admins
+              const otherAdmins = admins.filter(a => a.id !== profile.supervisor_id);
+              for (const admin of otherAdmins) {
+                if (admin.email) {
+                  const adminEmailHtml = `
+                    <!DOCTYPE html>
+                    <html>
+                      <head>
+                        <style>
+                          body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+                          .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+                          .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px; border-radius: 5px 5px 0 0; }
+                          .content { background: #f9f9f9; padding: 20px; border: 1px solid #ddd; border-radius: 0 0 5px 5px; }
+                          .badge { display: inline-block; background: #10b981; color: white; padding: 6px 12px; border-radius: 4px; font-weight: bold; font-size: 12px; }
+                          .footer { margin-top: 20px; padding-top: 20px; border-top: 1px solid #ddd; font-size: 12px; color: #666; }
+                        </style>
+                      </head>
+                      <body>
+                        <div class="container">
+                          <div class="header">
+                            <h1>Task In Progress</h1>
+                          </div>
+                          <div class="content">
+                            <p><strong>${profile.full_name}</strong> has started working on a task <span class="badge">IN PROGRESS</span></p>
+                            <p><strong>Task:</strong> ${taskData?.title || 'A task'}</p>
+                            <p><a href="${window.location.origin}/#/task-management" style="background: #667eea; color: white; padding: 10px 20px; text-decoration: none; border-radius: 4px; display: inline-block; margin-top: 10px;">View in System</a></p>
+                          </div>
+                          <div class="footer">
+                            <p>This is an automated notification. Please do not reply to this email.</p>
+                          </div>
+                        </div>
+                      </body>
+                    </html>
+                  `;
+                  await sendEmailNotification(admin.email, `Task In Progress - ${taskData?.title || 'A task'}`, adminEmailHtml).catch(err => console.error('Failed to send admin task email:', err));
+                }
+              }
             }
 
             await logAudit('task.started', 'task', taskId, { status: 'in_progress' });
@@ -342,12 +464,60 @@ export async function renderMyTasksPage() {
 
             if (profile.supervisor_id) {
               await supabase.from('notifications').insert({ user_id: profile.supervisor_id, ...taskCompleteNotif });
+
+              // Send email notification to supervisor
+              const { data: task } = await supabase
+                .from('tasks')
+                .select('title')
+                .eq('id', taskId)
+                .single();
+
+              const { data: supervisor } = await supabase
+                .from('profiles')
+                .select('full_name, email')
+                .eq('id', profile.supervisor_id)
+                .single();
+
+              if (supervisor?.email) {
+                const emailHtml = `
+                  <!DOCTYPE html>
+                  <html>
+                    <head>
+                      <style>
+                        body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+                        .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+                        .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px; border-radius: 5px 5px 0 0; }
+                        .content { background: #f9f9f9; padding: 20px; border: 1px solid #ddd; border-radius: 0 0 5px 5px; }
+                        .badge { display: inline-block; background: #f59e0b; color: white; padding: 6px 12px; border-radius: 4px; font-weight: bold; font-size: 12px; margin-left: 8px; }
+                        .footer { margin-top: 20px; padding-top: 20px; border-top: 1px solid #ddd; font-size: 12px; color: #666; }
+                      </style>
+                    </head>
+                    <body>
+                      <div class="container">
+                        <div class="header">
+                          <h1>Task Status Change Request</h1>
+                        </div>
+                        <div class="content">
+                          <p><strong>${profile.full_name}</strong> is requesting to change task status to <strong>"${newStatus.replace('_', ' ')}"</strong> <span class="badge">PENDING APPROVAL</span></p>
+                          <p><strong>Task:</strong> ${task?.title || 'A task'}</p>
+                          <p>Please review and approve or reject this status change request.</p>
+                          <p><a href="${window.location.origin}/#/approvals" style="background: #667eea; color: white; padding: 10px 20px; text-decoration: none; border-radius: 4px; display: inline-block; margin-top: 10px;">View in System</a></p>
+                        </div>
+                        <div class="footer">
+                          <p>This is an automated notification. Please do not reply to this email.</p>
+                        </div>
+                      </div>
+                    </body>
+                  </html>
+                `;
+                await sendEmailNotification(supervisor.email, `Task Status Change Request - ${task?.title || 'A task'}`, emailHtml).catch(err => console.error('Failed to send task email:', err));
+              }
             }
 
             // Also notify all active admins
             const { data: admins } = await supabase
               .from('profiles')
-              .select('id')
+              .select('id, email, full_name')
               .eq('role', 'admin')
               .eq('is_active', true);
 
@@ -356,6 +526,45 @@ export async function renderMyTasksPage() {
                 .filter(a => a.id !== profile.supervisor_id)
                 .map(a => ({ user_id: a.id, ...taskCompleteNotif }));
               if (adminNotifs.length > 0) await supabase.from('notifications').insert(adminNotifs);
+
+              // Send email to all other admins
+              const otherAdmins = admins.filter(a => a.id !== profile.supervisor_id);
+              for (const admin of otherAdmins) {
+                if (admin.email) {
+                  const adminEmailHtml = `
+                    <!DOCTYPE html>
+                    <html>
+                      <head>
+                        <style>
+                          body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+                          .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+                          .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px; border-radius: 5px 5px 0 0; }
+                          .content { background: #f9f9f9; padding: 20px; border: 1px solid #ddd; border-radius: 0 0 5px 5px; }
+                          .badge { display: inline-block; background: #f59e0b; color: white; padding: 6px 12px; border-radius: 4px; font-weight: bold; font-size: 12px; margin-left: 8px; }
+                          .footer { margin-top: 20px; padding-top: 20px; border-top: 1px solid #ddd; font-size: 12px; color: #666; }
+                        </style>
+                      </head>
+                      <body>
+                        <div class="container">
+                          <div class="header">
+                            <h1>Task Status Change Request</h1>
+                          </div>
+                          <div class="content">
+                            <p><strong>${profile.full_name}</strong> is requesting to change task status to <strong>"${newStatus.replace('_', ' ')}"</strong> <span class="badge">PENDING APPROVAL</span></p>
+                            <p><strong>Task:</strong> ${task?.title || 'A task'}</p>
+                            <p>Please review and approve or reject this status change request.</p>
+                            <p><a href="${window.location.origin}/#/approvals" style="background: #667eea; color: white; padding: 10px 20px; text-decoration: none; border-radius: 4px; display: inline-block; margin-top: 10px;">View in System</a></p>
+                          </div>
+                          <div class="footer">
+                            <p>This is an automated notification. Please do not reply to this email.</p>
+                          </div>
+                        </div>
+                      </body>
+                    </html>
+                  `;
+                  await sendEmailNotification(admin.email, `Task Status Change Request - ${task?.title || 'A task'}`, adminEmailHtml).catch(err => console.error('Failed to send admin task email:', err));
+                }
+              }
             }
 
             await logAudit('task.status_change_requested', 'task', taskId, { requested_status: newStatus });

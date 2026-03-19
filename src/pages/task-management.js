@@ -10,6 +10,7 @@ import { logAudit } from '../lib/audit.js';
 import { icons } from '../lib/icons.js';
 import { formatDate, renderAvatar, getTodayDate } from '../lib/utils.js';
 import { createModal } from '../lib/component.js';
+import { sendEmailNotification, getTaskAssignmentTemplate } from '../lib/email-notifications.js';
 
 export async function renderTaskManagementPage() {
   const profile = getProfile();
@@ -170,6 +171,9 @@ export async function renderTaskManagementPage() {
       </div>
     </div>
   `, (el) => {
+    // Build task Map for O(1) lookups instead of O(n) linear searches
+    const taskMap = new Map((tasks || []).map(t => [t.id, t]));
+
     if (canManageTasks) {
       el.querySelector('#create-task-btn')?.addEventListener('click', () => {
         openCreateTaskModal(interns, profile);
@@ -178,7 +182,7 @@ export async function renderTaskManagementPage() {
       // View task buttons (available for all tasks)
       el.querySelectorAll('.view-task-btn').forEach(btn => {
         btn.addEventListener('click', () => {
-          const task = tasks.find(t => t.id === btn.dataset.taskId);
+          const task = taskMap.get(btn.dataset.taskId);
           if (task) openViewTaskModal(task);
         });
       });
@@ -186,7 +190,7 @@ export async function renderTaskManagementPage() {
       // Edit task buttons (only rendered for tasks created by this user)
       el.querySelectorAll('.edit-task-btn').forEach(btn => {
         btn.addEventListener('click', () => {
-          const task = tasks.find(t => t.id === btn.dataset.taskId);
+          const task = taskMap.get(btn.dataset.taskId);
           if (task) openEditTaskModal(task, interns, profile);
         });
       });
@@ -194,7 +198,7 @@ export async function renderTaskManagementPage() {
       // Archive task buttons
       el.querySelectorAll('.archive-task-btn').forEach(btn => {
         btn.addEventListener('click', () => {
-          const task = tasks.find(t => t.id === btn.dataset.taskId);
+          const task = taskMap.get(btn.dataset.taskId);
           if (task) confirmArchiveTask(task);
         });
       });
@@ -432,7 +436,7 @@ function openCreateTaskModal(interns, profile) {
 
         if (error) throw error;
 
-        // Notify intern
+        // Notify intern via in-app notification
         await supabase.from('notifications').insert({
           user_id: assignedTo,
           type: 'system',
@@ -441,6 +445,22 @@ function openCreateTaskModal(interns, profile) {
           entity_type: 'task',
           entity_id: data.id,
         });
+
+        // Send email notification to intern (non-blocking)
+        const { data: intern } = await supabase
+          .from('profiles')
+          .select('full_name, email')
+          .eq('id', assignedTo)
+          .single();
+
+        if (intern?.email) {
+          const emailHtml = getTaskAssignmentTemplate(title, description || '');
+          sendEmailNotification(
+            intern.email,
+            `New Task Assigned - ${title}`,
+            emailHtml
+          ).catch(err => console.error('Failed to send task assignment email:', err));
+        }
 
         await logAudit('task.created', 'task', data.id, { title, assigned_to: assignedTo });
         showToast('Task created successfully', 'success');
@@ -501,20 +521,54 @@ function openEditTaskModal(task, interns, profile) {
       submitBtn.textContent = 'Saving...';
 
       try {
+        const newTitle = el.querySelector('#task-title').value.trim();
+        const newDescription = el.querySelector('#task-description').value.trim() || null;
+        const newAssignedTo = el.querySelector('#task-intern').value;
+        const newEstimatedHours = el.querySelector('#task-hours').value ? parseFloat(el.querySelector('#task-hours').value) : null;
+        const newDueDate = el.querySelector('#task-due').value || null;
+
         const { error } = await supabase
           .from('tasks')
           .update({
-            title: el.querySelector('#task-title').value.trim(),
-            description: el.querySelector('#task-description').value.trim() || null,
-            assigned_to: el.querySelector('#task-intern').value,
-            estimated_hours: el.querySelector('#task-hours').value ? parseFloat(el.querySelector('#task-hours').value) : null,
-            due_date: el.querySelector('#task-due').value || null,
+            title: newTitle,
+            description: newDescription,
+            assigned_to: newAssignedTo,
+            estimated_hours: newEstimatedHours,
+            due_date: newDueDate,
           })
           .eq('id', task.id);
 
         if (error) throw error;
 
-        await logAudit('task.updated', 'task', task.id, { title: el.querySelector('#task-title').value });
+        // If the intern was reassigned, notify the new intern
+        if (newAssignedTo !== task.assigned_to) {
+          const { data: newIntern } = await supabase
+            .from('profiles')
+            .select('full_name, email')
+            .eq('id', newAssignedTo)
+            .single();
+
+          if (newIntern?.email) {
+            const emailHtml = getTaskAssignmentTemplate(newTitle, newDescription || '');
+            sendEmailNotification(
+              newIntern.email,
+              `New Task Assigned - ${newTitle}`,
+              emailHtml
+            ).catch(err => console.error('Failed to send task assignment email:', err));
+          }
+
+          // Also send in-app notification to new intern
+          await supabase.from('notifications').insert({
+            user_id: newAssignedTo,
+            type: 'system',
+            title: 'New Task Assigned',
+            message: `You have been assigned a task: "${newTitle}"`,
+            entity_type: 'task',
+            entity_id: task.id,
+          });
+        }
+
+        await logAudit('task.updated', 'task', task.id, { title: newTitle });
         showToast('Task updated successfully', 'success');
         close();
         renderTaskManagementPage();

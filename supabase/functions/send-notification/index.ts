@@ -21,6 +21,27 @@ serve(async (req: Request) => {
   }
 
   try {
+    // ── Verify caller is authenticated ────────────────────────
+    const authHeader = req.headers.get("authorization") ?? "";
+    const jwt = authHeader.replace(/^Bearer\s+/i, "").trim();
+    if (!jwt) {
+      return json({ error: "Unauthorized: missing bearer token" }, 401);
+    }
+
+    // Decode JWT to verify it's valid (basic validation)
+    try {
+      const parts = jwt.split(".");
+      if (parts.length !== 3) throw new Error("invalid token format");
+      const b64 = parts[1].replace(/-/g, "+").replace(/_/g, "/");
+      const payload = JSON.parse(atob(b64));
+      if (!payload.sub) throw new Error("missing user ID");
+      if (payload.exp && payload.exp < Math.floor(Date.now() / 1000)) {
+        return json({ error: "Unauthorized: token expired" }, 401);
+      }
+    } catch {
+      return json({ error: "Unauthorized: invalid token" }, 401);
+    }
+
     if (!BREVO_API_KEY || !SENDER_EMAIL) {
       return json(
         { error: "Missing required secrets: BREVO_API_KEY and/or SENDER_EMAIL" },

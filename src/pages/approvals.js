@@ -20,7 +20,8 @@ export async function renderApprovalsPage() {
   let query = supabase
     .from('approvals')
     .select('*, intern:profiles!approvals_intern_id_fkey(full_name, email), reviewer:profiles!approvals_reviewed_by_fkey(full_name, email)')
-    .order('created_at', { ascending: false });
+    .order('created_at', { ascending: false })
+    .limit(100);
 
   if (!isAdmin) {
     if (profile.department_id) {

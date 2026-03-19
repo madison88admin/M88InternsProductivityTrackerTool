@@ -1,16 +1,16 @@
 /**
- * Set Password Page
- * Handles the invite link flow: validates the token, shows a password form
- * with real-time strength checking, and sets the user's password on submit.
+ * Reset Password Page
+ * Handles the password reset flow: validates reset token, shows password form
+ * with real-time strength checking, and updates the password on submit.
  */
 import { supabase } from '../lib/supabase.js';
 import { renderPage } from '../lib/component.js';
 import { showToast } from '../lib/toast.js';
 import { navigateTo } from '../lib/router.js';
 
-/** Extract the invite token from the URL hash query string (e.g. /#/set-password?token=xxx). */
+/** Extract the reset token from the URL hash query string (e.g. /#/reset-password?token=xxx). */
 function getTokenFromUrl() {
-  const hash = window.location.hash; // e.g. "#/set-password?token=abc123"
+  const hash = window.location.hash; // e.g. "#/reset-password?token=abc123"
   const queryStart = hash.indexOf('?');
   if (queryStart === -1) return null;
   return new URLSearchParams(hash.slice(queryStart)).get('token');
@@ -31,7 +31,7 @@ function allMet(reqs) {
   return reqs.length && reqs.upper && reqs.lower && reqs.number && reqs.special;
 }
 
-export function renderSetPasswordPage() {
+export function renderResetPasswordPage() {
   renderPage(`
     <div class="min-h-screen flex">
       <!-- Left side — Brand panel -->
@@ -65,7 +65,7 @@ export function renderSetPasswordPage() {
         </div>
       </div>
 
-      <!-- Right side — Set password form -->
+      <!-- Right side — Reset password form -->
       <div class="w-full lg:w-1/2 flex items-center justify-center bg-neutral-50 px-6 py-12">
         <div class="w-full max-w-md">
           <!-- Mobile logo -->
@@ -82,7 +82,7 @@ export function renderSetPasswordPage() {
             <div class="flex flex-col items-center py-6 gap-4">
               <div class="w-10 h-10 border-4 border-primary-200 border-t-primary-600
                           rounded-full animate-spin"></div>
-              <p class="text-sm text-neutral-500">Validating your invite link…</p>
+              <p class="text-sm text-neutral-500">Validating your reset link…</p>
             </div>
           </div>
 
@@ -101,7 +101,7 @@ export function renderSetPasswordPage() {
                 <p id="error-message" class="text-sm text-neutral-500"></p>
               </div>
               <p class="text-xs text-neutral-400 mt-2">
-                Please contact your administrator to request a new invitation.
+                You can request a new password reset link from the login page.
               </p>
             </div>
           </div>
@@ -109,11 +109,11 @@ export function renderSetPasswordPage() {
           <!-- Form state (hidden initially) -->
           <div id="state-form" class="hidden">
             <div>
-              <h2 class="text-2xl font-bold text-neutral-900">Set Your Password</h2>
-              <p id="form-greeting" class="text-neutral-500 mt-2 text-sm"></p>
+              <h2 class="text-2xl font-bold text-neutral-900">Reset Your Password</h2>
+              <p class="text-neutral-500 mt-2 text-sm">Enter your new password below. It must be strong and unique.</p>
             </div>
 
-            <form id="set-password-form" class="mt-8 space-y-5" novalidate>
+            <form id="reset-password-form" class="mt-8 space-y-5" novalidate>
 
               <!-- Password field -->
               <div>
@@ -196,7 +196,7 @@ export function renderSetPasswordPage() {
               </div>
 
               <button type="submit" id="submit-btn" class="btn-primary w-full py-3! text-base!" disabled>
-                Set Password
+                Reset Password
               </button>
             </form>
           </div>
@@ -218,14 +218,13 @@ export function renderSetPasswordPage() {
 
     // ── No token in URL ──────────────────────────────────────
     if (!token) {
-      showState('error', 'This invite link is invalid or incomplete.');
+      showState('error', 'This reset link is invalid or incomplete.');
       return;
     }
 
     // ── Validate token against the Edge Function ─────────────
-    let fullName = '';
     try {
-      const { data, error } = await supabase.functions.invoke('validate-invite-token', {
+      const { data, error } = await supabase.functions.invoke('validate-reset-token', {
         body: { token },
       });
 
@@ -233,24 +232,19 @@ export function renderSetPasswordPage() {
 
       if (!data.valid) {
         const messages = {
-          not_found: 'This invite link is invalid or does not exist.',
-          used:      'This invite link has already been used.',
-          expired:   'This invite link has expired (links are valid for 10 minutes).',
+          not_found: 'This reset link is invalid or does not exist.',
+          used:      'This reset link has already been used.',
+          expired:   'This reset link has expired (links are valid for 10 minutes).',
         };
-        showState('error', messages[data.error] ?? 'This invite link is no longer valid.');
+        showState('error', messages[data.error] ?? 'This reset link is no longer valid.');
         return;
       }
-
-      fullName = data.fullName || '';
     } catch (err) {
-      showState('error', 'Unable to validate the invite link. Please try again later.');
+      showState('error', 'Unable to validate the reset link. Please try again later.');
       return;
     }
 
     // ── Show the password form ────────────────────────────────
-    document.getElementById('form-greeting').textContent =
-      fullName ? `Welcome, ${fullName}! Please create a password for your account.`
-               : 'Please create a password for your new account.';
     showState('form');
     bindFormEvents(token);
   });
@@ -309,7 +303,7 @@ function bindFormEvents(token) {
   }
 
   // ── Form submit ──────────────────────────────────────────
-  document.getElementById('set-password-form').addEventListener('submit', async (e) => {
+  document.getElementById('reset-password-form').addEventListener('submit', async (e) => {
     e.preventDefault();
 
     const password = passwordInput.value;
@@ -326,29 +320,29 @@ function bindFormEvents(token) {
     }
 
     submitBtn.disabled = true;
-    submitBtn.textContent = 'Setting password…';
+    submitBtn.textContent = 'Resetting password…';
 
     try {
-      const { data, error } = await supabase.functions.invoke('complete-invite', {
+      const { data, error } = await supabase.functions.invoke('complete-password-reset', {
         body: { token, password },
       });
 
       if (error) throw new Error(error.message);
       if (!data.ok) {
         const messages = {
-          used:    'This invite link has already been used.',
-          expired: 'This invite link has expired.',
-          not_found: 'This invite link is no longer valid.',
+          used:    'This reset link has already been used.',
+          expired: 'This reset link has expired.',
+          not_found: 'This reset link is no longer valid.',
         };
-        throw new Error(messages[data.error] ?? data.error ?? 'Failed to set password.');
+        throw new Error(messages[data.error] ?? data.error ?? 'Failed to reset password.');
       }
 
-      showToast('Password set successfully! You can now log in.', 'success');
+      showToast('Password reset successfully! You can now log in with your new password.', 'success');
       navigateTo('/login');
     } catch (err) {
       showToast(err.message || 'Something went wrong. Please try again.', 'error');
       submitBtn.disabled = false;
-      submitBtn.textContent = 'Set Password';
+      submitBtn.textContent = 'Reset Password';
     }
   });
 }

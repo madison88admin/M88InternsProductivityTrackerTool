@@ -130,8 +130,8 @@ serve(async (req: Request) => {
 
     await adminClient.from("profiles").update(profileUpdates).eq("id", userId);
 
-    // ── Generate invite token (5-minute expiry) ──────────────
-    const expiresAt = new Date(Date.now() + 5 * 60 * 1000).toISOString();
+    // ── Generate invite token (10-minute expiry) ──────────────
+    const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
     const { data: tokenRow, error: tokenErr } = await adminClient
       .from("invite_tokens")
       .insert({ user_id: userId, email, full_name: fullName, expires_at: expiresAt })
@@ -182,69 +182,70 @@ function buildInviteEmail(fullName: string, link: string): string {
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 </head>
-<body style="margin:0;padding:0;background:#f5f5f5;font-family:Arial,sans-serif;">
-  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f5f5f5;padding:40px 0;">
+<body style="margin:0;padding:0;background-color:#1a1a2e;font-family:Arial,sans-serif;">
+  <!-- HEADER -->
+  <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#f4f4f4;padding:20px 0;">
     <tr>
       <td align="center">
-        <table width="560" cellpadding="0" cellspacing="0"
-               style="background:#ffffff;border-radius:12px;overflow:hidden;
-                      box-shadow:0 2px 12px rgba(0,0,0,0.08);">
-          <!-- Header -->
+        <img
+          src="https://hhnvjkxsuhvtsoxzrahi.supabase.co/storage/v1/object/public/public-assets/logo.png"
+          alt="Madison 88, Ltd."
+          width="180"
+          style="display:block;"
+        />
+      </td>
+    </tr>
+  </table>
+
+  <!-- BODY -->
+  <table width="100%" cellpadding="0" cellspacing="0">
+    <tr>
+      <td align="center" style="padding:40px 20px;">
+        <table width="600" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:8px;padding:40px;box-shadow:0 2px 8px rgba(0,0,0,0.1);">
           <tr>
-            <td style="background:linear-gradient(135deg,#4338ca,#6366f1);
-                        padding:32px 40px;text-align:center;">
-              <div style="display:inline-block;background:rgba(255,255,255,0.2);
-                          border-radius:10px;padding:10px 20px;">
-                <span style="font-size:24px;font-weight:900;color:#ffffff;
-                             letter-spacing:-0.5px;">M88</span>
-              </div>
-              <p style="color:rgba(255,255,255,0.9);margin:12px 0 0;font-size:14px;">
-                Intern Productivity Tracker
-              </p>
-            </td>
-          </tr>
-          <!-- Body -->
-          <tr>
-            <td style="padding:40px;">
-              <h2 style="margin:0 0 8px;color:#1a1a2e;font-size:22px;">
+            <td>
+              <h2 style="color:#1a1a2e;margin-top:0;margin-bottom:12px;font-size:22px;">
                 Welcome, ${fullName}!
               </h2>
-              <p style="margin:0 0 24px;color:#555;font-size:15px;line-height:1.6;">
-                You've been invited to join the <strong>M88 Intern Productivity Tracker</strong>.
+              <p style="color:#555;line-height:1.6;margin:0 0 24px;">
+                You have been invited to join the <strong>M88 Intern Productivity Tracker</strong>.
                 Click the button below to set your password and activate your account.
               </p>
-              <div style="text-align:center;margin:32px 0;">
+              <p style="text-align:center;margin:32px 0;">
                 <a href="${link}"
-                   style="display:inline-block;background:linear-gradient(135deg,#4338ca,#6366f1);
-                          color:#ffffff;text-decoration:none;padding:14px 40px;
-                          border-radius:8px;font-weight:700;font-size:15px;
-                          letter-spacing:0.3px;">
+                   style="background-color:#1a1a2e;color:#ffffff;padding:14px 40px;text-decoration:none;border-radius:6px;font-weight:bold;display:inline-block;font-size:15px;">
                   Set My Password
                 </a>
-              </div>
-              <div style="background:#fff8e1;border:1px solid #ffe082;border-radius:8px;
-                          padding:14px 18px;margin:24px 0;">
-                <p style="margin:0;color:#7b5800;font-size:13px;line-height:1.5;">
-                  <strong>Important:</strong> This link expires in
-                  <strong>5 minutes</strong> and can only be used once.
+              </p>
+              <div style="background-color:#fff8e1;border:1px solid #ffe082;border-radius:6px;padding:14px 16px;margin:24px 0;">
+                <p style="color:#7b5800;font-size:13px;margin:0;line-height:1.5;">
+                  <strong>Important:</strong> This link expires in <strong>10 minutes</strong> and can only be used once.
                   If it has expired, please contact your administrator to resend the invitation.
                 </p>
               </div>
-              <p style="margin:24px 0 0;color:#888;font-size:13px;">
+              <p style="color:#888;font-size:13px;margin:24px 0 0;">
                 If you did not expect this invitation, you can safely ignore this email.
               </p>
             </td>
           </tr>
-          <!-- Footer -->
-          <tr>
-            <td style="background:#f9f9f9;padding:20px 40px;text-align:center;
-                        border-top:1px solid #eee;">
-              <p style="margin:0;color:#aaa;font-size:12px;">
-                M88 Intern Productivity Tracker &mdash; automated message, do not reply.
-              </p>
-            </td>
-          </tr>
         </table>
+      </td>
+    </tr>
+  </table>
+
+  <!-- FOOTER -->
+  <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#f4f4f4;padding:20px 0;margin-top:20px;">
+    <tr>
+      <td align="center">
+        <img
+          src="https://hhnvjkxsuhvtsoxzrahi.supabase.co/storage/v1/object/public/public-assets/logo.png"
+          alt="Madison 88, Ltd."
+          width="100"
+          style="display:block;margin-bottom:10px;opacity:0.8;"
+        />
+        <p style="color:#1a1a2e;font-size:12px;margin:0;">
+          &copy; 2026 Madison 88 Business Solutions Asia Inc. All rights reserved.
+        </p>
       </td>
     </tr>
   </table>

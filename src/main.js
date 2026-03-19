@@ -15,6 +15,7 @@ import { renderLoginPage } from './pages/login.js';
 import { renderAdminSetupPage } from './pages/admin-setup.js';
 import { renderForgotPasswordPage } from './pages/forgot-password.js';
 import { renderSetPasswordPage } from './pages/set-password.js';
+import { renderResetPasswordPage } from './pages/reset-password.js';
 import { renderDashboard } from './pages/dashboard.js';
 import { renderAttendancePage } from './pages/attendance.js';
 import { renderMyTasksPage } from './pages/my-tasks.js';
@@ -38,7 +39,7 @@ import { renderNotificationsPage } from './pages/notifications.js';
 import { renderProfilePage } from './pages/profile.js';
 
 // ── Public routes (no auth required) ───────────────────────
-const PUBLIC_ROUTES = ['/login', '/admin-setup', '/forgot-password', '/set-password'];
+const PUBLIC_ROUTES = ['/login', '/admin-setup', '/forgot-password', '/reset-password', '/set-password'];
 
 // ── Register Routes ─────────────────────────────────────────
 
@@ -46,6 +47,7 @@ const PUBLIC_ROUTES = ['/login', '/admin-setup', '/forgot-password', '/set-passw
 addRoute('/login', renderLoginPage);
 addRoute('/admin-setup', renderAdminSetupPage);
 addRoute('/forgot-password', renderForgotPasswordPage);
+addRoute('/reset-password', renderResetPasswordPage);
 addRoute('/set-password', renderSetPasswordPage);
 
 // All authenticated users
@@ -95,7 +97,8 @@ async function getSecuritySettings() {
   try {
     const { data: settings } = await supabase
       .from('system_settings')
-      .select('*');
+      .select('key, value')
+      .in('key', ['enable_forgot_password', 'enable_admin_account_creation']);
 
     const settingsMap = {};
     (settings || []).forEach(s => { settingsMap[s.key] = s; });
