@@ -11,7 +11,7 @@ import { icons } from '../lib/icons.js';
 import { formatDate, getTodayDate } from '../lib/utils.js';
 import { createModal } from '../lib/component.js';
 import { isHoliday } from '../lib/holidays.js';
-import { sendEmailNotification } from '../lib/email-notifications.js';
+import { sendEmailNotification, getDepartmentSupervisors } from '../lib/email-notifications.js';
 
 export async function renderMyTasksPage() {
   const profile = getProfile();
@@ -235,23 +235,23 @@ export async function renderMyTasksPage() {
             });
 
             if (profile.supervisor_id) {
-              await supabase.from('notifications').insert({
-                user_id: profile.supervisor_id,
-                type: 'pending_approval',
-                title: 'Task Submission for Review',
-                message: `${profile.full_name} submitted a task for your review: "${title}"`,
-                entity_type: 'task',
-                entity_id: newTask.id,
-              });
+              // Get all supervisors in the intern's department for multi-supervisor notifications
+              const deptSupervisors = await getDepartmentSupervisors(profile.id);
 
-              // Send email notification to supervisor
-              const { data: supervisor } = await supabase
-                .from('profiles')
-                .select('full_name, email')
-                .eq('id', profile.supervisor_id)
-                .single();
+              // Notify all department supervisors
+              if (deptSupervisors && deptSupervisors.length > 0) {
+                // Create notification records for all supervisors
+                const notifs = deptSupervisors.map(s => ({
+                  user_id: s.id,
+                  type: 'pending_approval',
+                  title: 'Task Submission for Review',
+                  message: `${profile.full_name} submitted a task for your review: "${title}"`,
+                  entity_type: 'task',
+                  entity_id: newTask.id,
+                }));
+                await supabase.from('notifications').insert(notifs);
 
-              if (supervisor?.email) {
+                // Email template
                 const emailHtml = `
                   <!DOCTYPE html>
                   <html>
@@ -283,7 +283,14 @@ export async function renderMyTasksPage() {
                     </body>
                   </html>
                 `;
-                await sendEmailNotification(supervisor.email, `Task Submission for Review - ${title}`, emailHtml).catch(err => console.error('Failed to send task email:', err));
+
+                // Send email to each supervisor
+                deptSupervisors.forEach(supervisor => {
+                  if (supervisor?.email) {
+                    sendEmailNotification(supervisor.email, `Task Submission for Review - ${title}`, emailHtml)
+                      .catch(err => console.error('Failed to send task email to ' + supervisor.email + ':', err));
+                  }
+                });
               }
             }
 
@@ -453,7 +460,11 @@ export async function renderMyTasksPage() {
               comments: `Requesting status change to: ${newStatus.replace('_', ' ')}`,
             });
 
-            // Notify supervisor
+            // Get all supervisors in the intern's department for multi-supervisor notifications
+            const deptSupervisors = await getDepartmentSupervisors(profile.id);
+            const deptSupervisorIds = deptSupervisors.map(s => s.id);
+
+            // Notify supervisor(s)
             const taskCompleteNotif = {
               type: 'pending_approval',
               title: 'Task Status Change Request',
@@ -462,59 +473,64 @@ export async function renderMyTasksPage() {
               entity_id: taskId,
             };
 
-            if (profile.supervisor_id) {
-              await supabase.from('notifications').insert({ user_id: profile.supervisor_id, ...taskCompleteNotif });
+            if (profile.supervisor_id && deptSupervisors && deptSupervisors.length > 0) {
+              // Create notification records for all department supervisors
+              const supervisorNotifs = deptSupervisors.map(s => ({
+                user_id: s.id,
+                ...taskCompleteNotif,
+              }));
+              await supabase.from('notifications').insert(supervisorNotifs);
 
-              // Send email notification to supervisor
+              // Fetch task for email
               const { data: task } = await supabase
                 .from('tasks')
                 .select('title')
                 .eq('id', taskId)
                 .single();
 
-              const { data: supervisor } = await supabase
-                .from('profiles')
-                .select('full_name, email')
-                .eq('id', profile.supervisor_id)
-                .single();
-
-              if (supervisor?.email) {
-                const emailHtml = `
-                  <!DOCTYPE html>
-                  <html>
-                    <head>
-                      <style>
-                        body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
-                        .container { max-width: 600px; margin: 0 auto; padding: 20px; }
-                        .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px; border-radius: 5px 5px 0 0; }
-                        .content { background: #f9f9f9; padding: 20px; border: 1px solid #ddd; border-radius: 0 0 5px 5px; }
-                        .badge { display: inline-block; background: #f59e0b; color: white; padding: 6px 12px; border-radius: 4px; font-weight: bold; font-size: 12px; margin-left: 8px; }
-                        .footer { margin-top: 20px; padding-top: 20px; border-top: 1px solid #ddd; font-size: 12px; color: #666; }
-                      </style>
-                    </head>
-                    <body>
-                      <div class="container">
-                        <div class="header">
-                          <h1>Task Status Change Request</h1>
-                        </div>
-                        <div class="content">
-                          <p><strong>${profile.full_name}</strong> is requesting to change task status to <strong>"${newStatus.replace('_', ' ')}"</strong> <span class="badge">PENDING APPROVAL</span></p>
-                          <p><strong>Task:</strong> ${task?.title || 'A task'}</p>
-                          <p>Please review and approve or reject this status change request.</p>
-                          <p><a href="${window.location.origin}/#/approvals" style="background: #667eea; color: white; padding: 10px 20px; text-decoration: none; border-radius: 4px; display: inline-block; margin-top: 10px;">View in System</a></p>
-                        </div>
-                        <div class="footer">
-                          <p>This is an automated notification. Please do not reply to this email.</p>
-                        </div>
+              // Email template
+              const emailHtml = `
+                <!DOCTYPE html>
+                <html>
+                  <head>
+                    <style>
+                      body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+                      .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+                      .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px; border-radius: 5px 5px 0 0; }
+                      .content { background: #f9f9f9; padding: 20px; border: 1px solid #ddd; border-radius: 0 0 5px 5px; }
+                      .badge { display: inline-block; background: #f59e0b; color: white; padding: 6px 12px; border-radius: 4px; font-weight: bold; font-size: 12px; margin-left: 8px; }
+                      .footer { margin-top: 20px; padding-top: 20px; border-top: 1px solid #ddd; font-size: 12px; color: #666; }
+                    </style>
+                  </head>
+                  <body>
+                    <div class="container">
+                      <div class="header">
+                        <h1>Task Status Change Request</h1>
                       </div>
-                    </body>
-                  </html>
-                `;
-                await sendEmailNotification(supervisor.email, `Task Status Change Request - ${task?.title || 'A task'}`, emailHtml).catch(err => console.error('Failed to send task email:', err));
-              }
+                      <div class="content">
+                        <p><strong>${profile.full_name}</strong> is requesting to change task status to <strong>"${newStatus.replace('_', ' ')}"</strong> <span class="badge">PENDING APPROVAL</span></p>
+                        <p><strong>Task:</strong> ${task?.title || 'A task'}</p>
+                        <p>Please review and approve or reject this status change request.</p>
+                        <p><a href="${window.location.origin}/#/approvals" style="background: #667eea; color: white; padding: 10px 20px; text-decoration: none; border-radius: 4px; display: inline-block; margin-top: 10px;">View in System</a></p>
+                      </div>
+                      <div class="footer">
+                        <p>This is an automated notification. Please do not reply to this email.</p>
+                      </div>
+                    </div>
+                  </body>
+                </html>
+              `;
+
+              // Send email to each supervisor
+              deptSupervisors.forEach(supervisor => {
+                if (supervisor?.email) {
+                  sendEmailNotification(supervisor.email, `Task Status Change Request - ${task?.title || 'A task'}`, emailHtml)
+                    .catch(err => console.error('Failed to send task email to ' + supervisor.email + ':', err));
+                }
+              });
             }
 
-            // Also notify all active admins
+            // Also notify all active admins (exclude department supervisors)
             const { data: admins } = await supabase
               .from('profiles')
               .select('id, email, full_name')
@@ -523,12 +539,18 @@ export async function renderMyTasksPage() {
 
             if (admins && admins.length > 0) {
               const adminNotifs = admins
-                .filter(a => a.id !== profile.supervisor_id)
+                .filter(a => !deptSupervisorIds.includes(a.id))  // Exclude department supervisors
                 .map(a => ({ user_id: a.id, ...taskCompleteNotif }));
               if (adminNotifs.length > 0) await supabase.from('notifications').insert(adminNotifs);
 
-              // Send email to all other admins
-              const otherAdmins = admins.filter(a => a.id !== profile.supervisor_id);
+              // Send email to all other admins (exclude department supervisors)
+              const otherAdmins = admins.filter(a => !deptSupervisorIds.includes(a.id));
+              const { data: task } = await supabase
+                .from('tasks')
+                .select('title')
+                .eq('id', taskId)
+                .single();
+
               for (const admin of otherAdmins) {
                 if (admin.email) {
                   const adminEmailHtml = `
@@ -562,7 +584,7 @@ export async function renderMyTasksPage() {
                       </body>
                     </html>
                   `;
-                  await sendEmailNotification(admin.email, `Task Status Change Request - ${task?.title || 'A task'}`, adminEmailHtml).catch(err => console.error('Failed to send admin task email:', err));
+                  await sendEmailNotification(admin.email, `Task Status Change Request - ${task?.title || 'A task'}`, adminEmailHtml).catch(err => console.error('Failed to send admin task email to ' + admin.email + ':', err));
                 }
               }
             }

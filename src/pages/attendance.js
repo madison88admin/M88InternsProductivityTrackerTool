@@ -11,7 +11,7 @@ import { icons } from '../lib/icons.js';
 import { formatDate, formatTime, formatHoursDisplay, getPublicIP, isLateArrival, isOutsideAllowedHours } from '../lib/utils.js';
 import { createModal } from '../lib/component.js';
 import { isHoliday } from '../lib/holidays.js';
-import { sendEmailNotification } from '../lib/email-notifications.js';
+import { sendEmailNotification, getDepartmentSupervisors } from '../lib/email-notifications.js';
 
 const PH_TIMEZONE = 'Asia/Manila';
 let phMidnightRefreshTimer = null;
@@ -138,6 +138,10 @@ export async function renderAttendancePage() {
         .maybeSingle();
 
       if (!existingApproval && profile.supervisor_id) {
+        // Get all supervisors in the intern's department for multi-supervisor notifications
+        const deptSupervisors = await getDepartmentSupervisors(profile.id);
+
+        // Create approval record with primary supervisor (maintains backward compatibility)
         await supabase.from('approvals').insert({
           type: 'attendance',
           entity_id: todayRecord.id,
@@ -145,23 +149,20 @@ export async function renderAttendancePage() {
           supervisor_id: profile.supervisor_id,
         });
 
-        await supabase.from('notifications').insert({
-          user_id: profile.supervisor_id,
-          type: 'pending_approval',
-          title: 'Attendance Auto-Submitted',
-          message: `${profile.full_name}'s attendance for ${formatDate(today)} was auto-submitted with incomplete punches.`,
-          entity_type: 'attendance',
-          entity_id: todayRecord.id,
-        });
+        // Notify all department supervisors
+        if (deptSupervisors && deptSupervisors.length > 0) {
+          // Create notification records for all supervisors
+          const notifs = deptSupervisors.map(s => ({
+            user_id: s.id,
+            type: 'pending_approval',
+            title: 'Attendance Auto-Submitted',
+            message: `${profile.full_name}'s attendance for ${formatDate(today)} was auto-submitted with incomplete punches.`,
+            entity_type: 'attendance',
+            entity_id: todayRecord.id,
+          }));
+          await supabase.from('notifications').insert(notifs);
 
-        // Send email notification to supervisor
-        const { data: supervisor } = await supabase
-          .from('profiles')
-          .select('full_name, email')
-          .eq('id', profile.supervisor_id)
-          .single();
-
-        if (supervisor?.email) {
+          // Email template
           const emailHtml = `
             <!DOCTYPE html>
             <html>
@@ -192,7 +193,14 @@ export async function renderAttendancePage() {
               </body>
             </html>
           `;
-          await sendEmailNotification(supervisor.email, 'Attendance Auto-Submitted - Review Required', emailHtml).catch(err => console.error('Failed to send attendance email:', err));
+
+          // Send email to each supervisor
+          deptSupervisors.forEach(supervisor => {
+            if (supervisor?.email) {
+              sendEmailNotification(supervisor.email, 'Attendance Auto-Submitted - Review Required', emailHtml)
+                .catch(err => console.error('Failed to send attendance email to ' + supervisor.email + ':', err));
+            }
+          });
         }
 
 

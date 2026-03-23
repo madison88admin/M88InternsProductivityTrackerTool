@@ -127,3 +127,47 @@ export function getTaskAssignmentTemplate(taskTitle, taskDescription) {
     </html>
   `;
 }
+
+/**
+ * Get all active supervisors in an intern's department for multi-supervisor notifications
+ * @param {UUID} internId - The intern's ID
+ * @returns {Promise<Array>} Array of supervisor profiles (id, full_name, email)
+ */
+export async function getDepartmentSupervisors(internId) {
+  try {
+    // Fetch intern to get department_id
+    const { data: intern, error: internError } = await supabase
+      .from('profiles')
+      .select('department_id')
+      .eq('id', internId)
+      .single();
+
+    if (internError) {
+      console.error('Error fetching intern:', internError);
+      return [];
+    }
+
+    if (!intern?.department_id) {
+      console.warn('Intern has no department assigned');
+      return [];
+    }
+
+    // Fetch all active supervisors in that department
+    const { data: supervisors, error: supError } = await supabase
+      .from('profiles')
+      .select('id, full_name, email')
+      .eq('department_id', intern.department_id)
+      .eq('role', 'supervisor')
+      .eq('is_active', true);
+
+    if (supError) {
+      console.error('Error fetching supervisors:', supError);
+      return [];
+    }
+
+    return supervisors || [];
+  } catch (err) {
+    console.error('Failed to get department supervisors:', err);
+    return [];
+  }
+}

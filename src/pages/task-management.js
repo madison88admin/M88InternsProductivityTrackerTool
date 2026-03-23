@@ -49,7 +49,7 @@ export async function renderTaskManagementPage() {
   // Fetch tasks — supervisors see all tasks created by dept co-supervisors; admins see all
   let tasksQuery = supabase
     .from('tasks')
-    .select('*, assigned_profile:profiles!tasks_assigned_to_fkey(full_name), creator_profile:profiles!tasks_created_by_fkey(full_name)')
+    .select('*, assigned_profile:profiles!tasks_assigned_to_fkey(full_name, department_id), creator_profile:profiles!tasks_created_by_fkey(full_name)')
     .eq('is_archived', false)
     .order('created_at', { ascending: false });
 
@@ -107,6 +107,7 @@ export async function renderTaskManagementPage() {
               <th>Est. Hours</th>
               <th>Due Date</th>
               <th>Created</th>
+              <th>Created By</th>
               ${canManageTasks ? '<th>Actions</th>' : ''}
             </tr>
           </thead>
@@ -142,13 +143,14 @@ export async function renderTaskManagementPage() {
                 <td>${task.estimated_hours || '—'}</td>
                 <td class="${dueDateClass}">${task.due_date ? formatDate(task.due_date) : '—'}</td>
                 <td>${formatDate(task.created_at)}</td>
+                <td>${task.creator_profile?.full_name || '—'}</td>
                 ${canManageTasks ? `
                 <td>
                   <div class="flex gap-1">
                     <button class="btn-sm btn-secondary view-task-btn" data-task-id="${task.id}" title="View full details">
                       ${icons.eye}
                     </button>
-                    ${task.created_by === profile.id ? `
+                    ${(isAdmin || (profile.department_id && task.assigned_profile?.department_id === profile.department_id)) ? `
                     <button class="btn-sm btn-secondary edit-task-btn" data-task-id="${task.id}" title="Edit">
                       ${icons.edit}
                     </button>
@@ -165,7 +167,7 @@ export async function renderTaskManagementPage() {
                 `;
               })()}
             `).join('')}
-            ${(!tasks || tasks.length === 0) ? `<tr><td colspan="${canManageTasks ? 7 : 6}" class="text-center text-neutral-400 py-8">No tasks found</td></tr>` : ''}
+            ${(!tasks || tasks.length === 0) ? `<tr><td colspan="${canManageTasks ? 8 : 7}" class="text-center text-neutral-400 py-8">No tasks found</td></tr>` : ''}
           </tbody>
         </table>
       </div>
@@ -618,14 +620,28 @@ function confirmArchiveTask(task) {
 }
 
 async function openArchivedTasksModal(profile, isAdmin, canManageTasks) {
+  // For supervisors in a dept, get all co-supervisor IDs for shared task visibility
+  let deptSupervisorIds = [profile.id];
+  if (!isAdmin && profile.department_id) {
+    const { data: deptSups } = await supabase
+      .from('profiles')
+      .select('id')
+      .eq('department_id', profile.department_id)
+      .eq('role', 'supervisor');
+    deptSupervisorIds = (deptSups || []).map(s => s.id);
+    if (!deptSupervisorIds.includes(profile.id)) deptSupervisorIds.push(profile.id);
+  }
+
   let query = supabase
     .from('tasks')
-    .select('*, assigned_profile:profiles!tasks_assigned_to_fkey(full_name), creator_profile:profiles!tasks_created_by_fkey(full_name)')
+    .select('*, assigned_profile:profiles!tasks_assigned_to_fkey(full_name, department_id), creator_profile:profiles!tasks_created_by_fkey(full_name)')
     .eq('is_archived', true)
     .order('updated_at', { ascending: false });
 
   if (!isAdmin) {
-    query = query.eq('created_by', profile.id);
+    query = profile.department_id
+      ? query.in('created_by', deptSupervisorIds)
+      : query.eq('created_by', profile.id);
   }
 
   const { data: archived } = await query;
@@ -655,7 +671,7 @@ async function openArchivedTasksModal(profile, isAdmin, canManageTasks) {
                     <td>${task.creator_profile?.full_name || '—'}</td>
                     ${canManageTasks ? `
                     <td>
-                      ${task.created_by === profile.id ? `
+                      ${(isAdmin || (profile.department_id && task.assigned_profile?.department_id === profile.department_id)) ? `
                         <button class="btn-sm btn-secondary unarchive-btn" data-task-id="${task.id}" title="Restore task">
                           ${icons.unarchive}
                         </button>
