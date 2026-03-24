@@ -605,6 +605,12 @@ async function viewApprovalDetails(approvalId, approvals) {
               <p class="font-medium">${formatHoursDisplay(narrative.hours)}</p>
             </div>
           ` : ''}
+          ${narrative.edited_at ? `
+            <div class="p-2 bg-info-50 rounded-lg border border-info-200">
+              <p class="text-sm text-info-700"><strong>✏️ This narrative was edited</strong></p>
+              <p class="text-xs text-info-600">Last edited: ${formatDateTime(narrative.edited_at)}</p>
+            </div>
+          ` : ''}
           ${narrative.is_late_submission ? `
             <div class="p-2 bg-warning-50 rounded-lg">
               <p class="text-sm text-warning-600">⚠ Late submission</p>

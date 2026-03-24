@@ -136,6 +136,53 @@ export function formatHoursDisplay(hours) {
 }
 
 /**
+ * Format hours with both time format and decimal (e.g., 8.75 → "8h 45m (8.75 hrs)").
+ * Used for transparency in reports where both formats are helpful.
+ * @param {number} hours
+ * @returns {string}
+ */
+export function formatHoursBothFormats(hours) {
+  const timeFormat = formatHoursDisplay(hours);
+  const decimalFormat = hours.toFixed(2);
+  return `${timeFormat} (${decimalFormat} hrs)`;
+}
+
+/**
+ * Format hours as HH:MM format (e.g., 8.75 → "08:45").
+ * @param {number} decimalHours
+ * @returns {string}
+ */
+export function formatHoursAsHHMM(decimalHours) {
+  if (!decimalHours || decimalHours <= 0) return '00:00';
+  const hours = Math.floor(decimalHours);
+  const minutes = Math.round((decimalHours - hours) * 60);
+  return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
+}
+
+/**
+ * Format currency amount with PHP symbol and 2 decimal places.
+ * @param {number} amount
+ * @param {boolean} includeSymbol - Whether to include ₱ symbol (default: true)
+ * @returns {string}
+ */
+export function formatCurrency(amount, includeSymbol = true) {
+  const formatted = Number(amount || 0).toFixed(2);
+  return includeSymbol ? `₱${formatted}` : formatted;
+}
+
+/**
+ * Calculate session hours from two timestamps with full precision.
+ * @param {string|Date|null} timeIn
+ * @param {string|Date|null} timeOut
+ * @returns {number} Hours (decimal, full precision)
+ */
+export function calculateSessionHours(timeIn, timeOut) {
+  if (!timeIn || !timeOut) return 0;
+  const ms = new Date(timeOut) - new Date(timeIn);
+  return Math.max(0, ms / (1000 * 60 * 60));
+}
+
+/**
  * Format a date as YYYY-MM-DD in a given timezone.
  * @param {string|Date} date
  * @param {string} [timeZone]

@@ -6,7 +6,7 @@ import { renderLayout } from '../components/layout.js';
 import { supabase } from '../lib/supabase.js';
 import { showToast } from '../lib/toast.js';
 import { icons } from '../lib/icons.js';
-import { formatDate, formatDateKey, formatHoursDisplay, formatTime } from '../lib/utils.js';
+import { formatDate, formatDateKey, formatHoursDisplay, formatHoursBothFormats, formatTime } from '../lib/utils.js';
 import { createModal } from '../lib/component.js';
 import { logAudit } from '../lib/audit.js';
 import { getCurrentUser } from '../lib/auth.js';
@@ -117,7 +117,7 @@ export async function renderAttendanceOverviewPage() {
         </div>
         <div class="card text-center">
           <p class="text-sm text-neutral-500">Total Hours</p>
-          <p class="text-2xl font-bold text-primary-600">${formatHoursDisplay(totalHours)}</p>
+          <p class="text-2xl font-bold text-primary-600">${formatHoursBothFormats(totalHours)}</p>
         </div>
       </div>
 
@@ -261,9 +261,12 @@ function renderRows(records, searchQuery) {
       <td>${formatDate(r.date)}</td>
       <td class="text-sm">${r.time_in_1 ? formatTime(r.time_in_1) : '—'}</td>
       <td class="text-sm">${r.time_out_1 ? formatTime(r.time_out_1) : '—'}</td>
-      <td class="text-sm">${r.time_in_2 ? formatTime(r.time_in_2) : '—'}</td>
+      <td>${r.time_in_2 ? formatTime(r.time_in_2) : '—'}</td>
       <td class="text-sm">${r.time_out_2 ? formatTime(r.time_out_2) : '—'}</td>
-      <td>${formatHoursDisplay(r.total_hours)}</td>
+      <td>
+        <span class="font-semibold">${formatHoursDisplay(r.total_hours)}</span>
+        <span class="text-xs text-neutral-500 block mt-0.5">(${r.total_hours.toFixed(2)} hrs)</span>
+      </td>
       <td><span class="badge-${r.status === 'approved' ? 'success' : r.status === 'rejected' ? 'danger' : 'pending'}">${r.status}</span></td>
       <td>
         ${r.is_late ? '<span class="badge-warning text-xs">Late</span>' : ''}

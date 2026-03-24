@@ -7,7 +7,7 @@ import { renderLayout } from '../components/layout.js';
 import { supabase } from '../lib/supabase.js';
 import { showToast } from '../lib/toast.js';
 import { icons } from '../lib/icons.js';
-import { formatDate, formatDateKey, formatTime, formatHoursDisplay, getMonday, getFriday, getTodayDate } from '../lib/utils.js';
+import { formatDate, formatDateKey, formatTime, formatHoursDisplay, formatHoursBothFormats, formatHoursAsHHMM, formatCurrency, calculateSessionHours, getMonday, getFriday, getTodayDate } from '../lib/utils.js';
 import { logAudit } from '../lib/audit.js';
 
 let chartInstance = null;
@@ -503,21 +503,8 @@ async function loadImageAsDataUrl(url) {
   }
 }
 
-function calcSessionHours(timeIn, timeOut) {
-  if (!timeIn || !timeOut) return 0;
-  const ms = new Date(timeOut) - new Date(timeIn);
-  return Math.max(0, ms / (1000 * 60 * 60));
-}
-
 function formatHolidayName(name) {
   return String(name || 'Holiday').toUpperCase();
-}
-
-function formatHoursAsHmm(decimalHours) {
-  if (!decimalHours || decimalHours <= 0) return '00:00';
-  const hours = Math.floor(decimalHours);
-  const minutes = Math.round((decimalHours - hours) * 60);
-  return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
 }
 
 // ─── DAR: PDF generation ────────────────────────────────────────────────────
@@ -636,8 +623,8 @@ export async function generateDarPdf(darData, weekNum, mondayDate, existingDoc) 
     const holidayTask = `---SUSPENSION OF WORK DUE TO ${formatHolidayName(holidayName)} HOLIDAY---`;
     const noLogTask = '---NO RECORDED LOG FOR THIS DAY---';
 
-    // Morning session
-    const mHours = isHolidayDate ? 0 : (isNoLog ? 0 : calcSessionHours(att?.time_in_1, att?.time_out_1));
+    // Morning session (calculate for display purposes only)
+    const mHours = isHolidayDate ? 0 : (isNoLog ? 0 : calculateSessionHours(att?.time_in_1, att?.time_out_1));
     const mTask = morningNarr?.task?.title || '';
     const mContent = stripHtml(morningNarr?.content);
     let mAccomplished = mTask ? `${mTask}${mContent ? ': ' + mContent : ''}` : mContent;
@@ -650,7 +637,7 @@ export async function generateDarPdf(darData, weekNum, mondayDate, existingDoc) 
       isHolidayDate || isNoLog ? '00:00' : (att?.time_in_1 ? formatTime(att.time_in_1) : '00:00'),
       isHolidayDate || isNoLog ? '00:00' : (att?.time_out_1 ? formatTime(att.time_out_1) : '00:00'),
       mAccomplished,
-      formatHoursAsHmm(mHours),
+      formatHoursAsHHMM(mHours),
       '',
       '',
     ]);
@@ -665,8 +652,8 @@ export async function generateDarPdf(darData, weekNum, mondayDate, existingDoc) 
       signatureCells.push({ row: mRowIdx, col: 6, dataUrl: supervisorSigDataUrl });
     }
 
-    // Afternoon session
-    const aHours = isHolidayDate ? 0 : (isNoLog ? 0 : calcSessionHours(att?.time_in_2, att?.time_out_2));
+    // Afternoon session (calculate for display purposes only)
+    const aHours = isHolidayDate ? 0 : (isNoLog ? 0 : calculateSessionHours(att?.time_in_2, att?.time_out_2));
     const aTask = afternoonNarr?.task?.title || '';
     const aContent = stripHtml(afternoonNarr?.content);
     let aAccomplished = aTask ? `${aTask}${aContent ? ': ' + aContent : ''}` : aContent;
@@ -679,7 +666,7 @@ export async function generateDarPdf(darData, weekNum, mondayDate, existingDoc) 
       isHolidayDate || isNoLog ? '00:00' : (att?.time_in_2 ? formatTime(att.time_in_2) : '00:00'),
       isHolidayDate || isNoLog ? '00:00' : (att?.time_out_2 ? formatTime(att.time_out_2) : '00:00'),
       aAccomplished,
-      formatHoursAsHmm(aHours),
+      formatHoursAsHHMM(aHours),
       '',
       '',
     ]);
@@ -694,7 +681,11 @@ export async function generateDarPdf(darData, weekNum, mondayDate, existingDoc) 
       signatureCells.push({ row: aRowIdx, col: 6, dataUrl: supervisorSigDataUrl });
     }
 
-    totalHours += mHours + aHours;
+    // Use stored total_hours from database (source of truth) instead of recalculating
+    // This ensures consistency with attendance overview and allowance computations
+    if (att?.total_hours != null) {
+      totalHours += att.total_hours;
+    }
   });
 
   const pageHeight = doc.internal.pageSize.getHeight();
@@ -756,8 +747,11 @@ export async function generateDarPdf(darData, weekNum, mondayDate, existingDoc) 
     ? allowancePeriod.total_amount
     : (Number.isFinite(computedAllowance) ? computedAllowance : 0);
 
-  // Place totals on the same row, left and right — use plain ASCII "PHP" to avoid font-encoding issues with the peso sign
-  doc.text(`TOTAL NUMBER OF HOURS: ${totalHours.toFixed(2)} hrs`, margin, finalY);
+  // Place totals on the same row, left and right
+  // Show hours in both formats for transparency: "28h 45m (28.75 hrs)"
+  // Show allowance with 2 decimal places: "PHP 719.16"
+  const totalHoursDisplay = formatHoursBothFormats(totalHours);
+  doc.text(`TOTAL NUMBER OF HOURS: ${totalHoursDisplay}`, margin, finalY);
   doc.text(`TOTAL ALLOWANCE FOR THIS WEEK: PHP ${allowanceTotal.toFixed(2)}`, pageWidth - margin, finalY, { align: 'right' });
 
   return doc;

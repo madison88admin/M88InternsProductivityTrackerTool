@@ -115,6 +115,7 @@ export async function renderNarrativesPage() {
                 <span class="badge-${morningNarrative.status === 'approved' ? 'approved' : morningNarrative.status === 'rejected' ? 'rejected' : 'pending'}">
                   ${morningNarrative.status}
                 </span>
+                ${morningNarrative.edited_at ? '<span class="badge bg-info-100 text-info-700 text-xs ml-1">Edited</span>' : ''}
               ` : '<span class="badge bg-neutral-100 text-neutral-500">Not submitted</span>'}
             </div>
             <p class="text-xs text-neutral-400 mb-2">Time In 1 → Time Out 1 ${morningHours !== null ? `• ${formatHoursDisplay(morningHours)}` : ''}</p>
@@ -141,6 +142,7 @@ export async function renderNarrativesPage() {
                 <span class="badge-${afternoonNarrative.status === 'approved' ? 'approved' : afternoonNarrative.status === 'rejected' ? 'rejected' : 'pending'}">
                   ${afternoonNarrative.status}
                 </span>
+                ${afternoonNarrative.edited_at ? '<span class="badge bg-info-100 text-info-700 text-xs ml-1">Edited</span>' : ''}
               ` : '<span class="badge bg-neutral-100 text-neutral-500">Not submitted</span>'}
             </div>
             <p class="text-xs text-neutral-400 mb-2">Time In 2 → Time Out 2 ${afternoonHours !== null ? `• ${formatHoursDisplay(afternoonHours)}` : ''}</p>
@@ -207,7 +209,7 @@ export async function renderNarrativesPage() {
       `;
     }
 
-    const canEdit = narrative.status === 'rejected' || (narrative.status === 'pending' && narrative.date === today);
+    const canEdit = narrative.status === 'rejected' || narrative.status === 'pending';
 
     return `
       <div class="border border-neutral-200 rounded-lg p-3">
@@ -216,6 +218,7 @@ export async function renderNarrativesPage() {
           <div class="flex items-center gap-2">
             ${narrative.hours ? `<span class="text-xs text-neutral-400">${formatHoursDisplay(narrative.hours)}</span>` : ''}
             <span class="badge-${narrative.status === 'approved' ? 'approved' : narrative.status === 'rejected' ? 'rejected' : 'pending'}">${narrative.status}</span>
+            ${narrative.edited_at ? '<span class="badge bg-info-100 text-info-700 text-xs">Edited</span>' : ''}
             ${canEdit ? `
               <button class="btn-sm btn-secondary edit-narrative-btn" data-narrative-id="${narrative.id}" title="Edit">
                 ${icons.edit}
@@ -1054,6 +1057,7 @@ function openEditNarrativeModal(narrative, tasks, profile) {
             content,
             status: 'pending',
             rejection_reason: null,
+            edited_at: new Date().toISOString(),
           })
           .eq('id', narrative.id);
 
@@ -1066,18 +1070,24 @@ function openEditNarrativeModal(narrative, tasks, profile) {
             entity_id: narrative.id,
             intern_id: profile.id,
             supervisor_id: profile.supervisor_id,
-            comments: 'Resubmitted after rejection',
+            comments: narrative.status === 'rejected' ? 'Resubmitted after rejection' : 'Edited while pending',
           });
         }
 
         // Notify all department supervisors
         const deptSupervisors = await getDepartmentSupervisors(profile.id);
+        const wasRejected = narrative.status === 'rejected';
+        const notifTitle = wasRejected ? 'Narrative Resubmitted' : 'Narrative Edited';
+        const notifMessage = wasRejected
+          ? `${profile.full_name} resubmitted a ${narrative.session} narrative for ${formatDate(narrative.date)}`
+          : `${profile.full_name} edited their ${narrative.session} narrative for ${formatDate(narrative.date)}`;
+
         if (deptSupervisors.length > 0) {
           const supervisorNotifs = deptSupervisors.map(sup => ({
             user_id: sup.id,
             type: 'pending_approval',
-            title: 'Narrative Resubmitted',
-            message: `${profile.full_name} resubmitted a ${narrative.session} narrative for ${formatDate(narrative.date)}`,
+            title: notifTitle,
+            message: notifMessage,
             entity_type: 'narrative',
             entity_id: narrative.id,
           }));
@@ -1098,8 +1108,8 @@ function openEditNarrativeModal(narrative, tasks, profile) {
             .map(a => ({
               user_id: a.id,
               type: 'pending_approval',
-              title: 'Narrative Resubmitted',
-              message: `${profile.full_name} resubmitted a ${narrative.session} narrative for ${formatDate(narrative.date)}`,
+              title: notifTitle,
+              message: notifMessage,
               entity_type: 'narrative',
               entity_id: narrative.id,
             }));

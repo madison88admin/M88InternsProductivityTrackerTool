@@ -598,13 +598,17 @@ async function computeWeeklyAllowances(currentRate, internRates, allowanceRateMo
               continue;
             }
 
+            // Round total_hours to 2 decimals before calculating amount
+            // This ensures the calculation matches what users see in the display
+            const roundedHours = Math.round(totalHours * 100) / 100;
+
             const payload = {
               intern_id: intern.id,
               week_start: weekStart,
               week_end: weekEnd,
               total_hours: totalHours,
               hourly_rate: rate,
-              total_amount: Math.round(totalHours * rate * 100) / 100,
+              total_amount: Math.round(roundedHours * rate * 100) / 100,
               status: 'computed',
               reviewed_by: null,
               reviewed_at: null,
