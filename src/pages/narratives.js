@@ -1068,18 +1068,23 @@ function openEditNarrativeModal(narrative, tasks, profile) {
             supervisor_id: profile.supervisor_id,
             comments: 'Resubmitted after rejection',
           });
+        }
 
-          await supabase.from('notifications').insert({
-            user_id: profile.supervisor_id,
+        // Notify all department supervisors
+        const deptSupervisors = await getDepartmentSupervisors(profile.id);
+        if (deptSupervisors.length > 0) {
+          const supervisorNotifs = deptSupervisors.map(sup => ({
+            user_id: sup.id,
             type: 'pending_approval',
             title: 'Narrative Resubmitted',
             message: `${profile.full_name} resubmitted a ${narrative.session} narrative for ${formatDate(narrative.date)}`,
             entity_type: 'narrative',
             entity_id: narrative.id,
-          });
+          }));
+          await supabase.from('notifications').insert(supervisorNotifs);
         }
 
-        // Also notify all active admins
+        // Also notify all active admins (exclude supervisors already notified)
         const { data: adminsForResubmit } = await supabase
           .from('profiles')
           .select('id')
@@ -1087,8 +1092,9 @@ function openEditNarrativeModal(narrative, tasks, profile) {
           .eq('is_active', true);
 
         if (adminsForResubmit && adminsForResubmit.length > 0) {
+          const supervisorIds = deptSupervisors.map(s => s.id);
           const adminNotifs = adminsForResubmit
-            .filter(a => a.id !== profile.supervisor_id)
+            .filter(a => !supervisorIds.includes(a.id))
             .map(a => ({
               user_id: a.id,
               type: 'pending_approval',

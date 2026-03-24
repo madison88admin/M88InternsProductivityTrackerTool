@@ -15,5 +15,6 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
     autoRefreshToken: true,
     persistSession: true,
     detectSessionInUrl: false,
+    storage: window.sessionStorage, // Use sessionStorage instead of localStorage - auto logout on tab close
   },
 });

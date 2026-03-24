@@ -1,6 +1,6 @@
 /**
  * Idle Timeout Service
- * Automatically logs out the user after 3 minutes of inactivity.
+ * Automatically logs out the user after 5 minutes of inactivity.
  * A 30-second countdown warning is shown before logout.
  */
 import { supabase } from './supabase.js';
@@ -8,7 +8,7 @@ import { logout, isAuthenticated } from './auth.js';
 import { navigateTo } from './router.js';
 import { showToast } from './toast.js';
 
-const IDLE_TIMEOUT_MS = 3 * 60 * 1000; // 3 minutes
+const IDLE_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
 const WARN_BEFORE_MS  = 30 * 1000;     // warn 30 seconds before logout
 
 const ACTIVITY_EVENTS = ['mousemove', 'mousedown', 'keydown', 'scroll', 'touchstart', 'click'];

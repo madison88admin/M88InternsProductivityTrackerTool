@@ -432,23 +432,20 @@ export async function renderAttendancePage() {
               supervisor_id: profile.supervisor_id,
             });
 
-            await supabase.from('notifications').insert({
-              user_id: profile.supervisor_id,
-              type: 'pending_approval',
-              title: 'Attendance Pending Review',
-              message: `${profile.full_name} has completed attendance for ${formatDate(today)}`,
-              entity_type: 'attendance',
-              entity_id: todayRecord.id,
-            });
+            // Notify all supervisors in the same department
+            const deptSupervisors = await getDepartmentSupervisors(profile.id);
+            if (deptSupervisors.length > 0) {
+              const notifPayload = deptSupervisors.map(sup => ({
+                user_id: sup.id,
+                type: 'pending_approval',
+                title: 'Attendance Pending Review',
+                message: `${profile.full_name} has completed attendance for ${formatDate(today)}`,
+                entity_type: 'attendance',
+                entity_id: todayRecord.id,
+              }));
+              await supabase.from('notifications').insert(notifPayload);
 
-            // Send email notification to supervisor
-            const { data: supervisor } = await supabase
-              .from('profiles')
-              .select('full_name, email')
-              .eq('id', profile.supervisor_id)
-              .single();
-
-            if (supervisor?.email) {
+              // Send email notification to all department supervisors
               const emailHtml = `
                 <!DOCTYPE html>
                 <html>
@@ -479,7 +476,11 @@ export async function renderAttendancePage() {
                   </body>
                 </html>
               `;
-              await sendEmailNotification(supervisor.email, 'Attendance Pending Review', emailHtml).catch(err => console.error('Failed to send attendance email:', err));
+              for (const sup of deptSupervisors) {
+                if (sup.email) {
+                  sendEmailNotification(sup.email, 'Attendance Pending Review', emailHtml).catch(err => console.error('Failed to send attendance email to', sup.email, err));
+                }
+              }
             }
           }
 
@@ -623,18 +624,19 @@ function openCorrectionModal(record, profile) {
 
         // Create approval entry so supervisor/admin can act on it from the Approvals page
         if (profile.supervisor_id) {
-          await Promise.all([
-            supabase.from('approvals').insert({
-              type: 'attendance_correction',
-              entity_id: correctionData.id,
-              intern_id: profile.id,
-              supervisor_id: profile.supervisor_id,
-            }),
-            supabase.from('notifications').insert({
-              user_id: profile.supervisor_id,
-              ...baseNotif,
-            }),
-          ]);
+          await supabase.from('approvals').insert({
+            type: 'attendance_correction',
+            entity_id: correctionData.id,
+            intern_id: profile.id,
+            supervisor_id: profile.supervisor_id,
+          });
+        }
+
+        // Notify all department supervisors
+        const deptSupervisors = await getDepartmentSupervisors(profile.id);
+        if (deptSupervisors.length > 0) {
+          const supervisorNotifs = deptSupervisors.map(sup => ({ user_id: sup.id, ...baseNotif }));
+          await supabase.from('notifications').insert(supervisorNotifs);
         }
 
         // Also notify all active admins since only admins can approve corrections
@@ -645,8 +647,10 @@ function openCorrectionModal(record, profile) {
           .eq('is_active', true)
           .then(({ data: admins }) => {
             if (!admins || admins.length === 0) return;
+            // Filter out supervisors we already notified
+            const supervisorIds = deptSupervisors.map(s => s.id);
             const adminNotifs = admins
-              .filter(a => a.id !== profile.supervisor_id)
+              .filter(a => !supervisorIds.includes(a.id))
               .map(a => ({ user_id: a.id, ...baseNotif }));
             if (adminNotifs.length === 0) return;
             return supabase.from('notifications').insert(adminNotifs);

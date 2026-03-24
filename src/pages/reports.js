@@ -373,7 +373,9 @@ async function updateDarPreview(el) {
 
   try {
     const darData = await fetchDarData(selectedIds[0], mondayDate, fridayDate);
-    const doc = await generateDarPdf(darData, weekNum, mondayDate);
+    // Calculate week number for the selected intern
+    const internWeekNum = calculateInternWeekNumber(darData.intern?.ojt_start_date, mondayDate);
+    const doc = await generateDarPdf(darData, internWeekNum, mondayDate);
     const blob = doc.output('blob');
 
     if (previewFrame._blobUrl) URL.revokeObjectURL(previewFrame._blobUrl);
@@ -383,12 +385,27 @@ async function updateDarPreview(el) {
     previewFrame.style.opacity = '1';
 
     const internName = darData.intern?.full_name || 'Intern';
-    previewLabel.textContent = `${internName} — Week ${weekNum}`;
+    previewLabel.textContent = `${internName} — Week ${internWeekNum}`;
   } catch (err) {
     console.error('DAR preview error:', err);
     previewLabel.textContent = 'Preview unavailable';
     previewSection.style.display = 'none';
   }
+}
+
+/**
+ * Calculate week number for an intern based on OJT start date and target Monday
+ */
+function calculateInternWeekNumber(ojtStartDate, mondayDate) {
+  if (!ojtStartDate) return 1;
+
+  const ojtStart = new Date(ojtStartDate + 'T00:00:00');
+  const monday = new Date(mondayDate + 'T00:00:00');
+  const ojtMonday = getMonday(ojtStart);
+  const diffMs = monday - ojtMonday;
+  let weekNum = Math.floor(diffMs / (7 * 24 * 60 * 60 * 1000)) + 1;
+  if (weekNum < 1) weekNum = 1;
+  return weekNum;
 }
 
 export async function fetchDarData(internId, mondayDate, fridayDate) {
@@ -776,8 +793,9 @@ async function handleDarGeneration(el) {
     if (selectedInternIds.length === 1 || bulkMode === 'single') {
       for (const internId of selectedInternIds) {
         const darData = await fetchDarData(internId, mondayDate, fridayDate);
-        const doc = await generateDarPdf(darData, weekNum, mondayDate);
-        const fileName = `DAR_${darData.intern?.full_name?.replace(/\s+/g, '_') || 'intern'}_Week${weekNum}.pdf`;
+        const internWeekNum = calculateInternWeekNumber(darData.intern?.ojt_start_date, mondayDate);
+        const doc = await generateDarPdf(darData, internWeekNum, mondayDate);
+        const fileName = `DAR_${darData.intern?.full_name?.replace(/\s+/g, '_') || 'intern'}_Week${internWeekNum}.pdf`;
         doc.save(fileName);
       }
       await logAudit('report.export_pdf', 'report', null, {
@@ -797,8 +815,9 @@ async function handleDarGeneration(el) {
 
       for (const internId of selectedInternIds) {
         const darData = await fetchDarData(internId, mondayDate, fridayDate);
-        const doc = await generateDarPdf(darData, weekNum, mondayDate);
-        const fileName = `DAR_${darData.intern?.full_name?.replace(/\s+/g, '_') || 'intern'}_Week${weekNum}.pdf`;
+        const internWeekNum = calculateInternWeekNumber(darData.intern?.ojt_start_date, mondayDate);
+        const doc = await generateDarPdf(darData, internWeekNum, mondayDate);
+        const fileName = `DAR_${darData.intern?.full_name?.replace(/\s+/g, '_') || 'intern'}_Week${internWeekNum}.pdf`;
         const pdfBlob = doc.output('blob');
         zip.file(fileName, pdfBlob);
       }
@@ -807,7 +826,7 @@ async function handleDarGeneration(el) {
       const url = URL.createObjectURL(zipBlob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `DAR_Week${weekNum}_${getTodayDate()}.zip`;
+      a.download = `DAR_${formatDateKey(mondayDate)}_to_${formatDateKey(fridayDate)}.zip`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
@@ -828,16 +847,17 @@ async function handleDarGeneration(el) {
 
       for (let i = 0; i < selectedInternIds.length; i++) {
         const darData = await fetchDarData(selectedInternIds[i], mondayDate, fridayDate);
+        const internWeekNum = calculateInternWeekNumber(darData.intern?.ojt_start_date, mondayDate);
         if (i === 0) {
-          doc = await generateDarPdf(darData, weekNum, mondayDate);
+          doc = await generateDarPdf(darData, internWeekNum, mondayDate);
         } else {
           doc.addPage('a4', 'portrait');
-          await generateDarPdf(darData, weekNum, mondayDate, doc);
+          await generateDarPdf(darData, internWeekNum, mondayDate, doc);
         }
       }
 
       if (doc) {
-        doc.save(`DAR_Combined_Week${weekNum}_${getTodayDate()}.pdf`);
+        doc.save(`DAR_Combined_${formatDateKey(mondayDate)}_to_${formatDateKey(fridayDate)}.pdf`);
         await logAudit('report.export_pdf', 'report', null, {
           report_type: 'dar',
           format: 'pdf',

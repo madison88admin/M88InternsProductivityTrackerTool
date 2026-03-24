@@ -1,7 +1,7 @@
 /**
  * Login Page
  */
-import { login, logout } from '../lib/auth.js';
+import { login } from '../lib/auth.js';
 import { renderPage } from '../lib/component.js';
 import { showToast } from '../lib/toast.js';
 import { navigateTo } from '../lib/router.js';
@@ -31,10 +31,10 @@ export async function renderLoginPage() {
   }
 
   /**
-   * Show Terms and Conditions modal
-   * User must accept before proceeding to dashboard
+   * Show Terms and Conditions modal (view-only)
+   * User can read the full terms by clicking the link
    */
-  async function showTermsModal() {
+  function showTermsModal() {
     const today = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
 
     const modalOverlay = document.createElement('div');
@@ -51,7 +51,7 @@ export async function renderLoginPage() {
         <h3 class="text-lg font-bold text-neutral-900">Terms and Conditions</h3>
         <p class="text-xs text-neutral-500 mt-0.5">Madison 88 Business Solutions Asia Inc. — M88 IPT · Effective ${today}</p>
       </div>
-      <span class="text-xs font-semibold px-3 py-1 rounded-full" style="color: var(--color-primary-700); background: var(--color-primary-50); border: 1px solid var(--color-primary-200);">Required</span>
+      <button type="button" class="modal-close" aria-label="Close">&times;</button>
     `;
 
     const body = document.createElement('div');
@@ -188,19 +188,9 @@ export async function renderLoginPage() {
     `;
 
     const footer = document.createElement('div');
-    footer.className = 'px-6 py-4 flex-shrink-0 flex flex-col gap-3';
-    footer.style.cssText = 'border-top: 1px solid var(--color-neutral-100); background: var(--color-neutral-50);';
+    footer.className = 'modal-footer';
     footer.innerHTML = `
-      <label id="terms-checkbox-label" class="flex items-start gap-3 cursor-pointer p-3 rounded-xl border-2 transition-all" style="border-color: var(--color-neutral-200);">
-        <input type="checkbox" id="terms-accept-checkbox" class="w-4 h-4 mt-0.5 shrink-0 cursor-pointer" style="accent-color: var(--color-primary-600);" />
-        <span class="text-sm text-neutral-700 leading-relaxed">
-          I have read and fully understand the Terms and Conditions of M88 IPT. I agree to comply with all terms and acknowledge that <strong class="text-neutral-900">I am personally liable</strong> for my actions within this system.
-        </span>
-      </label>
-      <div class="flex gap-3 justify-end">
-        <button id="terms-decline-btn" class="btn-secondary">Decline</button>
-        <button id="terms-accept-btn" class="btn-primary" disabled style="opacity: 0.4; cursor: not-allowed;">Accept and Login</button>
-      </div>
+      <button type="button" id="terms-close-btn" class="btn-primary">Close</button>
     `;
 
     modalContent.appendChild(header);
@@ -209,39 +199,24 @@ export async function renderLoginPage() {
     modalOverlay.appendChild(modalContent);
     document.body.appendChild(modalOverlay);
 
-    const checkbox = footer.querySelector('#terms-accept-checkbox');
-    const acceptBtn = footer.querySelector('#terms-accept-btn');
-    const declineBtn = footer.querySelector('#terms-decline-btn');
-    const checkboxLabel = footer.querySelector('#terms-checkbox-label');
+    const closeBtn = footer.querySelector('#terms-close-btn');
+    const headerCloseBtn = header.querySelector('.modal-close');
 
-    return new Promise((resolve) => {
-      checkbox.addEventListener('change', (e) => {
-        if (e.target.checked) {
-          acceptBtn.disabled = false;
-          acceptBtn.style.opacity = '1';
-          acceptBtn.style.cursor = 'pointer';
-          checkboxLabel.style.borderColor = 'var(--color-primary-400)';
-          checkboxLabel.style.background = 'var(--color-primary-50)';
-        } else {
-          acceptBtn.disabled = true;
-          acceptBtn.style.opacity = '0.4';
-          acceptBtn.style.cursor = 'not-allowed';
-          checkboxLabel.style.borderColor = 'var(--color-neutral-200)';
-          checkboxLabel.style.background = '';
-        }
-      });
+    // Close on button click
+    closeBtn.addEventListener('click', () => {
+      modalOverlay.remove();
+    });
 
-      acceptBtn.addEventListener('click', () => {
+    // Close on header X click
+    headerCloseBtn.addEventListener('click', () => {
+      modalOverlay.remove();
+    });
+
+    // Close on backdrop click
+    modalOverlay.addEventListener('click', (e) => {
+      if (e.target === modalOverlay) {
         modalOverlay.remove();
-        resolve(true);
-      });
-
-      declineBtn.addEventListener('click', async () => {
-        modalOverlay.remove();
-        await logout();
-        showToast('You must accept the Terms and Conditions to access the system', 'info');
-        resolve(false);
-      });
+      }
     });
   }
 
@@ -314,6 +289,15 @@ export async function renderLoginPage() {
               <input type="password" id="password" class="form-input" placeholder="Enter your password" required autocomplete="current-password" />
             </div>
 
+            <div class="pt-2">
+              <label class="flex items-start gap-3 cursor-pointer">
+                <input type="checkbox" id="terms-checkbox" class="w-4 h-4 mt-0.5 shrink-0 cursor-pointer" style="accent-color: var(--color-primary-600);" required />
+                <span class="text-sm text-neutral-600 leading-relaxed">
+                  I have read and agree to the <button type="button" id="view-terms-link" class="text-primary-600 hover:text-primary-700 font-medium underline">Terms and Conditions</button> of M88 IPT
+                </span>
+              </label>
+            </div>
+
             <button type="submit" id="login-btn" class="btn-primary w-full py-3! text-base!">
               <span id="login-text">Sign In</span>
               <span id="login-spinner" class="spinner hidden ml-2"></span>
@@ -336,14 +320,28 @@ export async function renderLoginPage() {
     </div>
   `, () => {
     const form = document.getElementById('login-form');
-    
+    const viewTermsLink = document.getElementById('view-terms-link');
+
+    // Open Terms modal when link is clicked
+    viewTermsLink.addEventListener('click', (e) => {
+      e.preventDefault();
+      showTermsModal();
+    });
+
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
       const email = document.getElementById('email').value;
       const password = document.getElementById('password').value;
+      const termsCheckbox = document.getElementById('terms-checkbox');
       const btn = document.getElementById('login-btn');
       const text = document.getElementById('login-text');
       const spinner = document.getElementById('login-spinner');
+
+      // Check if terms are accepted
+      if (!termsCheckbox.checked) {
+        showToast('You must accept the Terms and Conditions to sign in', 'warning');
+        return;
+      }
 
       btn.disabled = true;
       text.textContent = 'Signing in...';
@@ -351,15 +349,8 @@ export async function renderLoginPage() {
 
       try {
         await login(email, password);
-        const accepted = await showTermsModal();
-        if (accepted) {
-          showToast('Welcome back!', 'success');
-          navigateTo('/dashboard');
-        } else {
-          btn.disabled = false;
-          text.textContent = 'Sign In';
-          spinner.classList.add('hidden');
-        }
+        showToast('Welcome back!', 'success');
+        navigateTo('/dashboard');
       } catch (err) {
         showToast(err.message || 'Invalid email or password', 'error');
         btn.disabled = false;

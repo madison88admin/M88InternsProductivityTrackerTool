@@ -343,52 +343,51 @@ export async function renderMyTasksPage() {
               entity_id: taskId,
             };
 
-            if (profile.supervisor_id) {
-              await supabase.from('notifications').insert({ user_id: profile.supervisor_id, ...taskStartNotif });
+            // Notify all department supervisors
+            const deptSupervisors = await getDepartmentSupervisors(profile.id);
+            if (deptSupervisors.length > 0) {
+              const supervisorNotifs = deptSupervisors.map(sup => ({ user_id: sup.id, ...taskStartNotif }));
+              await supabase.from('notifications').insert(supervisorNotifs);
 
-              // Send email notification to supervisor
-              const { data: supervisor } = await supabase
-                .from('profiles')
-                .select('full_name, email')
-                .eq('id', profile.supervisor_id)
-                .single();
-
-              if (supervisor?.email) {
-                const emailHtml = `
-                  <!DOCTYPE html>
-                  <html>
-                    <head>
-                      <style>
-                        body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
-                        .container { max-width: 600px; margin: 0 auto; padding: 20px; }
-                        .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px; border-radius: 5px 5px 0 0; }
-                        .content { background: #f9f9f9; padding: 20px; border: 1px solid #ddd; border-radius: 0 0 5px 5px; }
-                        .badge { display: inline-block; background: #10b981; color: white; padding: 6px 12px; border-radius: 4px; font-weight: bold; font-size: 12px; }
-                        .footer { margin-top: 20px; padding-top: 20px; border-top: 1px solid #ddd; font-size: 12px; color: #666; }
-                      </style>
-                    </head>
-                    <body>
-                      <div class="container">
-                        <div class="header">
-                          <h1>Task In Progress</h1>
-                        </div>
-                        <div class="content">
-                          <p><strong>${profile.full_name}</strong> has started working on a task <span class="badge">IN PROGRESS</span></p>
-                          <p><strong>Task:</strong> ${taskData?.title || 'A task'}</p>
-                          <p><a href="${window.location.origin}/#/task-management" style="background: #667eea; color: white; padding: 10px 20px; text-decoration: none; border-radius: 4px; display: inline-block; margin-top: 10px;">View in System</a></p>
-                        </div>
-                        <div class="footer">
-                          <p>This is an automated notification. Please do not reply to this email.</p>
-                        </div>
+              // Send email notification to all department supervisors
+              const emailHtml = `
+                <!DOCTYPE html>
+                <html>
+                  <head>
+                    <style>
+                      body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+                      .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+                      .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px; border-radius: 5px 5px 0 0; }
+                      .content { background: #f9f9f9; padding: 20px; border: 1px solid #ddd; border-radius: 0 0 5px 5px; }
+                      .badge { display: inline-block; background: #10b981; color: white; padding: 6px 12px; border-radius: 4px; font-weight: bold; font-size: 12px; }
+                      .footer { margin-top: 20px; padding-top: 20px; border-top: 1px solid #ddd; font-size: 12px; color: #666; }
+                    </style>
+                  </head>
+                  <body>
+                    <div class="container">
+                      <div class="header">
+                        <h1>Task In Progress</h1>
                       </div>
-                    </body>
-                  </html>
-                `;
-                await sendEmailNotification(supervisor.email, `Task In Progress - ${taskData?.title || 'A task'}`, emailHtml).catch(err => console.error('Failed to send task email:', err));
+                      <div class="content">
+                        <p><strong>${profile.full_name}</strong> has started working on a task <span class="badge">IN PROGRESS</span></p>
+                        <p><strong>Task:</strong> ${taskData?.title || 'A task'}</p>
+                        <p><a href="${window.location.origin}/#/task-management" style="background: #667eea; color: white; padding: 10px 20px; text-decoration: none; border-radius: 4px; display: inline-block; margin-top: 10px;">View in System</a></p>
+                      </div>
+                      <div class="footer">
+                        <p>This is an automated notification. Please do not reply to this email.</p>
+                      </div>
+                    </div>
+                  </body>
+                </html>
+              `;
+              for (const sup of deptSupervisors) {
+                if (sup.email) {
+                  sendEmailNotification(sup.email, `Task In Progress - ${taskData?.title || 'A task'}`, emailHtml).catch(err => console.error('Failed to send task email to', sup.email, err));
+                }
               }
             }
 
-            // Also notify all active admins
+            // Also notify all active admins (exclude supervisors already notified)
             const { data: admins } = await supabase
               .from('profiles')
               .select('id, email, full_name')
@@ -396,13 +395,14 @@ export async function renderMyTasksPage() {
               .eq('is_active', true);
 
             if (admins && admins.length > 0) {
+              const supervisorIds = deptSupervisors.map(s => s.id);
               const adminNotifs = admins
-                .filter(a => a.id !== profile.supervisor_id)
+                .filter(a => !supervisorIds.includes(a.id))
                 .map(a => ({ user_id: a.id, ...taskStartNotif }));
               if (adminNotifs.length > 0) await supabase.from('notifications').insert(adminNotifs);
 
               // Send email to all other admins
-              const otherAdmins = admins.filter(a => a.id !== profile.supervisor_id);
+              const otherAdmins = admins.filter(a => !supervisorIds.includes(a.id));
               for (const admin of otherAdmins) {
                 if (admin.email) {
                   const adminEmailHtml = `
