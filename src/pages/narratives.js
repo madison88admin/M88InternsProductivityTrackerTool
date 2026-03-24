@@ -112,10 +112,17 @@ export async function renderNarrativesPage() {
                 <span class="text-sm font-semibold text-neutral-700">${icons.clock} Morning Session</span>
               </div>
               ${morningNarrative ? `
-                <span class="badge-${morningNarrative.status === 'approved' ? 'approved' : morningNarrative.status === 'rejected' ? 'rejected' : 'pending'}">
-                  ${morningNarrative.status}
-                </span>
-                ${morningNarrative.edited_at ? '<span class="badge bg-info-100 text-info-700 text-xs ml-1">Edited</span>' : ''}
+                <div class="flex items-center gap-2">
+                  <span class="badge-${morningNarrative.status === 'approved' ? 'approved' : morningNarrative.status === 'rejected' ? 'rejected' : 'pending'}">
+                    ${morningNarrative.status}
+                  </span>
+                  ${morningNarrative.edited_at ? '<span class="badge bg-info-100 text-info-700 text-xs">Edited</span>' : ''}
+                  ${(morningNarrative.status === 'rejected' || morningNarrative.status === 'pending') ? `
+                    <button class="btn-sm btn-secondary edit-narrative-btn" data-narrative-id="${morningNarrative.id}" title="Edit">
+                      ${icons.edit}
+                    </button>
+                  ` : ''}
+                </div>
               ` : '<span class="badge bg-neutral-100 text-neutral-500">Not submitted</span>'}
             </div>
             <p class="text-xs text-neutral-400 mb-2">Time In 1 → Time Out 1 ${morningHours !== null ? `• ${formatHoursDisplay(morningHours)}` : ''}</p>
@@ -139,10 +146,17 @@ export async function renderNarrativesPage() {
                 <span class="text-sm font-semibold text-neutral-700">${icons.clock} Afternoon Session</span>
               </div>
               ${afternoonNarrative ? `
-                <span class="badge-${afternoonNarrative.status === 'approved' ? 'approved' : afternoonNarrative.status === 'rejected' ? 'rejected' : 'pending'}">
-                  ${afternoonNarrative.status}
-                </span>
-                ${afternoonNarrative.edited_at ? '<span class="badge bg-info-100 text-info-700 text-xs ml-1">Edited</span>' : ''}
+                <div class="flex items-center gap-2">
+                  <span class="badge-${afternoonNarrative.status === 'approved' ? 'approved' : afternoonNarrative.status === 'rejected' ? 'rejected' : 'pending'}">
+                    ${afternoonNarrative.status}
+                  </span>
+                  ${afternoonNarrative.edited_at ? '<span class="badge bg-info-100 text-info-700 text-xs">Edited</span>' : ''}
+                  ${(afternoonNarrative.status === 'rejected' || afternoonNarrative.status === 'pending') ? `
+                    <button class="btn-sm btn-secondary edit-narrative-btn" data-narrative-id="${afternoonNarrative.id}" title="Edit">
+                      ${icons.edit}
+                    </button>
+                  ` : ''}
+                </div>
               ` : '<span class="badge bg-neutral-100 text-neutral-500">Not submitted</span>'}
             </div>
             <p class="text-xs text-neutral-400 mb-2">Time In 2 → Time Out 2 ${afternoonHours !== null ? `• ${formatHoursDisplay(afternoonHours)}` : ''}</p>
