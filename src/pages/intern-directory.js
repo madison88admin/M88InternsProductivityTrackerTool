@@ -175,26 +175,52 @@ export async function renderInternDirectoryPage() {
           <p class="text-xs text-neutral-400 mt-1">Select a past date or today</p>
         </div>
 
-        <div class="grid grid-cols-2 gap-4">
-          <div>
-            <label class="form-label">Morning In <span class="text-danger-500">*</span></label>
-            <input type="time" id="lph-time-in-1" class="form-input" required />
+        <p class="text-xs text-neutral-500">Mark a session as "Not worked" if the intern only worked the other session.</p>
+        <div class="space-y-6">
+          <!-- Morning Session -->
+          <div class="border border-neutral-200 rounded-lg p-4 bg-neutral-50">
+            <div class="flex items-center justify-between mb-4">
+              <h4 class="font-semibold text-neutral-800">Morning Session</h4>
+              <label class="flex items-center gap-2 cursor-pointer">
+                <input type="checkbox" id="lph-check-morning-not-worked" class="w-4 h-4">
+                <span class="text-sm text-neutral-600">Not worked</span>
+              </label>
+            </div>
+            <div class="space-y-3">
+              <div>
+                <label class="form-label">Morning In *</label>
+                <input type="time" id="lph-time-in-1" class="form-input w-full" placeholder="--:-- --">
+              </div>
+              <div>
+                <label class="form-label">Lunch Out *</label>
+                <input type="time" id="lph-time-out-1" class="form-input w-full" placeholder="--:-- --">
+              </div>
+            </div>
           </div>
-          <div>
-            <label class="form-label">Lunch Out <span class="text-danger-500">*</span></label>
-            <input type="time" id="lph-time-out-1" class="form-input" required />
-          </div>
-          <div>
-            <label class="form-label">Afternoon In <span class="text-danger-500">*</span></label>
-            <input type="time" id="lph-time-in-2" class="form-input" required />
-          </div>
-          <div>
-            <label class="form-label">End of Day <span class="text-danger-500">*</span></label>
-            <input type="time" id="lph-time-out-2" class="form-input" required />
-          </div>
-        </div>
 
-        <p class="text-xs text-neutral-400">All times are required. Times must be in chronological order.</p>
+          <!-- Afternoon Session -->
+          <div class="border border-neutral-200 rounded-lg p-4 bg-neutral-50">
+            <div class="flex items-center justify-between mb-4">
+              <h4 class="font-semibold text-neutral-800">Afternoon Session</h4>
+              <label class="flex items-center gap-2 cursor-pointer">
+                <input type="checkbox" id="lph-check-afternoon-not-worked" class="w-4 h-4">
+                <span class="text-sm text-neutral-600">Not worked</span>
+              </label>
+            </div>
+            <div class="space-y-3">
+              <div>
+                <label class="form-label">Afternoon In *</label>
+                <input type="time" id="lph-time-in-2" class="form-input w-full" placeholder="01:00 PM">
+              </div>
+              <div>
+                <label class="form-label">End of Day *</label>
+                <input type="time" id="lph-time-out-2" class="form-input w-full" placeholder="05:42 PM">
+              </div>
+            </div>
+          </div>
+
+          <p class="text-xs text-neutral-500 italic">All times are required within worked sessions. Times must be in chronological order.</p>
+        </div>
 
         <div class="flex justify-end gap-3 pt-2">
           <button type="button" id="lph-cancel" class="btn-secondary">Cancel</button>
@@ -211,6 +237,28 @@ export async function renderInternDirectoryPage() {
       const timeOut2Input = el.querySelector('#lph-time-out-2');
       let lastRequestedDate = '';
 
+      // Handle "Not worked" session checkboxes
+      const setupSessionToggle = (checkboxId, timeInputIds) => {
+        const checkbox = el.querySelector(checkboxId);
+        const inputs = timeInputIds.map(id => el.querySelector(id));
+        
+        checkbox.addEventListener('change', () => {
+          inputs.forEach(input => {
+            if (checkbox.checked) {
+              input.disabled = true;
+              input.value = '';
+              input.style.backgroundColor = '#f3f4f6';
+            } else {
+              input.disabled = false;
+              input.style.backgroundColor = '';
+            }
+          });
+        });
+      };
+
+      setupSessionToggle('#lph-check-morning-not-worked', ['#lph-time-in-1', '#lph-time-out-1']);
+      setupSessionToggle('#lph-check-afternoon-not-worked', ['#lph-time-in-2', '#lph-time-out-2']);
+
       const toTimeInputValue = (timestamp) => {
         if (!timestamp) return '';
         const parsed = new Date(timestamp);
@@ -225,6 +273,17 @@ export async function renderInternDirectoryPage() {
         timeOut1Input.value = '';
         timeIn2Input.value = '';
         timeOut2Input.value = '';
+        el.querySelector('#lph-check-morning-not-worked').checked = false;
+        el.querySelector('#lph-check-afternoon-not-worked').checked = false;
+        // Reset styles
+        timeIn1Input.style.backgroundColor = '';
+        timeOut1Input.style.backgroundColor = '';
+        timeIn2Input.style.backgroundColor = '';
+        timeOut2Input.style.backgroundColor = '';
+        timeIn1Input.disabled = false;
+        timeOut1Input.disabled = false;
+        timeIn2Input.disabled = false;
+        timeOut2Input.disabled = false;
       };
 
       const loadAttendanceForDate = async (date) => {
@@ -252,6 +311,28 @@ export async function renderInternDirectoryPage() {
         timeOut1Input.value = toTimeInputValue(data.time_out_1);
         timeIn2Input.value = toTimeInputValue(data.time_in_2);
         timeOut2Input.value = toTimeInputValue(data.time_out_2);
+
+        // Check if sessions are marked as "not worked" (both times null)
+        const morningNotWorked = !data.time_in_1 && !data.time_out_1;
+        const afternoonNotWorked = !data.time_in_2 && !data.time_out_2;
+
+        if (morningNotWorked) {
+          const checkbox = el.querySelector('#lph-check-morning-not-worked');
+          checkbox.checked = true;
+          timeIn1Input.disabled = true;
+          timeOut1Input.disabled = true;
+          timeIn1Input.style.backgroundColor = '#f3f4f6';
+          timeOut1Input.style.backgroundColor = '#f3f4f6';
+        }
+
+        if (afternoonNotWorked) {
+          const checkbox = el.querySelector('#lph-check-afternoon-not-worked');
+          checkbox.checked = true;
+          timeIn2Input.disabled = true;
+          timeOut2Input.disabled = true;
+          timeIn2Input.style.backgroundColor = '#f3f4f6';
+          timeOut2Input.style.backgroundColor = '#f3f4f6';
+        }
       };
 
       dateInput.addEventListener('change', async (event) => {
@@ -271,28 +352,56 @@ export async function renderInternDirectoryPage() {
         e.preventDefault();
 
         const date = el.querySelector('#lph-date').value;
-        const timeIn1 = el.querySelector('#lph-time-in-1').value;
-        const timeOut1 = el.querySelector('#lph-time-out-1').value;
-        const timeIn2 = el.querySelector('#lph-time-in-2').value;
-        const timeOut2 = el.querySelector('#lph-time-out-2').value;
+        const morningNotWorked = el.querySelector('#lph-check-morning-not-worked').checked;
+        const afternoonNotWorked = el.querySelector('#lph-check-afternoon-not-worked').checked;
 
-        if (!date || !timeIn1 || !timeOut1 || !timeIn2 || !timeOut2) {
-          showToast('Please fill in all fields', 'error');
+        // At least one session must be worked
+        if (morningNotWorked && afternoonNotWorked) {
+          showToast('At least one session (Morning or Afternoon) must be worked', 'error');
           return;
         }
 
-        // Validate chronological order
-        if (timeIn1 >= timeOut1) {
-          showToast('Morning In must be before Lunch Out', 'error');
-          return;
+        let timeIn1 = el.querySelector('#lph-time-in-1').value;
+        let timeOut1 = el.querySelector('#lph-time-out-1').value;
+        let timeIn2 = el.querySelector('#lph-time-in-2').value;
+        let timeOut2 = el.querySelector('#lph-time-out-2').value;
+
+        // Validate Morning session if worked
+        if (!morningNotWorked) {
+          if (!timeIn1 || !timeOut1) {
+            showToast('Morning In and Lunch Out are both required for morning session', 'error');
+            return;
+          }
+          if (timeIn1 >= timeOut1) {
+            showToast('Morning In must be before Lunch Out', 'error');
+            return;
+          }
+        } else {
+          timeIn1 = '';
+          timeOut1 = '';
         }
-        if (timeOut1 >= timeIn2) {
-          showToast('Lunch Out must be before Afternoon In', 'error');
-          return;
+
+        // Validate Afternoon session if worked
+        if (!afternoonNotWorked) {
+          if (!timeIn2 || !timeOut2) {
+            showToast('Afternoon In and End of Day are both required for afternoon session', 'error');
+            return;
+          }
+          if (timeIn2 >= timeOut2) {
+            showToast('Afternoon In must be before End of Day', 'error');
+            return;
+          }
+        } else {
+          timeIn2 = '';
+          timeOut2 = '';
         }
-        if (timeIn2 >= timeOut2) {
-          showToast('Afternoon In must be before End of Day', 'error');
-          return;
+
+        // Validate chronological order if both sessions are worked
+        if (!morningNotWorked && !afternoonNotWorked) {
+          if (timeOut1 >= timeIn2) {
+            showToast('Lunch Out must be before Afternoon In', 'error');
+            return;
+          }
         }
 
         const submitBtn = el.querySelector('#lph-submit');
@@ -302,7 +411,7 @@ export async function renderInternDirectoryPage() {
         try {
           const admin = getCurrentUser();
           const supervisorId = await resolveSupervisorId();
-          const ts = (time) => new Date(`${date}T${time}:00`).toISOString();
+          const ts = (time) => time ? new Date(`${date}T${time}:00`).toISOString() : null;
 
           const recordData = {
             intern_id: intern.internId,

@@ -323,24 +323,51 @@ function openEditAttendanceModal(record, onSaved) {
         <strong>Date:</strong> ${formatDate(record.date)} &nbsp;|&nbsp;
         <strong>Status:</strong> ${record.status}
       </div>
-      <p class="text-xs text-neutral-500">Leave a field blank to clear that punch. Hours, late flag, and outside-hours flag are recalculated automatically on save.</p>
-      <div class="grid grid-cols-2 gap-4">
-        <div>
-          <label class="form-label">AM Time In</label>
-          <input type="time" id="edit-time-in-1" class="form-input" value="${timeIn1}">
+      <p class="text-xs text-neutral-500">Mark a session as "Not worked" if the intern only worked the other session.</p>
+      <div class="space-y-6">
+        <!-- Morning Session -->
+        <div class="border border-neutral-200 rounded-lg p-4 bg-neutral-50">
+          <div class="flex items-center justify-between mb-4">
+            <h4 class="font-semibold text-neutral-800">Morning Session</h4>
+            <label class="flex items-center gap-2 cursor-pointer">
+              <input type="checkbox" id="check-morning-not-worked" class="w-4 h-4">
+              <span class="text-sm text-neutral-600">Not worked</span>
+            </label>
+          </div>
+          <div class="space-y-3">
+            <div>
+              <label class="form-label">Morning In *</label>
+              <input type="time" id="edit-time-in-1" class="form-input w-full" value="${timeIn1}" placeholder="--:-- --">
+            </div>
+            <div>
+              <label class="form-label">Lunch Out *</label>
+              <input type="time" id="edit-time-out-1" class="form-input w-full" value="${timeOut1}" placeholder="--:-- --">
+            </div>
+          </div>
         </div>
-        <div>
-          <label class="form-label">AM Time Out</label>
-          <input type="time" id="edit-time-out-1" class="form-input" value="${timeOut1}">
+
+        <!-- Afternoon Session -->
+        <div class="border border-neutral-200 rounded-lg p-4 bg-neutral-50">
+          <div class="flex items-center justify-between mb-4">
+            <h4 class="font-semibold text-neutral-800">Afternoon Session</h4>
+            <label class="flex items-center gap-2 cursor-pointer">
+              <input type="checkbox" id="check-afternoon-not-worked" class="w-4 h-4">
+              <span class="text-sm text-neutral-600">Not worked</span>
+            </label>
+          </div>
+          <div class="space-y-3">
+            <div>
+              <label class="form-label">Afternoon In *</label>
+              <input type="time" id="edit-time-in-2" class="form-input w-full" value="${timeIn2}" placeholder="01:00 PM">
+            </div>
+            <div>
+              <label class="form-label">End of Day *</label>
+              <input type="time" id="edit-time-out-2" class="form-input w-full" value="${timeOut2}" placeholder="05:42 PM">
+            </div>
+          </div>
         </div>
-        <div>
-          <label class="form-label">PM Time In</label>
-          <input type="time" id="edit-time-in-2" class="form-input" value="${timeIn2}">
-        </div>
-        <div>
-          <label class="form-label">PM Time Out</label>
-          <input type="time" id="edit-time-out-2" class="form-input" value="${timeOut2}">
-        </div>
+
+        <p class="text-xs text-neutral-500 italic">All times are required within worked sessions. Times must be in chronological order.</p>
       </div>
       <div class="flex justify-end gap-3 pt-2">
         <button type="button" id="edit-att-cancel" class="btn-secondary">Cancel</button>
@@ -350,23 +377,107 @@ function openEditAttendanceModal(record, onSaved) {
   `, (el, close) => {
     el.querySelector('#edit-att-cancel').addEventListener('click', close);
 
+    // Handle "Not worked" session checkboxes
+    const setupSessionToggle = (checkboxId, timeInputIds) => {
+      const checkbox = el.querySelector(checkboxId);
+      const inputs = timeInputIds.map(id => el.querySelector(id));
+      
+      checkbox.addEventListener('change', () => {
+        inputs.forEach(input => {
+          if (checkbox.checked) {
+            input.disabled = true;
+            input.value = '';
+            input.style.backgroundColor = '#f3f4f6';
+          } else {
+            input.disabled = false;
+            input.style.backgroundColor = '';
+          }
+        });
+      });
+    };
+
+    // Determine if sessions were marked as "not worked" based on stored data
+    const morningInputs = ['#edit-time-in-1', '#edit-time-out-1'].map(id => el.querySelector(id));
+    const afternoonInputs = ['#edit-time-in-2', '#edit-time-out-2'].map(id => el.querySelector(id));
+    
+    const morningNotWorked = morningInputs.every(input => !input.value);
+    const afternoonNotWorked = afternoonInputs.every(input => !input.value);
+
+    // Pre-check and disable if session was marked as not worked
+    if (morningNotWorked && (record.time_in_1 === null || record.time_in_1 === undefined)) {
+      const checkbox = el.querySelector('#check-morning-not-worked');
+      checkbox.checked = true;
+      morningInputs.forEach(input => {
+        input.disabled = true;
+        input.style.backgroundColor = '#f3f4f6';
+      });
+    }
+
+    if (afternoonNotWorked && (record.time_in_2 === null || record.time_in_2 === undefined)) {
+      const checkbox = el.querySelector('#check-afternoon-not-worked');
+      checkbox.checked = true;
+      afternoonInputs.forEach(input => {
+        input.disabled = true;
+        input.style.backgroundColor = '#f3f4f6';
+      });
+    }
+
+    setupSessionToggle('#check-morning-not-worked', ['#edit-time-in-1', '#edit-time-out-1']);
+    setupSessionToggle('#check-afternoon-not-worked', ['#edit-time-in-2', '#edit-time-out-2']);
+
     el.querySelector('#edit-attendance-form').addEventListener('submit', async (e) => {
       e.preventDefault();
 
-      const timeIn1  = el.querySelector('#edit-time-in-1').value;
-      const timeOut1 = el.querySelector('#edit-time-out-1').value;
-      const timeIn2  = el.querySelector('#edit-time-in-2').value;
-      const timeOut2 = el.querySelector('#edit-time-out-2').value;
+      const morningNotWorked = el.querySelector('#check-morning-not-worked').checked;
+      const afternoonNotWorked = el.querySelector('#check-afternoon-not-worked').checked;
 
-      // Basic sequence validation
-      if (timeOut1 && !timeIn1) {
-        showToast('AM Time In is required when AM Time Out is set', 'error'); return;
+      // At least one session must be worked
+      if (morningNotWorked && afternoonNotWorked) {
+        showToast('At least one session (Morning or Afternoon) must be worked', 'error');
+        return;
       }
-      if (timeIn2 && !timeOut1) {
-        showToast('AM Time Out is required before PM Time In', 'error'); return;
+
+      let timeIn1  = el.querySelector('#edit-time-in-1').value;
+      let timeOut1 = el.querySelector('#edit-time-out-1').value;
+      let timeIn2  = el.querySelector('#edit-time-in-2').value;
+      let timeOut2 = el.querySelector('#edit-time-out-2').value;
+
+      // Validate Morning session if worked
+      if (!morningNotWorked) {
+        if (!timeIn1 || !timeOut1) {
+          showToast('Morning In and Lunch Out are both required for morning session', 'error');
+          return;
+        }
+        if (timeIn1 >= timeOut1) {
+          showToast('Morning In must be before Lunch Out', 'error');
+          return;
+        }
+      } else {
+        timeIn1 = '';
+        timeOut1 = '';
       }
-      if (timeOut2 && !timeIn2) {
-        showToast('PM Time In is required when PM Time Out is set', 'error'); return;
+
+      // Validate Afternoon session if worked
+      if (!afternoonNotWorked) {
+        if (!timeIn2 || !timeOut2) {
+          showToast('Afternoon In and End of Day are both required for afternoon session', 'error');
+          return;
+        }
+        if (timeIn2 >= timeOut2) {
+          showToast('Afternoon In must be before End of Day', 'error');
+          return;
+        }
+      } else {
+        timeIn2 = '';
+        timeOut2 = '';
+      }
+
+      // Validate chronological order if both sessions are worked
+      if (!morningNotWorked && !afternoonNotWorked) {
+        if (timeOut1 >= timeIn2) {
+          showToast('Lunch Out must be before Afternoon In', 'error');
+          return;
+        }
       }
 
       const toTs = (t) => t ? new Date(`${record.date}T${t}:00`).toISOString() : null;
@@ -378,12 +489,10 @@ function openEditAttendanceModal(record, onSaved) {
         time_out_2: toTs(timeOut2),
       };
 
-      const hasCompletePunches = Boolean(
-        updates.time_in_1 &&
-        updates.time_out_1 &&
-        updates.time_in_2 &&
-        updates.time_out_2
-      );
+      // Auto-approve if we have at least one complete session (morning or afternoon)
+      const hasMorningSession = updates.time_in_1 && updates.time_out_1;
+      const hasAfternoonSession = updates.time_in_2 && updates.time_out_2;
+      const hasCompletePunches = hasMorningSession || hasAfternoonSession;
 
       updates.status = hasCompletePunches ? 'approved' : 'pending';
       updates.approved_at = hasCompletePunches ? new Date().toISOString() : null;

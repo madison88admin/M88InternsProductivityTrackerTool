@@ -496,6 +496,13 @@ function formatHolidayName(name) {
   return String(name || 'Holiday').toUpperCase();
 }
 
+function formatHoursAsHmm(decimalHours) {
+  if (!decimalHours || decimalHours <= 0) return '00:00';
+  const hours = Math.floor(decimalHours);
+  const minutes = Math.round((decimalHours - hours) * 60);
+  return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
+}
+
 // ─── DAR: PDF generation ────────────────────────────────────────────────────
 
 export async function generateDarPdf(darData, weekNum, mondayDate, existingDoc) {
@@ -626,7 +633,7 @@ export async function generateDarPdf(darData, weekNum, mondayDate, existingDoc) 
       isHolidayDate || isNoLog ? '00:00' : (att?.time_in_1 ? formatTime(att.time_in_1) : '00:00'),
       isHolidayDate || isNoLog ? '00:00' : (att?.time_out_1 ? formatTime(att.time_out_1) : '00:00'),
       mAccomplished,
-      '00:00',  // Always 00:00 for no logs
+      formatHoursAsHmm(mHours),
       '',
       '',
     ]);
@@ -655,7 +662,7 @@ export async function generateDarPdf(darData, weekNum, mondayDate, existingDoc) 
       isHolidayDate || isNoLog ? '00:00' : (att?.time_in_2 ? formatTime(att.time_in_2) : '00:00'),
       isHolidayDate || isNoLog ? '00:00' : (att?.time_out_2 ? formatTime(att.time_out_2) : '00:00'),
       aAccomplished,
-      '00:00',  // Always 00:00 for no logs
+      formatHoursAsHmm(aHours),
       '',
       '',
     ]);

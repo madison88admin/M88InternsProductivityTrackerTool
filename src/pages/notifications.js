@@ -279,6 +279,9 @@ async function openApprovalNotificationModal(notification, profile) {
 
     const detailsHtml = await getApprovalDetailsHtml(approval);
 
+    // Check if this is an attendance correction request and user is a supervisor
+    const isAttendanceCorrectionForSupervisor = approval.type === 'attendance_correction' && profile.role === 'supervisor';
+
     // Replace loading state with actual content
     modalEl.querySelector('.modal-body').innerHTML = `
     <div class="space-y-4">
@@ -295,80 +298,101 @@ async function openApprovalNotificationModal(notification, profile) {
 
       ${detailsHtml}
 
-      <form id="notif-reject-form" class="hidden space-y-2 p-3 bg-neutral-50 rounded-lg border border-neutral-200">
-        <label class="text-xs text-neutral-500">Reason for rejection <span class="text-danger-500">*</span></label>
-        <textarea id="notif-reject-reason" class="form-input" rows="3" placeholder="Provide reason for rejection..."></textarea>
-      </form>
+      ${isAttendanceCorrectionForSupervisor ? `
+        <div class="p-4 bg-blue-50 border border-blue-200 rounded-lg">
+          <div class="flex items-start gap-3">
+            <svg class="w-5 h-5 text-blue-600 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+            </svg>
+            <div>
+              <p class="text-sm font-semibold text-blue-900 mb-1">Admin Approval Required</p>
+              <p class="text-xs text-blue-700 leading-relaxed">Attendance correction requests can only be approved or rejected by administrators. This notification is for your awareness only.</p>
+            </div>
+          </div>
+        </div>
+      ` : `
+        <form id="notif-reject-form" class="hidden space-y-2 p-3 bg-neutral-50 rounded-lg border border-neutral-200">
+          <label class="text-xs text-neutral-500">Reason for rejection <span class="text-danger-500">*</span></label>
+          <textarea id="notif-reject-reason" class="form-input" rows="3" placeholder="Provide reason for rejection..."></textarea>
+        </form>
+      `}
 
       <div class="flex justify-end gap-3 pt-2 border-t border-neutral-200">
         <button type="button" id="notif-cancel" class="btn-secondary">Close</button>
-        <button type="button" id="notif-show-reject" class="btn-danger">Reject</button>
-        <button type="button" id="notif-approve" class="btn-success">Approve</button>
+        ${!isAttendanceCorrectionForSupervisor ? `
+          <button type="button" id="notif-show-reject" class="btn-danger">Reject</button>
+          <button type="button" id="notif-approve" class="btn-success">Approve</button>
+        ` : ''}
       </div>
-      <div id="notif-reject-actions" class="hidden justify-end gap-3">
-        <button type="button" id="notif-reject-back" class="btn-secondary">Back</button>
-        <button type="button" id="notif-reject-submit" class="btn-danger">Confirm Reject</button>
-      </div>
+      ${!isAttendanceCorrectionForSupervisor ? `
+        <div id="notif-reject-actions" class="hidden justify-end gap-3">
+          <button type="button" id="notif-reject-back" class="btn-secondary">Back</button>
+          <button type="button" id="notif-reject-submit" class="btn-danger">Confirm Reject</button>
+        </div>
+      ` : ''}
     </div>
   `;
 
     // Attach event listeners after content is replaced
-    const approveBtn = modalEl.querySelector('#notif-approve');
-    const showRejectBtn = modalEl.querySelector('#notif-show-reject');
-    const rejectForm = modalEl.querySelector('#notif-reject-form');
-    const rejectActions = modalEl.querySelector('#notif-reject-actions');
-    const footerRow = modalEl.querySelector('.border-t');
-
     modalEl.querySelector('#notif-cancel').addEventListener('click', close);
 
-    showRejectBtn.addEventListener('click', () => {
-      rejectForm.classList.remove('hidden');
-      rejectActions.classList.remove('hidden');
-      rejectActions.classList.add('flex');
-      footerRow.classList.add('hidden');
-    });
+    // Only attach approve/reject listeners if not an attendance correction for supervisors
+    if (!isAttendanceCorrectionForSupervisor) {
+      const approveBtn = modalEl.querySelector('#notif-approve');
+      const showRejectBtn = modalEl.querySelector('#notif-show-reject');
+      const rejectForm = modalEl.querySelector('#notif-reject-form');
+      const rejectActions = modalEl.querySelector('#notif-reject-actions');
+      const footerRow = modalEl.querySelector('.border-t');
 
-    modalEl.querySelector('#notif-reject-back').addEventListener('click', () => {
-      rejectForm.classList.add('hidden');
-      rejectActions.classList.add('hidden');
-      rejectActions.classList.remove('flex');
-      footerRow.classList.remove('hidden');
-    });
+      showRejectBtn.addEventListener('click', () => {
+        rejectForm.classList.remove('hidden');
+        rejectActions.classList.remove('hidden');
+        rejectActions.classList.add('flex');
+        footerRow.classList.add('hidden');
+      });
 
-    approveBtn.addEventListener('click', async () => {
-      approveBtn.disabled = true;
-      showRejectBtn.disabled = true;
-      try {
-        await processApprovalFromNotification(approval, 'approved');
-        showToast('Submission approved', 'success');
-        close();
-        renderNotificationsPage();
-      } catch (err) {
-        showToast(err.message || 'Failed to approve submission', 'error');
-        approveBtn.disabled = false;
-        showRejectBtn.disabled = false;
-      }
-    });
+      modalEl.querySelector('#notif-reject-back').addEventListener('click', () => {
+        rejectForm.classList.add('hidden');
+        rejectActions.classList.add('hidden');
+        rejectActions.classList.remove('flex');
+        footerRow.classList.remove('hidden');
+      });
 
-    modalEl.querySelector('#notif-reject-submit').addEventListener('click', async () => {
-      const reason = modalEl.querySelector('#notif-reject-reason').value.trim();
-      if (!reason) {
-        showToast('Please provide a rejection reason', 'error');
-        return;
-      }
+      approveBtn.addEventListener('click', async () => {
+        approveBtn.disabled = true;
+        showRejectBtn.disabled = true;
+        try {
+          await processApprovalFromNotification(approval, 'approved');
+          showToast('Submission approved', 'success');
+          close();
+          renderNotificationsPage();
+        } catch (err) {
+          showToast(err.message || 'Failed to approve submission', 'error');
+          approveBtn.disabled = false;
+          showRejectBtn.disabled = false;
+        }
+      });
 
-      const rejectSubmitBtn = modalEl.querySelector('#notif-reject-submit');
-      rejectSubmitBtn.disabled = true;
-      try {
-        await processApprovalFromNotification(approval, 'rejected', reason);
-        showToast('Submission rejected', 'success');
-        close();
-        renderNotificationsPage();
-      } catch (err) {
-        showToast(err.message || 'Failed to reject submission', 'error');
-        rejectSubmitBtn.disabled = false;
-      }
-    });
+      modalEl.querySelector('#notif-reject-submit').addEventListener('click', async () => {
+        const reason = modalEl.querySelector('#notif-reject-reason').value.trim();
+        if (!reason) {
+          showToast('Please provide a rejection reason', 'error');
+          return;
+        }
+
+        const rejectSubmitBtn = modalEl.querySelector('#notif-reject-submit');
+        rejectSubmitBtn.disabled = true;
+        try {
+          await processApprovalFromNotification(approval, 'rejected', reason);
+          showToast('Submission rejected', 'success');
+          close();
+          renderNotificationsPage();
+        } catch (err) {
+          showToast(err.message || 'Failed to reject submission', 'error');
+          rejectSubmitBtn.disabled = false;
+        }
+      });
+    }
   });
 }
 
