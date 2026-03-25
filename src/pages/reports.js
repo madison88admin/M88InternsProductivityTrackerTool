@@ -435,6 +435,7 @@ export async function fetchDarData(internId, mondayDate, fridayDate) {
       .eq('intern_id', internId)
       .gte('date', mondayDate)
       .lte('date', fridayDate)
+      .neq('status', 'draft')  // Exclude drafts from reports
       .order('date', { ascending: true }),
     supabase
       .from('holidays')

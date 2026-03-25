@@ -13,6 +13,7 @@ import { formatDate, formatDateTime, formatHoursDisplay, getTodayDate } from '..
 import { createModal } from '../lib/component.js';
 import { isHoliday } from '../lib/holidays.js';
 import { sendEmailNotification, getDepartmentSupervisors } from '../lib/email-notifications.js';
+import { openNarrativeModal as openSharedNarrativeModal } from '../lib/narrative-modal.js';
 
 // Pre-load Quill to avoid dynamic import delays in modal
 let QuillModule = null;
@@ -70,12 +71,13 @@ export async function renderNarrativesPage() {
     return false;
   });
 
-  // Fetch today's narratives
+  // Fetch today's narratives (exclude drafts from display)
   const { data: todayNarratives } = await supabase
     .from('narratives')
     .select('*, task:tasks(title)')
     .eq('intern_id', profile.id)
     .eq('date', today)
+    .neq('status', 'draft')
     .order('session', { ascending: true });
 
   // Fetch today's attendance for the combined view
@@ -86,12 +88,13 @@ export async function renderNarrativesPage() {
     .eq('date', today)
     .maybeSingle();
 
-  // Fetch recent narratives (past)
+  // Fetch recent narratives (past, exclude drafts)
   const { data: recentNarratives } = await supabase
     .from('narratives')
     .select('*, task:tasks(title)')
     .eq('intern_id', profile.id)
     .neq('date', today)
+    .neq('status', 'draft')
     .order('date', { ascending: false })
     .limit(30);
 
@@ -344,9 +347,16 @@ export async function renderNarrativesPage() {
       });
     });
 
-    // New narrative button
-    el.querySelector('#add-narrative-btn')?.addEventListener('click', () => {
-      openNarrativeModal(tasks, profile, today);
+    // New narrative button - use shared modal library
+    el.querySelector('#add-narrative-btn')?.addEventListener('click', async () => {
+      await openSharedNarrativeModal({
+        tasks,
+        profile,
+        fixedDate: null,
+        allowDateChange: true,
+        forceSubmission: false,
+        onComplete: renderNarrativesPage,
+      });
     });
 
     // Bind edit buttons for initial view

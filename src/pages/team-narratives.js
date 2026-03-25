@@ -61,6 +61,7 @@ export async function renderTeamNarrativesPage() {
       .from('narratives')
       .select('*, intern:profiles!narratives_intern_id_fkey(full_name), task:tasks(title)')
       .in('intern_id', internIds)
+      .neq('status', 'draft')  // Hide drafts from supervisors
       .order('date', { ascending: false });
 
     // Apply date range filter

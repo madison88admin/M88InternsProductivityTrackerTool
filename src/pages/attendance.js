@@ -12,6 +12,7 @@ import { formatDate, formatTime, formatHoursDisplay, getPublicIP, isLateArrival,
 import { createModal } from '../lib/component.js';
 import { isHoliday } from '../lib/holidays.js';
 import { sendEmailNotification, getDepartmentSupervisors } from '../lib/email-notifications.js';
+import { showNarrativePromptModal } from '../lib/narrative-modal.js';
 
 const PH_TIMEZONE = 'Asia/Manila';
 let phMidnightRefreshTimer = null;
@@ -480,6 +481,52 @@ export async function renderAttendancePage() {
                 if (sup.email) {
                   sendEmailNotification(sup.email, 'Attendance Pending Review', emailHtml).catch(err => console.error('Failed to send attendance email to', sup.email, err));
                 }
+              }
+            }
+          }
+
+          // Show narrative prompt for time-out punches
+          if (punchType === 'time_out_1' || punchType === 'time_out_2') {
+            // Check if narrative already submitted today
+            const { data: existingNarratives } = await supabase
+              .from('narratives')
+              .select('session')
+              .eq('intern_id', profile.id)
+              .eq('date', today)
+              .in('status', ['pending', 'approved', 'rejected']);
+
+            const submittedCount = existingNarratives?.length || 0;
+
+            // Only show prompt if not all narratives submitted
+            if (submittedCount < 2) {
+              // Fetch intern's tasks
+              const { data: allTasks } = await supabase
+                .from('tasks')
+                .select('id, title, status, pending_status, approved_at')
+                .eq('assigned_to', profile.id);
+
+              const nowDate = new Date();
+              const fortyEightHoursAgo = new Date(nowDate.getTime() - (48 * 60 * 60 * 1000));
+
+              const tasks = (allTasks || []).filter(t => {
+                if (t.status === 'not_started') return false;
+                if (t.status === 'in_progress') return true;
+                if (t.status === 'completed' && t.approved_at) {
+                  const approvedDate = new Date(t.approved_at);
+                  return approvedDate >= fortyEightHoursAgo;
+                }
+                return false;
+              });
+
+              if (tasks.length > 0) {
+                await showNarrativePromptModal({
+                  date: today,
+                  isEndOfDay: punchType === 'time_out_2',
+                  profile,
+                  tasks,
+                  onComplete: renderAttendancePage,
+                });
+                return; // Don't re-render page yet, prompt modal will handle it
               }
             }
           }

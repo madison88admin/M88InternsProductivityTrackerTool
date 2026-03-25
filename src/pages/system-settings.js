@@ -50,6 +50,10 @@ export async function renderSystemSettingsPage() {
   const adminAccountSettings = settingsMap.enable_admin_account_creation?.value || {};
   const adminAccountEnabled = adminAccountSettings.enabled !== false;
 
+  // Narrative settings
+  const pastDateNarratives = settingsMap.allow_past_date_narratives?.value || {};
+  const allowPastDateNarratives = pastDateNarratives.enabled === true;
+
   renderLayout(`
     <div class="page-header animate-fade-in-up">
       <h1 class="page-title">System Settings</h1>
@@ -141,6 +145,20 @@ export async function renderSystemSettingsPage() {
         </div>
       </div>
 
+      <!-- Narrative Settings -->
+      <div class="card">
+        <h3 class="text-base font-bold text-neutral-900 mb-4 flex items-center gap-2">${icons.narrative || icons.edit} Narrative Settings</h3>
+        <div class="space-y-4">
+          <label class="flex items-center gap-3 cursor-pointer">
+            <input type="checkbox" id="allow-past-date-narratives" ${allowPastDateNarratives ? 'checked' : ''} />
+            <div>
+              <p class="text-sm font-medium text-neutral-800">Allow Past Date Narratives</p>
+              <p class="text-xs text-neutral-400 mt-0.5">When enabled, interns can select any past date for narrative submission. When disabled, narratives are auto-set to today's date after time-out.</p>
+            </div>
+          </label>
+        </div>
+      </div>
+
       <div class="flex justify-end">
         <button type="submit" class="btn-primary">
           ${icons.check}
@@ -189,6 +207,10 @@ export async function renderSystemSettingsPage() {
           {
             key: 'enable_admin_account_creation',
             value: { enabled: el.querySelector('#enable-admin-account-creation').checked },
+          },
+          {
+            key: 'allow_past_date_narratives',
+            value: { enabled: el.querySelector('#allow-past-date-narratives').checked },
           },
         ];
 
