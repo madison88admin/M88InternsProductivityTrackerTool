@@ -23,9 +23,13 @@ export function renderPage(html, init) {
  * @param {string} title
  * @param {string} bodyHtml
  * @param {Function} [init]
+ * @param {Object} [options] - Modal options
+ * @param {boolean} [options.dismissible=true] - If false, removes close button and prevents backdrop clicks
  * @returns {{ element: HTMLElement, close: Function }}
  */
-export function createModal(title, bodyHtml, init) {
+export function createModal(title, bodyHtml, init, options = {}) {
+  const { dismissible = true } = options || {};
+
   const backdrop = document.createElement('div');
   backdrop.className = 'modal-backdrop';
   backdrop.id = 'modal';
@@ -33,11 +37,13 @@ export function createModal(title, bodyHtml, init) {
     <div class="modal-content">
       <div class="modal-header">
         <h3 class="text-lg font-bold text-neutral-900">${title}</h3>
-        <button id="modal-close" class="w-8 h-8 rounded-lg flex items-center justify-center text-neutral-400 hover:text-neutral-600 hover:bg-neutral-100 transition-all duration-200">
-          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
-          </svg>
-        </button>
+        ${dismissible ? `
+          <button id="modal-close" class="w-8 h-8 rounded-lg flex items-center justify-center text-neutral-400 hover:text-neutral-600 hover:bg-neutral-100 transition-all duration-200">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+            </svg>
+          </button>
+        ` : ''}
       </div>
       <div class="modal-body">${bodyHtml}</div>
     </div>
@@ -47,15 +53,17 @@ export function createModal(title, bodyHtml, init) {
 
   const close = () => backdrop.remove();
 
-  backdrop.querySelector('#modal-close').addEventListener('click', close);
+  if (dismissible) {
+    backdrop.querySelector('#modal-close').addEventListener('click', close);
 
-  let mouseDownOnBackdrop = false;
-  backdrop.addEventListener('mousedown', (e) => {
-    mouseDownOnBackdrop = e.target === backdrop;
-  });
-  backdrop.addEventListener('click', (e) => {
-    if (e.target === backdrop && mouseDownOnBackdrop) close();
-  });
+    let mouseDownOnBackdrop = false;
+    backdrop.addEventListener('mousedown', (e) => {
+      mouseDownOnBackdrop = e.target === backdrop;
+    });
+    backdrop.addEventListener('click', (e) => {
+      if (e.target === backdrop && mouseDownOnBackdrop) close();
+    });
+  }
 
   if (init) {
     requestAnimationFrame(() => init(backdrop, close));

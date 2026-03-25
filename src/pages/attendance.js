@@ -105,6 +105,52 @@ export async function renderAttendancePage() {
     .eq('date', today)
     .maybeSingle();
 
+  // Check if end-of-day punch exists without narrative submission (prevent refresh bypass)
+  if (todayRecord && todayRecord.time_out_2) {
+    const { data: existingNarratives } = await supabase
+      .from('narratives')
+      .select('id')
+      .eq('intern_id', profile.id)
+      .eq('date', today)
+      .in('status', ['pending', 'approved', 'rejected']);
+
+    const submittedCount = existingNarratives?.length || 0;
+
+    // If end-of-day punch exists but no narratives submitted, force modal
+    if (submittedCount < 2) {
+      // Fetch intern's tasks
+      const { data: allTasks } = await supabase
+        .from('tasks')
+        .select('id, title, status, pending_status, approved_at')
+        .eq('assigned_to', profile.id);
+
+      const nowDate = new Date();
+      const fortyEightHoursAgo = new Date(nowDate.getTime() - (48 * 60 * 60 * 1000));
+
+      const tasks = (allTasks || []).filter(t => {
+        if (t.status === 'not_started') return false;
+        if (t.status === 'in_progress') return true;
+        if (t.status === 'completed' && t.approved_at) {
+          const approvedDate = new Date(t.approved_at);
+          return approvedDate >= fortyEightHoursAgo;
+        }
+        return false;
+      });
+
+      if (tasks.length > 0) {
+        // Show blocking modal immediately (before rendering the page)
+        await showNarrativePromptModal({
+          date: today,
+          isEndOfDay: true,
+          profile,
+          tasks,
+          onComplete: renderAttendancePage,
+        });
+        return; // Don't render page yet, wait for narrative submission
+      }
+    }
+  }
+
   // Fetch recent records
   const { data: recentRecords } = await supabase
     .from('attendance_records')

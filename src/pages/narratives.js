@@ -128,7 +128,6 @@ export async function renderNarrativesPage() {
             <h3 class="text-base font-bold text-neutral-900">Today's Daily Log</h3>
             <p class="text-sm text-neutral-500">${formatDate(today)}</p>
           </div>
-          ${todayTask ? `<span class="badge-info">Task: ${todayTask.title}</span>` : ''}
         </div>
 
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -152,6 +151,7 @@ export async function renderNarrativesPage() {
                 </div>
               ` : '<span class="badge bg-neutral-100 text-neutral-500">Not submitted</span>'}
             </div>
+            ${morningNarrative?.task ? `<p class="text-xs text-primary-600 font-medium mb-1">Task: ${morningNarrative.task.title}</p>` : ''}
             <p class="text-xs text-neutral-400 mb-2">Time In 1 → Time Out 1 ${morningHours !== null ? `• ${formatHoursDisplay(morningHours)}` : ''}</p>
             ${morningNarrative ? `
               <div class="prose prose-sm text-neutral-700 text-sm">${morningNarrative.content}</div>
@@ -186,6 +186,7 @@ export async function renderNarrativesPage() {
                 </div>
               ` : '<span class="badge bg-neutral-100 text-neutral-500">Not submitted</span>'}
             </div>
+            ${afternoonNarrative?.task ? `<p class="text-xs text-primary-600 font-medium mb-1">Task: ${afternoonNarrative.task.title}</p>` : ''}
             <p class="text-xs text-neutral-400 mb-2">Time In 2 → Time Out 2 ${afternoonHours !== null ? `• ${formatHoursDisplay(afternoonHours)}` : ''}</p>
             ${afternoonNarrative ? `
               <div class="prose prose-sm text-neutral-700 text-sm">${afternoonNarrative.content}</div>
@@ -227,7 +228,6 @@ export async function renderNarrativesPage() {
           <div class="flex items-center justify-between mb-3">
             <h4 class="text-sm font-bold text-neutral-900">${formatDate(date)}</h4>
             <div class="flex items-center gap-2">
-              ${dayNarratives[0]?.task?.title ? `<span class="badge-info">${dayNarratives[0].task.title}</span>` : ''}
               ${dayNarratives.some(n => n.is_late_submission) ? '<span class="badge bg-warning-50 text-warning-600">Late</span>' : ''}
             </div>
           </div>
@@ -267,6 +267,7 @@ export async function renderNarrativesPage() {
             ` : ''}
           </div>
         </div>
+        ${narrative.task ? `<p class="text-xs text-primary-600 font-medium mb-1">Task: ${narrative.task.title}</p>` : ''}
         <div class="prose prose-sm text-neutral-700 text-sm">${narrative.content}</div>
         ${narrative.is_late_submission ? '<p class="text-xs text-warning-500 mt-1">Late submission</p>' : ''}
         ${narrative.rejection_reason ? `

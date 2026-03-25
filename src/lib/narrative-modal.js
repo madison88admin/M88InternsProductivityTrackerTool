@@ -70,30 +70,9 @@ async function fetchExistingNarrativesForDate(internId, date, includeDrafts = fa
 }
 
 /**
- * Load draft from database first, fallback to localStorage
+ * Load draft from localStorage
  */
 async function loadDraft(internId, date, session) {
-  // Try database first
-  const { data: dbDraft } = await supabase
-    .from('narratives')
-    .select('id, content, task_id, hours')
-    .eq('intern_id', internId)
-    .eq('date', date)
-    .eq('session', session)
-    .eq('status', 'draft')
-    .maybeSingle();
-
-  if (dbDraft) {
-    return {
-      source: 'database',
-      id: dbDraft.id,
-      content: dbDraft.content,
-      taskId: dbDraft.task_id,
-      hours: dbDraft.hours,
-    };
-  }
-
-  // Fallback to localStorage (for migration period)
   try {
     const key = `narrative_draft_${internId}`;
     const raw = localStorage.getItem(key);
@@ -120,42 +99,47 @@ async function loadDraft(internId, date, session) {
 }
 
 /**
- * Save draft to database (upsert)
+ * Save draft to localStorage only
  */
-async function saveDraftToDb(internId, date, session, content, taskId, hours, supervisorId) {
-  // Check if draft exists
-  const { data: existing } = await supabase
-    .from('narratives')
-    .select('id')
-    .eq('intern_id', internId)
-    .eq('date', date)
-    .eq('session', session)
-    .eq('status', 'draft')
-    .maybeSingle();
+function saveDraftToLocalStorage(internId, date, session, content, taskId) {
+  try {
+    const key = `narrative_draft_${internId}`;
+    const contentKey = session === 'morning' ? 'morningContent' : 'afternoonContent';
+    const taskKey = session === 'morning' ? 'morningTaskId' : 'afternoonTaskId';
 
-  if (existing) {
-    // Update existing draft
-    await supabase
-      .from('narratives')
-      .update({
-        content,
-        task_id: taskId || null,
-        hours: hours || 0,
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', existing.id);
-  } else {
-    // Insert new draft
-    await supabase.from('narratives').insert({
-      intern_id: internId,
-      task_id: taskId || null,
-      date,
-      session,
-      content,
-      hours: hours || 0,
-      status: 'draft',
-      supervisor_id: supervisorId,
-    });
+    const existing = localStorage.getItem(key);
+    const parsed = existing ? JSON.parse(existing) : { version: 1, date };
+
+    parsed[contentKey] = content;
+    parsed[taskKey] = taskId;
+    parsed.date = date;
+    parsed.version = 1;
+
+    localStorage.setItem(key, JSON.stringify(parsed));
+  } catch (err) {
+    console.error('Failed to save to localStorage:', err);
+  }
+}
+
+/**
+ * Delete draft from localStorage
+ */
+function clearSessionDraft(internId, date, session) {
+  try {
+    const key = `narrative_draft_${internId}`;
+    const existing = localStorage.getItem(key);
+    if (!existing) return;
+
+    const parsed = JSON.parse(existing);
+    const contentKey = session === 'morning' ? 'morningContent' : 'afternoonContent';
+    const taskKey = session === 'morning' ? 'morningTaskId' : 'afternoonTaskId';
+
+    delete parsed[contentKey];
+    delete parsed[taskKey];
+
+    localStorage.setItem(key, JSON.stringify(parsed));
+  } catch (err) {
+    console.error('Failed to delete localStorage draft:', err);
   }
 }
 
@@ -163,14 +147,6 @@ async function saveDraftToDb(internId, date, session, content, taskId, hours, su
  * Delete all drafts for a date
  */
 async function clearDrafts(internId, date) {
-  await supabase
-    .from('narratives')
-    .delete()
-    .eq('intern_id', internId)
-    .eq('date', date)
-    .eq('status', 'draft');
-
-  // Also clear localStorage
   try {
     localStorage.removeItem(`narrative_draft_${internId}`);
   } catch {
@@ -237,6 +213,19 @@ export async function openNarrativeModal(options) {
 
   createModal('Daily Narrative', `
     <form id="narrative-form" class="space-y-4">
+      <!-- Important: Draft Preservation Notice
+      <div class="p-3 bg-amber-50 border border-amber-300 rounded-lg flex items-start gap-2"> 
+        <svg class="w-5 h-5 text-amber-600 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4v2m0 4v2M7.08 6.47a9 9 0 1 1 9.84 0"></path>
+        </svg>
+        <div>
+          <p class="text-sm font-semibold text-amber-900 mb-1">Draft Preservation</p>
+          <p class="text-xs text-amber-800">
+            Your narrative drafts are saved locally in your browser. <strong>Do not clear your browser cache or cookies</strong> or you will lose unsaved drafts. Always submit your narratives before clearing browser data.
+          </p>
+        </div>
+      </div>  -->
+
       <div>
         <label class="form-label">Date</label>
         ${dateInputHtml}
@@ -385,7 +374,7 @@ export async function openNarrativeModal(options) {
       return !!selectEl.querySelector(`option[value="${value}"]`);
     }
 
-    // Debounced draft save to database
+    // Debounced draft save to localStorage
     async function scheduleMorningSave() {
       if (morningDraftTimer) clearTimeout(morningDraftTimer);
       morningDraftTimer = setTimeout(async () => {
@@ -396,9 +385,14 @@ export async function openNarrativeModal(options) {
           const content = morningQuill.root.innerHTML;
           const taskId = el.querySelector('#morning-task').value;
           const date = el.querySelector('#narrative-date').value;
+          const hasContent = morningQuill.getText().trim().length > 0;
 
-          if (morningQuill.getText().trim().length > 0) {
-            await saveDraftToDb(profile.id, date, 'morning', content, taskId, morningHours, profile.supervisor_id);
+          if (hasContent) {
+            // Save to localStorage if has content
+            saveDraftToLocalStorage(profile.id, date, 'morning', content, taskId);
+          } else {
+            // Delete draft if content is empty (user deleted everything)
+            clearSessionDraft(profile.id, date, 'morning');
           }
         } catch (err) {
           console.error('Failed to save morning draft:', err);
@@ -418,9 +412,14 @@ export async function openNarrativeModal(options) {
           const content = afternoonQuill.root.innerHTML;
           const taskId = el.querySelector('#afternoon-task').value;
           const date = el.querySelector('#narrative-date').value;
+          const hasContent = afternoonQuill.getText().trim().length > 0;
 
-          if (afternoonQuill.getText().trim().length > 0) {
-            await saveDraftToDb(profile.id, date, 'afternoon', content, taskId, afternoonHours, profile.supervisor_id);
+          if (hasContent) {
+            // Save to localStorage if has content
+            saveDraftToLocalStorage(profile.id, date, 'afternoon', content, taskId);
+          } else {
+            // Delete draft if content is empty (user deleted everything)
+            clearSessionDraft(profile.id, date, 'afternoon');
           }
         } catch (err) {
           console.error('Failed to save afternoon draft:', err);
@@ -811,7 +810,7 @@ export async function openNarrativeModal(options) {
         submitBtn.textContent = 'Submit Narratives';
       }
     });
-  }, !forceSubmission ? '/narratives' : null);
+  }, { dismissible: !forceSubmission });
 }
 
 /**
@@ -897,5 +896,5 @@ export async function showNarrativePromptModal(options) {
         onComplete,
       });
     });
-  }, null);
+  }, { dismissible: false });
 }
