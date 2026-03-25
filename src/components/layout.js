@@ -6,7 +6,7 @@ import { getUserRole, getProfile, logout } from '../lib/auth.js';
 import { navigateTo } from '../lib/router.js';
 import { icons } from '../lib/icons.js';
 import { showToast } from '../lib/toast.js';
-import { renderAvatar } from '../lib/utils.js';
+import { renderAvatar, hydrateSignedAvatars } from '../lib/utils.js';
 import { supabase } from '../lib/supabase.js';
 
 /**
@@ -171,6 +171,8 @@ export function renderLayout(contentHtml, init, guardPath) {
       </div>
     </main>
   `;
+
+  hydrateSignedAvatars(app).catch(() => {});
 
   // Event handlers with proper cleanup
   const mobileBtn = document.getElementById('mobile-menu-btn');

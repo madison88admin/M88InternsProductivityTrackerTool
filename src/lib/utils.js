@@ -1,7 +1,7 @@
 /**
  * Utility helpers used across the application.
  */
-import { supabase } from './supabase.js';
+import { getSignedStorageUrls, getPublicStorageUrl, fetchAuthenticatedAsset } from './storage.js';
 
 export const PH_TIMEZONE = 'Asia/Manila';
 
@@ -292,10 +292,104 @@ export function renderAvatar(user, sizeClass = 'w-9 h-9', textClass = 'text-sm')
   const wrapper = `${sizeClass} rounded-full shrink-0 relative overflow-hidden flex items-center justify-center text-white ${textClass} font-semibold`;
   const gradient = `background: linear-gradient(135deg, var(--color-primary-600), var(--color-primary-400));`;
 
-  if (user?.avatar_url) {
-    const { data: { publicUrl } } = supabase.storage.from('avatars').getPublicUrl(user.avatar_url);
-    return `<div class="${wrapper}" style="${gradient}">${initial}<img src="${publicUrl}" alt="${safeName}" class="absolute inset-0 w-full h-full object-cover" onerror="this.remove()" /></div>`;
+  const avatarPath = (user?.avatar_url || '').trim();
+  const avatarSignedUrl = (user?.avatar_signed_url || '').trim();
+
+  if (avatarSignedUrl || avatarPath) {
+    let imgSource = avatarSignedUrl;
+    let dataAttr = '';
+
+    if (!imgSource && avatarPath) {
+      if (/^https?:\/\//i.test(avatarPath)) {
+        imgSource = avatarPath;
+      } else {
+        // Don't use getAuthenticatedAssetUrl() - browsers can't send auth headers in <img src>
+        // Instead, use data-avatar-path and let hydrateSignedAvatars() fetch with auth
+        imgSource = '';
+        dataAttr = ` data-avatar-path="${avatarPath.replace(/"/g, '&quot;')}"`;
+      }
+    }
+
+    if (imgSource) {
+      return `<div class="${wrapper}" style="${gradient}">${initial}<img src="${imgSource}" alt="${safeName}" class="absolute inset-0 w-full h-full object-cover" onerror="this.remove()" /></div>`;
+    } else if (dataAttr) {
+      // Render with transparent placeholder - NO onerror here, hydration will handle loading
+      // onerror is added by hydration after successful load
+      return `<div class="${wrapper}" style="${gradient}">${initial}<img src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"${dataAttr} alt="${safeName}" class="absolute inset-0 w-full h-full object-cover" style="opacity:0" /></div>`;
+    }
   }
 
   return `<div class="${wrapper}" style="${gradient}">${initial}</div>`;
+}
+
+export async function hydrateSignedAvatars(root = document) {
+  const scope = root || document;
+  const avatarImages = Array.from(scope.querySelectorAll('img[data-avatar-path]'));
+  if (avatarImages.length === 0) return;
+
+  const paths = avatarImages
+    .map((img) => img.getAttribute('data-avatar-path'))
+    .filter(Boolean);
+
+  if (paths.length === 0) return;
+
+  for (const img of avatarImages) {
+    const path = img.getAttribute('data-avatar-path');
+    if (!path) continue;
+
+    try {
+      const signedUrl = await fetchAuthenticatedAsset('avatars', path);
+      if (signedUrl) {
+        img.onload = () => {
+          img.style.opacity = '1';
+          img.onerror = () => img.remove();
+        };
+        img.onerror = () => img.remove();
+        img.src = signedUrl;
+        img.removeAttribute('data-avatar-path');
+      } else {
+        img.remove();
+      }
+    } catch (err) {
+      console.error(`Failed to load avatar: ${path}`, err);
+      img.remove();
+    }
+  }
+}
+
+let avatarObserverActive = false;
+
+export function initAvatarHydrationObserver() {
+  if (avatarObserverActive) return;
+  avatarObserverActive = true;
+
+  const observer = new MutationObserver((mutations) => {
+    let needsHydration = false;
+    for (const mutation of mutations) {
+      if (mutation.addedNodes.length > 0) {
+        for (const node of mutation.addedNodes) {
+          if (node.nodeType === 1) {
+            const el = node;
+            if (
+              el.matches?.('img[data-avatar-path]') ||
+              el.querySelector?.('img[data-avatar-path]')
+            ) {
+              needsHydration = true;
+              break;
+            }
+          }
+        }
+        if (needsHydration) break;
+      }
+    }
+
+    if (needsHydration) {
+      requestAnimationFrame(() => hydrateSignedAvatars(document).catch(() => {}));
+    }
+  });
+
+  observer.observe(document.body, {
+    childList: true,
+    subtree: true,
+  });
 }

@@ -7,6 +7,7 @@ import './styles/main.css';
 import { initAuth, isAuthenticated, getUserRole, hasRole } from './lib/auth.js';
 import { initIdleTimeout } from './lib/idle-timeout.js';
 import { addRoute, setBeforeEach, setNotFound, initRouter, navigateTo } from './lib/router.js';
+import { initAvatarHydrationObserver } from './lib/utils.js';
 import { showToast } from './lib/toast.js';
 import { supabase } from './lib/supabase.js';
 
@@ -213,6 +214,7 @@ async function boot() {
   try {
     await initAuth();
     initIdleTimeout();
+    initAvatarHydrationObserver();
     initRouter();
   } catch (err) {
     console.error('App initialization failed:', err);

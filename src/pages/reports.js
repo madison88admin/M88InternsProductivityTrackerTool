@@ -9,6 +9,7 @@ import { showToast } from '../lib/toast.js';
 import { icons } from '../lib/icons.js';
 import { formatDate, formatDateKey, formatTime, formatHoursDisplay, formatHoursBothFormats, formatHoursAsHHMM, formatCurrency, calculateSessionHours, getMonday, getFriday, getTodayDate } from '../lib/utils.js';
 import { logAudit } from '../lib/audit.js';
+import { getSignedStorageUrls, getPublicStorageUrl } from '../lib/storage.js';
 
 let chartInstance = null;
 
@@ -528,16 +529,34 @@ export async function generateDarPdf(darData, weekNum, mondayDate, existingDoc) 
   // Pre-load images
   const logoDataUrl = await loadImageAsDataUrl('/logo.png');
 
+  const signaturePaths = [
+    intern?.signature_url,
+    ...((supervisors || []).map((supervisor) => supervisor?.signature_url)),
+  ].filter(Boolean);
+
+  let signedSignatureUrls = new Map();
+  if (signaturePaths.length > 0) {
+    try {
+      signedSignatureUrls = await getSignedStorageUrls('signatures', signaturePaths, 600);
+    } catch {
+      signedSignatureUrls = new Map();
+    }
+  }
+
   let internSigDataUrl = null;
   if (intern?.signature_url) {
-    const sigUrl = supabase.storage.from('signatures').getPublicUrl(intern.signature_url).data.publicUrl;
+    const sigUrl = signedSignatureUrls.get(intern.signature_url) 
+      || getPublicStorageUrl('signatures', intern.signature_url) 
+      || null;
     internSigDataUrl = await loadImageAsDataUrl(sigUrl);
   }
 
   const supervisorSigById = new Map();
   for (const supervisor of (supervisors || [])) {
     if (!supervisor?.signature_url) continue;
-    const sigUrl = supabase.storage.from('signatures').getPublicUrl(supervisor.signature_url).data.publicUrl;
+    const sigUrl = signedSignatureUrls.get(supervisor.signature_url) 
+      || getPublicStorageUrl('signatures', supervisor.signature_url) 
+      || null;
     const sigDataUrl = await loadImageAsDataUrl(sigUrl);
     if (sigDataUrl) supervisorSigById.set(supervisor.id, sigDataUrl);
   }

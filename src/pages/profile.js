@@ -9,6 +9,7 @@ import { showToast } from '../lib/toast.js';
 import { logAudit } from '../lib/audit.js';
 import { icons } from '../lib/icons.js';
 import { formatDate, formatHoursDisplay, computeEstimatedEndDate } from '../lib/utils.js';
+import { fetchAuthenticatedAsset } from '../lib/storage.js';
 
 export async function renderProfilePage() {
   const profile = getProfile();
@@ -31,13 +32,10 @@ export async function renderProfilePage() {
     estimatedEnd = computeEstimatedEndDate(ojtInfo.required, ojtInfo.completed, ojtInfo.daysWorked);
   }
 
-  const avatarUrl = profile.avatar_url
-    ? supabase.storage.from('avatars').getPublicUrl(profile.avatar_url).data.publicUrl
-    : null;
-
-  const signatureUrl = profile.signature_url
-    ? supabase.storage.from('signatures').getPublicUrl(profile.signature_url).data.publicUrl
-    : null;
+  const [avatarUrl, signatureUrl] = await Promise.all([
+    fetchAuthenticatedAsset('avatars', profile.avatar_url),
+    fetchAuthenticatedAsset('signatures', profile.signature_url),
+  ]);
 
   renderLayout(`
     <div class="page-header animate-fade-in-up">

@@ -29,6 +29,7 @@ npm install
 2. Go to **SQL Editor** and run the schema files in order:
    - `supabase/001_schema.sql` — Tables, enums, functions, triggers
    - `supabase/002_rls_policies.sql` — Row-level security policies & storage bucket
+  - `supabase/003...029_*.sql` — Incremental migrations (includes private avatar/signature storage hardening)
 3. Copy your project URL and anon key from **Settings → API**
 
 ### 3. Environment Variables
@@ -129,6 +130,26 @@ supabase secrets set BREVO_API_KEY=your-brevo-api-key
 ```bash
 supabase functions deploy send-notification
 ```
+
+## Secure Asset Download (Authenticated Endpoint)
+
+The system uses a Supabase Edge Function to serve avatars and signatures through an authenticated endpoint, preventing unauthorized access and direct URL sharing.
+
+### Setup
+
+1. Deploy the `download-asset` function:
+```bash
+supabase functions deploy download-asset
+```
+
+2. The function checks authentication on every request and serves assets only to authenticated users
+3. Assets served through: `/functions/v1/download-asset?bucket=avatars&path=filename.jpg`
+
+**Key security features:**
+- ✅ Authenticated requests only (checks JWT token)
+- ✅ No direct URLs exposed to browser
+- ✅ Prevents direct file downloads and sharing
+- ✅ E-signatures protected from malicious actors
 
 ## Roles & Permissions
 

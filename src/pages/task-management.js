@@ -8,7 +8,7 @@ import { supabase } from '../lib/supabase.js';
 import { showToast } from '../lib/toast.js';
 import { logAudit } from '../lib/audit.js';
 import { icons } from '../lib/icons.js';
-import { formatDate, renderAvatar, getTodayDate } from '../lib/utils.js';
+import { formatDate, renderAvatar, getTodayDate, hydrateSignedAvatars } from '../lib/utils.js';
 import { createModal } from '../lib/component.js';
 import { sendEmailNotification, getTaskAssignmentTemplate } from '../lib/email-notifications.js';
 import { saveTaskDraft, loadTaskDraft, clearTaskDraft, hasDraft, getDraftAge } from '../lib/task-draft.js';
@@ -359,6 +359,7 @@ function initInternPicker(el, interns) {
       if (!intern) return;
       hidden.value = intern.id;
       avatarSlot.innerHTML = renderAvatar(intern, 'w-6 h-6', 'text-xs');
+      hydrateSignedAvatars(avatarSlot).catch(() => {});
       nameSlot.textContent = intern.full_name;
       nameSlot.className = 'truncate text-neutral-900';
       el.querySelectorAll('.intern-option').forEach(o => o.classList.remove('bg-primary-50'));
@@ -372,6 +373,8 @@ function initInternPicker(el, interns) {
     if (!el.querySelector('#intern-picker').contains(e.target)) list.classList.add('hidden');
   };
   document.addEventListener('click', closeOutside);
+
+  hydrateSignedAvatars(el.querySelector('#intern-picker')).catch(() => {});
 }
 
 function openCreateTaskModal(interns, profile) {
