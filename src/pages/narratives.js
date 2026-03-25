@@ -37,14 +37,38 @@ export async function renderNarrativesPage() {
   // Pre-load Quill in background for faster modal opening
   getQuill().catch(() => {});
 
-  // Fetch intern's active tasks (not completed, or completed but not yet approved by supervisor)
+  // Fetch intern's tasks (in_progress or completed within 48 hours)
   const { data: allTasks } = await supabase
     .from('tasks')
-    .select('id, title, status, pending_status')
+    .select('id, title, status, pending_status, approved_at')
     .eq('assigned_to', profile.id);
 
-  // Tasks available for narratives: not completed (or pending completion but not approved yet)
-  const tasks = (allTasks || []).filter(t => t.status !== 'completed');
+  // Tasks available for narratives:
+  // - Tasks that are 'in_progress' (exclude 'not_started')
+  // - OR completed tasks that were approved within the last 48 hours
+  const now = new Date();
+  const fortyEightHoursAgo = new Date(now.getTime() - (48 * 60 * 60 * 1000));
+
+  const tasks = (allTasks || []).filter(t => {
+    // Exclude tasks that haven't been started yet
+    if (t.status === 'not_started') {
+      return false;
+    }
+
+    // Include in-progress tasks
+    if (t.status === 'in_progress') {
+      return true;
+    }
+
+    // For completed tasks, check if approved within last 48 hours
+    if (t.status === 'completed' && t.approved_at) {
+      const approvedDate = new Date(t.approved_at);
+      return approvedDate >= fortyEightHoursAgo;
+    }
+
+    // Exclude completed tasks without approval timestamp
+    return false;
+  });
 
   // Fetch today's narratives
   const { data: todayNarratives } = await supabase
@@ -369,7 +393,23 @@ async function fetchExistingNarrativesForDate(internId, date) {
 }
 
 function openNarrativeModal(tasks, profile, today) {
-  const taskOptions = (tasks || []).map(t => `<option value="${t.id}">${t.title} (${t.status.replace('_', ' ')})</option>`).join('');
+  const now = new Date();
+  const taskOptions = (tasks || []).map(t => {
+    let label = t.title;
+
+    if (t.status === 'completed' && t.approved_at) {
+      // Calculate hours remaining for completed tasks
+      const approvedDate = new Date(t.approved_at);
+      const expiresAt = new Date(approvedDate.getTime() + (48 * 60 * 60 * 1000));
+      const hoursRemaining = Math.max(0, Math.round((expiresAt - now) / (60 * 60 * 1000)));
+
+      label = `${t.title} (completed)`;
+    } else {
+      label = `${t.title} (${t.status.replace('_', ' ')})`;
+    }
+
+    return `<option value="${t.id}">${label}</option>`;
+  }).join('');
 
   createModal('New Daily Narrative', `
     <form id="narrative-form" class="space-y-4">

@@ -11,6 +11,7 @@ import { icons } from '../lib/icons.js';
 import { formatDate, renderAvatar, getTodayDate } from '../lib/utils.js';
 import { createModal } from '../lib/component.js';
 import { sendEmailNotification, getTaskAssignmentTemplate } from '../lib/email-notifications.js';
+import { saveTaskDraft, loadTaskDraft, clearTaskDraft, hasDraft, getDraftAge } from '../lib/task-draft.js';
 
 export async function renderTaskManagementPage() {
   const profile = getProfile();
@@ -62,6 +63,8 @@ export async function renderTaskManagementPage() {
   const { data: tasks } = await tasksQuery;
   const today = getTodayDate();
 
+  const hasDraftSaved = hasDraft();
+
   renderLayout(`
     <div class="flex items-center justify-between page-header animate-fade-in-up">
       <div>
@@ -74,9 +77,10 @@ export async function renderTaskManagementPage() {
           <span class="ml-2">View Archive</span>
         </button>
         ${canManageTasks ? `
-        <button id="create-task-btn" class="btn-primary" ${(!interns || interns.length === 0) ? 'disabled title="No interns available in your department"' : ''}>
+        <button id="create-task-btn" class="btn-primary relative" ${(!interns || interns.length === 0) ? 'disabled title="No interns available in your department"' : ''}>
           ${icons.plus}
           <span class="ml-2">Create Task</span>
+          ${hasDraftSaved ? '<span class="absolute -top-1 -right-1 flex h-3 w-3"><span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-warning-400 opacity-75"></span><span class="relative inline-flex rounded-full h-3 w-3 bg-warning-500"></span></span>' : ''}
         </button>` : ''}
       </div>
     </div>
@@ -371,31 +375,50 @@ function initInternPicker(el, interns) {
 }
 
 function openCreateTaskModal(interns, profile) {
+  // Check for existing draft
+  const draft = loadTaskDraft();
+  const draftExists = hasDraft();
+
   createModal('Create Task', `
+    ${draftExists ? `
+      <div class="mb-4 p-3 bg-warning-50 border border-warning-200 rounded-lg flex items-start justify-between">
+        <div class="flex items-start gap-2">
+          <span class="text-warning-600">${icons.info}</span>
+          <div>
+            <p class="text-sm font-medium text-warning-800">Draft Found</p>
+            <p class="text-xs text-warning-600">Saved ${getDraftAge()}</p>
+          </div>
+        </div>
+        <button type="button" id="clear-draft-btn" class="text-xs text-warning-600 hover:text-warning-800 underline">
+          Clear Draft
+        </button>
+      </div>
+    ` : ''}
+
     <form id="create-task-form" class="space-y-4">
       <div>
         <label class="form-label">Title <span class="text-danger-500">*</span></label>
-        <input type="text" id="task-title" class="form-input" placeholder="Task title" required />
+        <input type="text" id="task-title" class="form-input" placeholder="Task title" value="${draft?.title || ''}" required />
       </div>
 
       <div>
         <label class="form-label">Description</label>
-        <textarea id="task-description" class="form-input" rows="3" placeholder="Task description (optional)"></textarea>
+        <textarea id="task-description" class="form-input" rows="3" placeholder="Task description (optional)">${draft?.description || ''}</textarea>
       </div>
 
       <div>
         <label class="form-label">Assign To <span class="text-danger-500">*</span></label>
-        ${internPickerHtml(interns)}
+        ${internPickerHtml(interns, draft?.assignedTo || '')}
       </div>
 
       <div class="grid grid-cols-2 gap-4">
         <div>
           <label class="form-label">Estimated Hours</label>
-          <input type="number" id="task-hours" class="form-input" step="0.5" min="0" placeholder="Optional" />
+          <input type="number" id="task-hours" class="form-input" step="0.5" min="0" placeholder="Optional" value="${draft?.estimatedHours || ''}" />
         </div>
         <div>
           <label class="form-label">Due Date</label>
-          <input type="date" id="task-due" class="form-input" />
+          <input type="date" id="task-due" class="form-input" value="${draft?.dueDate || ''}" />
         </div>
       </div>
 
@@ -407,6 +430,49 @@ function openCreateTaskModal(interns, profile) {
   `, (el, close) => {
     el.querySelector('#task-cancel').addEventListener('click', close);
     initInternPicker(el, interns);
+
+    // Clear draft button handler
+    const clearDraftBtn = el.querySelector('#clear-draft-btn');
+    if (clearDraftBtn) {
+      clearDraftBtn.addEventListener('click', () => {
+        if (confirm('Are you sure you want to clear the saved draft?')) {
+          clearTaskDraft();
+          showToast('Draft cleared', 'success');
+          close();
+          openCreateTaskModal(interns, profile); // Reopen modal without draft
+        }
+      });
+    }
+
+    // Auto-save draft as user types (debounced)
+    let saveTimeout;
+    const saveDraft = () => {
+      clearTimeout(saveTimeout);
+      saveTimeout = setTimeout(() => {
+        const formData = {
+          title: el.querySelector('#task-title').value.trim(),
+          description: el.querySelector('#task-description').value.trim(),
+          assignedTo: el.querySelector('#task-intern').value,
+          estimatedHours: el.querySelector('#task-hours').value,
+          dueDate: el.querySelector('#task-due').value,
+        };
+        // Only save if there's any data
+        if (formData.title || formData.description || formData.assignedTo || formData.estimatedHours || formData.dueDate) {
+          saveTaskDraft(formData);
+        }
+      }, 500); // 500ms debounce
+    };
+
+    // Attach input listeners for auto-save
+    el.querySelector('#task-title').addEventListener('input', saveDraft);
+    el.querySelector('#task-description').addEventListener('input', saveDraft);
+    el.querySelector('#task-hours').addEventListener('input', saveDraft);
+    el.querySelector('#task-due').addEventListener('change', saveDraft);
+
+    // Save when intern is selected (attach to the hidden input that gets updated)
+    const internInput = el.querySelector('#task-intern');
+    const observer = new MutationObserver(saveDraft);
+    observer.observe(internInput, { attributes: true, attributeFilter: ['value'] });
 
     el.querySelector('#create-task-form').addEventListener('submit', async (e) => {
       e.preventDefault();
@@ -465,6 +531,10 @@ function openCreateTaskModal(interns, profile) {
         }
 
         await logAudit('task.created', 'task', data.id, { title, assigned_to: assignedTo });
+
+        // Clear draft on successful submission
+        clearTaskDraft();
+
         showToast('Task created successfully', 'success');
         close();
         renderTaskManagementPage();

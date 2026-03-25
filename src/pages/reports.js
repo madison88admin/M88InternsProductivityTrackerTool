@@ -620,8 +620,8 @@ export async function generateDarPdf(darData, weekNum, mondayDate, existingDoc) 
     const supervisorSigDataUrl = att?.supervisor_id
       ? (supervisorSigById.get(att.supervisor_id) || defaultSupervisorSigDataUrl)
       : defaultSupervisorSigDataUrl;
-    const holidayTask = `---SUSPENSION OF WORK DUE TO ${formatHolidayName(holidayName)} HOLIDAY---`;
-    const noLogTask = '---NO RECORDED LOG FOR THIS DAY---';
+    const holidayTask = `--- SUSPENSION OF WORK DUE TO ${formatHolidayName(holidayName)} HOLIDAY ---`;
+    const noLogTask = '--- NO RECORDED LOG FOR THIS DAY ---';
 
     // Morning session (calculate for display purposes only)
     const mHours = isHolidayDate ? 0 : (isNoLog ? 0 : calculateSessionHours(att?.time_in_1, att?.time_out_1));

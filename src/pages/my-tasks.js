@@ -317,7 +317,22 @@ export async function renderMyTasksPage() {
         const taskId = btn.dataset.taskId;
         const newStatus = btn.dataset.newStatus;
 
+        // Store original button content and disable it
+        const originalContent = btn.innerHTML;
         btn.disabled = true;
+        btn.style.opacity = '0.7';
+        btn.style.cursor = 'not-allowed';
+
+        // Show loading state
+        const loadingText = newStatus === 'in_progress' ? 'Starting...' : 'Submitting...';
+        btn.innerHTML = `
+          <svg class="animate-spin w-3.5 h-3.5" fill="none" viewBox="0 0 24 24">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+          </svg>
+          <span class="ml-1.5">${loadingText}</span>
+        `;
+
         try {
           if (newStatus === 'in_progress') {
             // Starting a task: apply immediately, just notify supervisor
@@ -595,7 +610,11 @@ export async function renderMyTasksPage() {
           renderMyTasksPage();
         } catch (err) {
           showToast(err.message || 'Failed to update task status', 'error');
+          // Restore original button state
           btn.disabled = false;
+          btn.style.opacity = '';
+          btn.style.cursor = '';
+          btn.innerHTML = originalContent;
         }
       });
     });
