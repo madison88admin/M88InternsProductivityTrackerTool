@@ -137,6 +137,7 @@ export async function inviteUser(email, role, fullName, departmentId, locationId
 
 /**
  * Logout the current user.
+ * Resilient to session expiration - always succeeds even if audit log or signOut fails.
  */
 export async function logout() {
   const userId = currentSession.user?.id || null;
@@ -145,13 +146,51 @@ export async function logout() {
     role: currentSession.profile?.role || null,
   };
 
+  // Try to log audit, but don't fail if session is expired
   if (userId) {
-    await logAuthAudit('auth.logout', userId, details);
+    try {
+      await logAuthAudit('auth.logout', userId, details);
+    } catch (err) {
+      console.warn('Audit log failed during logout (likely expired session):', err);
+      // Continue with logout regardless
+    }
   }
 
-  const { error } = await supabase.auth.signOut();
-  if (error) throw error;
+  // Always try to sign out, even if it fails (session might be expired)
+  try {
+    await supabase.auth.signOut();
+  } catch (err) {
+    console.warn('SignOut API failed (likely expired session):', err);
+    // Still clear local session below
+  }
+
+  // Always clear local session state, even if server-side signOut failed
   currentSession = { user: null, profile: null };
+
+  // Force-clear all Supabase auth keys from storage as fallback
+  try {
+    // Clear all keys that start with 'sb-' from sessionStorage
+    const keysToRemove = [];
+    for (let i = 0; i < sessionStorage.length; i++) {
+      const key = sessionStorage.key(i);
+      if (key && key.startsWith('sb-')) {
+        keysToRemove.push(key);
+      }
+    }
+    keysToRemove.forEach(key => sessionStorage.removeItem(key));
+
+    // Also clear from localStorage in case any keys were stored there
+    const localKeysToRemove = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && key.startsWith('sb-')) {
+        localKeysToRemove.push(key);
+      }
+    }
+    localKeysToRemove.forEach(key => localStorage.removeItem(key));
+  } catch (err) {
+    console.warn('Failed to clear storage:', err);
+  }
 }
 
 /**

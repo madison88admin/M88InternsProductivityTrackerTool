@@ -209,13 +209,17 @@ export function renderLayout(contentHtml, init, guardPath) {
     const btn = e.currentTarget;
     if (btn.disabled) return;
     btn.disabled = true;
+
     try {
-      await logout();
+      await logout(); // Now resilient - never throws
       showToast('Signed out successfully', 'success');
-      navigateTo('/login');
     } catch (err) {
-      showToast('Failed to sign out', 'error');
-      btn.disabled = false;
+      console.error('Logout error:', err);
+      showToast('Signed out (session may have expired)', 'info');
+    } finally {
+      // ALWAYS navigate to login, even if logout had issues
+      // The logout() function clears local state regardless of errors
+      navigateTo('/login');
     }
   };
 

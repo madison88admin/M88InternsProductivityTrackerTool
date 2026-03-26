@@ -215,6 +215,8 @@ async function boot() {
     await initAuth();
     initIdleTimeout();
     initAvatarHydrationObserver();
+    // Note: Session refresh on tab visibility is automatically handled by Supabase's
+    // built-in autoRefreshToken feature. No custom handler needed.
     initRouter();
   } catch (err) {
     console.error('App initialization failed:', err);

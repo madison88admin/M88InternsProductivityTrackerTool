@@ -242,7 +242,13 @@ export function computeEstimatedEndDate(hoursRequired, hoursRendered, daysWorked
  */
 export async function getPublicIP() {
   try {
-    const response = await fetch('https://api.ipify.org?format=json');
+    // Race the IP fetch against a 800ms timeout to prevent blocking UI
+    const response = await Promise.race([
+      fetch('https://api.ipify.org?format=json'),
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('IP fetch timeout')), 800)
+      )
+    ]);
     const data = await response.json();
     return data.ip;
   } catch {

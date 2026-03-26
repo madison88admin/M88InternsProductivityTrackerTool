@@ -107,12 +107,12 @@ async function buildInternDashboard(profile) {
   ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
   const dateFrom = ninetyDaysAgo.toLocaleDateString('en-CA');
 
-  // ── Parallel data fetch ───────────────────────────────────────────────────
+  // ── Parallel data fetch (optimized with limits) ──────────────────────────
   const [attTodayRes, allAttRes, allTasksRes, allNarrativesRes, notifsRes] = await Promise.all([
     supabase.from('attendance_records').select('*').eq('intern_id', profile.id).eq('date', today).maybeSingle(),
-    supabase.from('attendance_records').select('total_hours, is_late, status, date').eq('intern_id', profile.id).gte('date', dateFrom),
-    supabase.from('tasks').select('status, due_date, is_archived').eq('assigned_to', profile.id),
-    supabase.from('narratives').select('status, date').eq('intern_id', profile.id).neq('status', 'draft'),
+    supabase.from('attendance_records').select('total_hours, is_late, status, date').eq('intern_id', profile.id).gte('date', dateFrom).order('date', { ascending: false }).limit(200),
+    supabase.from('tasks').select('status, due_date, is_archived').eq('assigned_to', profile.id).order('created_at', { ascending: false }).limit(100),
+    supabase.from('narratives').select('status, date').eq('intern_id', profile.id).neq('status', 'draft').gte('date', dateFrom).order('date', { ascending: false }).limit(150),
     supabase.from('notifications').select('*', { count: 'exact', head: true }).eq('user_id', profile.id).eq('is_read', false),
   ]);
 
@@ -1011,8 +1011,11 @@ async function buildSupervisorDashboard(profile) {
 
 async function buildAdminDashboard(profile) {
   const today = getTodayDate();
+  const sixtyDaysAgo = new Date();
+  sixtyDaysAgo.setDate(sixtyDaysAgo.getDate() - 60);
+  const dateFilter = sixtyDaysAgo.toLocaleDateString('en-CA');
 
-  // ── System-level stats ──────────────────────────────────────────────────────
+  // ── System-level stats (parallelized) ───────────────────────────────────────
   const [
     { count: totalUsers },
     { count: totalLocations },
@@ -1025,7 +1028,7 @@ async function buildAdminDashboard(profile) {
     supabase.from('approvals').select('*', { count: 'exact', head: true }).eq('status', 'pending'),
   ]);
 
-  // ── Intern KPI data ─────────────────────────────────────────────────────────
+  // ── Intern KPI data (optimized with parallel fetch) ────────────────────────
   const { data: interns } = await supabase
     .from('profiles')
     .select('id, full_name, avatar_url, school, hours_required, hours_rendered, ojt_start_date, status, is_voluntary, department:departments(name)')
@@ -1043,11 +1046,14 @@ async function buildAdminDashboard(profile) {
         .from('attendance_records')
         .select('intern_id, total_hours, is_late')
         .in('intern_id', internIds)
-        .eq('status', 'approved'),
+        .eq('status', 'approved')
+        .gte('date', dateFilter)
+        .limit(1000),
       supabase
         .from('tasks')
         .select('assigned_to, status, due_date, is_archived')
-        .in('assigned_to', internIds),
+        .in('assigned_to', internIds)
+        .limit(500),
     ]);
     allAttendance = attRes.data || [];
     allTasks = taskRes.data || [];

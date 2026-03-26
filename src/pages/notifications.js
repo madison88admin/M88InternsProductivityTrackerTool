@@ -811,11 +811,12 @@ async function processApprovalFromNotification(approval, status, comments = null
 
   if (internData?.email) {
     const emailHtml = getApprovalResultTemplate(approval.type, status, comments);
-    await sendEmailNotification(
+    // Fire-and-forget: don't block UI waiting for email
+    sendEmailNotification(
       internData.email,
       notificationTitle,
       emailHtml
-    );
+    ).catch(err => console.error('Failed to send approval email:', err));
   }
 
   await logAudit(`approval.${status}`, 'approval', approval.id, {

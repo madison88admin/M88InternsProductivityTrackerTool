@@ -450,7 +450,8 @@ export async function renderMyTasksPage() {
                       </body>
                     </html>
                   `;
-                  await sendEmailNotification(admin.email, `Task In Progress - ${taskData?.title || 'A task'}`, adminEmailHtml).catch(err => console.error('Failed to send admin task email:', err));
+                  // Fire-and-forget: don't block UI waiting for email
+                  sendEmailNotification(admin.email, `Task In Progress - ${taskData?.title || 'A task'}`, adminEmailHtml).catch(err => console.error('Failed to send admin task email:', err));
                 }
               }
             }
@@ -599,7 +600,8 @@ export async function renderMyTasksPage() {
                       </body>
                     </html>
                   `;
-                  await sendEmailNotification(admin.email, `Task Status Change Request - ${task?.title || 'A task'}`, adminEmailHtml).catch(err => console.error('Failed to send admin task email to ' + admin.email + ':', err));
+                  // Fire-and-forget: don't block UI waiting for email
+                  sendEmailNotification(admin.email, `Task Status Change Request - ${task?.title || 'A task'}`, adminEmailHtml).catch(err => console.error('Failed to send admin task email to ' + admin.email + ':', err));
                 }
               }
             }

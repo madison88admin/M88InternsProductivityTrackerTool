@@ -4,6 +4,10 @@
  */
 import { supabase } from './supabase.js';
 
+// Cache for department supervisors (reduces DB queries from 2 to 0 on repeat calls)
+const supervisorCache = new Map();
+const SUPERVISOR_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
 /**
  * Send email notification to a user
  * @param {string} userEmail - Recipient email
@@ -135,6 +139,13 @@ export function getTaskAssignmentTemplate(taskTitle, taskDescription) {
  */
 export async function getDepartmentSupervisors(internId) {
   try {
+    // Check cache first
+    const cached = supervisorCache.get(internId);
+    if (cached && (Date.now() - cached.timestamp < SUPERVISOR_CACHE_TTL)) {
+      console.log('Using cached department supervisors for intern:', internId);
+      return cached.supervisors;
+    }
+
     // Fetch intern to get department_id
     const { data: intern, error: internError } = await supabase
       .from('profiles')
@@ -165,9 +176,32 @@ export async function getDepartmentSupervisors(internId) {
       return [];
     }
 
-    return supervisors || [];
+    const result = supervisors || [];
+
+    // Cache the result
+    supervisorCache.set(internId, {
+      supervisors: result,
+      timestamp: Date.now()
+    });
+
+    return result;
   } catch (err) {
     console.error('Failed to get department supervisors:', err);
     return [];
+  }
+}
+
+/**
+ * Invalidate supervisor cache for a specific intern or all interns
+ * Call this when department assignments or supervisor status changes
+ * @param {UUID|null} internId - Specific intern ID, or null to clear all cache
+ */
+export function invalidateSupervisorCache(internId = null) {
+  if (internId) {
+    supervisorCache.delete(internId);
+    console.log('Cleared supervisor cache for intern:', internId);
+  } else {
+    supervisorCache.clear();
+    console.log('Cleared all supervisor cache');
   }
 }
