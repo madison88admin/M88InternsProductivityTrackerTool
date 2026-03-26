@@ -206,20 +206,38 @@ export function renderLayout(contentHtml, init, guardPath) {
   };
 
   const handleLogout = async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    // Visual feedback: disable immediately to prevent double-clicks
     const btn = e.currentTarget;
-    if (btn.disabled) return;
-    btn.disabled = true;
+    const originalText = btn.innerHTML;
+    btn.innerHTML = `${icons.spinner} <span>Signing out...</span>`;
+    btn.style.pointerEvents = 'none';
+
+    // Failsafe: force navigation after 3 seconds if logout hangs
+    const failsafeTimeout = setTimeout(() => {
+      console.warn('Logout taking too long, forcing navigation');
+      window.location.replace(window.location.origin + window.location.pathname + '#/login');
+    }, 3000);
 
     try {
-      await logout(); // Now resilient - never throws
-      showToast('Signed out successfully', 'success');
+      // Call resilient logout (never throws, always clears state)
+      await logout();
+      clearTimeout(failsafeTimeout);
+
+      // Small delay to ensure storage clear operations complete
+      await new Promise(resolve => setTimeout(resolve, 100));
+
+      // Use replace() to do full navigation without reload race condition
+      window.location.replace(window.location.origin + window.location.pathname + '#/login');
     } catch (err) {
-      console.error('Logout error:', err);
-      showToast('Signed out (session may have expired)', 'info');
-    } finally {
-      // ALWAYS navigate to login, even if logout had issues
-      // The logout() function clears local state regardless of errors
-      navigateTo('/login');
+      // This should never happen since logout() is resilient, but handle it anyway
+      console.error('Unexpected logout error:', err);
+      clearTimeout(failsafeTimeout);
+
+      // Still force navigation
+      window.location.replace(window.location.origin + window.location.pathname + '#/login');
     }
   };
 

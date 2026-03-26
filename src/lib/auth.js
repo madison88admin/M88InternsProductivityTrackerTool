@@ -146,19 +146,25 @@ export async function logout() {
     role: currentSession.profile?.role || null,
   };
 
-  // Try to log audit, but don't fail if session is expired
+  // Try to log audit with timeout, but don't fail if session is expired
   if (userId) {
     try {
-      await logAuthAudit('auth.logout', userId, details);
+      await Promise.race([
+        logAuthAudit('auth.logout', userId, details),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('Audit timeout')), 1000))
+      ]);
     } catch (err) {
       console.warn('Audit log failed during logout (likely expired session):', err);
       // Continue with logout regardless
     }
   }
 
-  // Always try to sign out, even if it fails (session might be expired)
+  // Always try to sign out with timeout, even if it fails (session might be expired)
   try {
-    await supabase.auth.signOut();
+    await Promise.race([
+      supabase.auth.signOut(),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('SignOut timeout')), 1500))
+    ]);
   } catch (err) {
     console.warn('SignOut API failed (likely expired session):', err);
     // Still clear local session below
