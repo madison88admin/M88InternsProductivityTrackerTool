@@ -15,15 +15,83 @@ import { sendEmailNotification, getApprovalResultTemplate } from '../lib/email-n
 
 export async function renderNotificationsPage() {
   const profile = getProfile();
+  const isAdmin = profile.role === 'admin';
 
-  const { data: notifications } = await supabase
-    .from('notifications')
-    .select('*')
-    .eq('user_id', profile.id)
-    .order('created_at', { ascending: false })
-    .limit(100);
+  // For admins with departments, load interns in their department
+  let departmentInternIds = [];
+  if (isAdmin && profile.department_id) {
+    const { data: deptInterns } = await supabase
+      .from('profiles')
+      .select('id')
+      .eq('department_id', profile.department_id)
+      .eq('role', 'intern');
+    departmentInternIds = (deptInterns || []).map(i => i.id);
+  }
 
-  const notifs = notifications || [];
+  // Get saved preference from sessionStorage, or use default
+  let showDeptOnly = isAdmin && profile.department_id && departmentInternIds.length > 0
+    ? sessionStorage.getItem('notif-dept-filter') === 'dept'
+    : false;
+
+  async function loadNotifications() {
+    if (!isAdmin) {
+      // Non-admin sees only their own
+      const { data: notifications } = await supabase
+        .from('notifications')
+        .select('*')
+        .eq('user_id', profile.id)
+        .order('created_at', { ascending: false })
+        .limit(100);
+      return notifications || [];
+    }
+
+    if (showDeptOnly && departmentInternIds.length > 0) {
+      // Admin viewing "My Department" - need notifications about department interns
+      // This includes: notifications TO interns AND pending approval notifications about them
+
+      // Fetch all notifications and filter in memory for department relevance
+      const { data: allNotifs } = await supabase
+        .from('notifications')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(500);
+
+      // Get ALL approvals for department interns (pending, approved, rejected)
+      const { data: deptApprovals } = await supabase
+        .from('approvals')
+        .select('entity_id, type')
+        .in('intern_id', departmentInternIds);
+
+      const approvalEntityIds = new Set((deptApprovals || []).map(a => a.entity_id).filter(Boolean));
+
+      // Filter notifications to those relevant to department:
+      // 1. Sent TO department interns (approval results, system notifications, etc.), OR
+      // 2. Notifications ABOUT department intern submissions (pending approvals, etc.)
+      const notifications = (allNotifs || []).filter(notif => {
+        // Include if notification is TO a department intern
+        if (departmentInternIds.includes(notif.user_id)) return true;
+
+        // Include if it's a notification about a department intern's submission
+        if (notif.entity_id && approvalEntityIds.has(notif.entity_id)) {
+          return true;
+        }
+
+        return false;
+      }).slice(0, 100);
+
+      return notifications;
+    }
+
+    // Admin viewing "All Interns" - see all notifications
+    const { data: notifications } = await supabase
+      .from('notifications')
+      .select('*')
+      .order('created_at', { ascending: false })
+      .limit(100);
+    return notifications || [];
+  }
+
+  let notifs = await loadNotifications();
   const unreadCount = notifs.filter(n => !n.is_read).length;
   const notifTypes = [...new Set(notifs.map(n => getTypeLabel(n)))].sort((a, b) => a.localeCompare(b));
   const typeOptionsHtml = notifTypes
@@ -68,7 +136,7 @@ export async function renderNotificationsPage() {
     </div>
 
     <!-- Filter tabs -->
-    <div class="flex items-center justify-between gap-3 mb-6 animate-fade-in-up" style="animation-delay: 100ms;">
+    <div class="flex items-center justify-between gap-3 mb-6 animate-fade-in-up flex-wrap" style="animation-delay: 100ms;">
       <div class="flex gap-1 p-1 rounded-xl" style="background: var(--color-neutral-100);">
         <button class="filter-tab px-4 py-1.5 rounded-lg text-sm font-semibold transition-all bg-white shadow-sm text-neutral-800" data-filter="all">
           All
@@ -80,13 +148,26 @@ export async function renderNotificationsPage() {
         </button>
       </div>
 
-      <div class="flex items-center gap-2">
-        <label for="notif-type-filter" class="text-sm text-neutral-500 font-medium">Type</label>
+      <div class="flex items-center gap-3">
+        <label for="notif-type-filter" class="text-sm text-neutral-500 font-medium">Type:</label>
         <select id="notif-type-filter" class="form-input py-2 px-3 text-sm min-w-45">
           <option value="all">All Types</option>
           ${typeOptionsHtml}
         </select>
       </div>
+
+      ${isAdmin && departmentInternIds.length > 0 ? `
+      <div class="flex gap-1 p-1 rounded-xl ml-auto" style="background: var(--color-neutral-100);">
+        <button id="dept-all-btn" class="dept-toggle-btn px-4 py-1.5 rounded-lg text-sm font-semibold transition-all ${!showDeptOnly ? 'bg-white shadow-sm text-neutral-800' : 'text-neutral-500'}" data-value="all">
+          <span class="dept-btn-text">All Interns</span>
+          <span class="dept-btn-spinner ml-1 animate-spin rounded-full h-3 w-3 border-2 border-b-transparent inline-block" style="display: none; border-color: currentColor;"></span>
+        </button>
+        <button id="dept-dept-btn" class="dept-toggle-btn px-4 py-1.5 rounded-lg text-sm font-semibold transition-all ${showDeptOnly ? 'bg-white shadow-sm text-neutral-800' : 'text-neutral-500'}" data-value="dept">
+          <span class="dept-btn-text">My Department</span>
+          <span class="dept-btn-spinner ml-1 animate-spin rounded-full h-3 w-3 border-2 border-b-transparent inline-block" style="display: none; border-color: currentColor;"></span>
+        </button>
+      </div>
+      ` : ''}
     </div>
 
     <!-- Notification list -->
@@ -163,6 +244,21 @@ export async function renderNotificationsPage() {
     el.querySelector('#notif-type-filter')?.addEventListener('change', (event) => {
       activeTypeFilter = event.target.value;
       applyFilters();
+    });
+
+    // Department toggle buttons — update filter and re-render
+    el.querySelectorAll('.dept-toggle-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        // Disable all buttons and show spinner on active button
+        el.querySelectorAll('.dept-toggle-btn').forEach(b => b.disabled = true);
+        btn.querySelector('.dept-btn-spinner').style.display = 'inline-block';
+
+        // Save preference and re-render
+        sessionStorage.setItem('notif-dept-filter', btn.dataset.value);
+        await renderNotificationsPage();
+
+        // Re-enable buttons and hide spinners (this happens after page re-renders)
+      });
     });
 
     // Mark all read

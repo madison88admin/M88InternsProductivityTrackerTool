@@ -19,7 +19,7 @@ export async function renderApprovalsPage() {
 
   let query = supabase
     .from('approvals')
-    .select('*, intern:profiles!approvals_intern_id_fkey(full_name, email), reviewer:profiles!approvals_reviewed_by_fkey(full_name, email)')
+    .select('*, intern:profiles!approvals_intern_id_fkey(full_name, email, department_id, departments(name)), reviewer:profiles!approvals_reviewed_by_fkey(full_name, email)')
     .order('created_at', { ascending: false })
     .limit(100);
 
@@ -41,9 +41,20 @@ export async function renderApprovalsPage() {
 
   const { data: approvals } = await query;
 
-  const pendingApprovals = (approvals || []).filter(a => a.status === 'pending');
+  const allPendingApprovals = (approvals || []).filter(a => a.status === 'pending');
   const reviewedApprovals = (approvals || []).filter(a => a.status !== 'pending');
-  const actionablePendingCount = pendingApprovals.filter(a => isAdmin || a.type !== 'attendance_correction').length;
+  
+  // For admins with departments, separate into department and other approvals
+  let pendingApprovals = allPendingApprovals;
+  let deptPendingApprovals = [];
+  
+  if (isAdmin && profile.department_id) {
+    deptPendingApprovals = allPendingApprovals.filter(a => a.intern?.department_id === profile.department_id);
+    pendingApprovals = allPendingApprovals.filter(a => a.intern?.department_id !== profile.department_id);
+  }
+  
+  const actionablePendingCount = allPendingApprovals.filter(a => isAdmin || a.type !== 'attendance_correction').length;
+  const actionableDeptPendingCount = deptPendingApprovals.filter(a => a.type !== 'attendance_correction').length;
 
   renderLayout(`
     <div class="page-header animate-fade-in-up">
@@ -51,24 +62,58 @@ export async function renderApprovalsPage() {
       <p class="page-subtitle">Review and manage submissions</p>
     </div>
 
-    <!-- Pending Approvals -->
-    <div class="card mb-6">
+    ${isAdmin && profile.department_id && deptPendingApprovals.length > 0 ? `
+    <!-- Department Pending Approvals (For Admins with Department) -->
+    <div class="card mb-6 border-l-4 border-l-primary-600">
       <div class="flex items-center justify-between mb-4">
-        <h3 class="text-base font-bold text-neutral-900">Pending (${pendingApprovals.length})</h3>
-        ${pendingApprovals.length > 0 ? `
-          <button id="bulk-approve-btn" class="btn-sm ${actionablePendingCount > 0 ? 'btn-success' : 'btn-secondary opacity-50 cursor-not-allowed'}" ${actionablePendingCount === 0 ? 'disabled' : ''}>
-            ${icons.check} Approve All Today
-          </button>
-        ` : ''}
+        <h3 class="text-base font-bold text-neutral-900">Pending - My Department (${deptPendingApprovals.length})</h3>
+        <div class="flex gap-3 items-center">
+          <select id="dept-pending-sort" class="form-input py-2 px-3 text-sm min-w-max">
+            <option value="date-desc">Sort: Newest First</option>
+            <option value="date-asc">Sort: Oldest First</option>
+            <option value="intern-asc">Sort: Intern A-Z</option>
+            <option value="type">Sort: By Type</option>
+          </select>
+          ${actionableDeptPendingCount > 0 ? `
+            <button id="bulk-approve-dept-btn" class="btn-sm btn-success">
+              ${icons.check} Approve All Today
+            </button>
+          ` : ''}
+        </div>
+      </div>
+
+      <div class="space-y-3" id="dept-pending-approvals-container">
+        ${deptPendingApprovals.map(a => renderApprovalCard(a, isAdmin)).join('')}
+      </div>
+    </div>
+    ` : ''}
+
+    <!-- Pending Approvals -->
+    <div class="card mb-6 ${isAdmin && profile.department_id ? 'border-l-4 border-l-neutral-300' : ''}">
+      <div class="flex items-center justify-between mb-4">
+        <h3 class="text-base font-bold text-neutral-900">${isAdmin && profile.department_id ? 'Other Pending' : 'Pending'} (${pendingApprovals.length})</h3>
+        <div class="flex gap-3 items-center">
+          <select id="pending-sort" class="form-input py-2 px-3 text-sm min-w-max">
+            <option value="date-desc">Sort: Newest First</option>
+            <option value="date-asc">Sort: Oldest First</option>
+            <option value="intern-asc">Sort: Intern A-Z</option>
+            <option value="type">Sort: By Type</option>
+          </select>
+          ${pendingApprovals.length > 0 && (actionablePendingCount - actionableDeptPendingCount) > 0 ? `
+            <button id="bulk-approve-btn" class="btn-sm btn-success">
+              ${icons.check} Approve All Today
+            </button>
+          ` : ''}
+        </div>
       </div>
 
       ${pendingApprovals.length > 0 ? `
-        <div class="space-y-3">
+        <div class="space-y-3" id="pending-approvals-container">
           ${pendingApprovals.map(a => renderApprovalCard(a, isAdmin)).join('')}
         </div>
       ` : `
         <div class="text-center py-8 text-neutral-400">
-          <p>No pending approvals</p>
+          <p>No other pending approvals</p>
         </div>
       `}
     </div>
@@ -111,24 +156,89 @@ export async function renderApprovalsPage() {
       </div>
     </div>
   `, (el) => {
-    // Approve/Reject individual items
-    el.querySelectorAll('.approve-btn').forEach(btn => {
-      btn.addEventListener('click', () => handleApproval(btn.dataset.approvalId, 'approved', approvals));
+    // Sorting function
+    function sortApprovals(approvalsToSort, sortBy) {
+      const sorted = [...approvalsToSort];
+      
+      switch(sortBy) {
+        case 'date-asc':
+          return sorted.sort((a, b) => new Date(a.submitted_at) - new Date(b.submitted_at));
+        case 'intern-asc':
+          return sorted.sort((a, b) => (a.intern?.full_name || '').localeCompare(b.intern?.full_name || ''));
+        case 'type':
+          return sorted.sort((a, b) => a.type.localeCompare(b.type));
+        case 'date-desc':
+        default:
+          return sorted.sort((a, b) => new Date(b.submitted_at) - new Date(a.submitted_at));
+      }
+    }
+
+    // Attach event listeners to approval buttons
+    function attachApprovalListeners(container) {
+      container.querySelectorAll('.approve-btn').forEach(btn => {
+        btn.addEventListener('click', () => handleApproval(btn.dataset.approvalId, 'approved', approvals));
+      });
+      container.querySelectorAll('.reject-btn').forEach(btn => {
+        btn.addEventListener('click', () => openRejectModal(btn.dataset.approvalId, approvals));
+      });
+      container.querySelectorAll('.view-details-btn').forEach(btn => {
+        btn.addEventListener('click', () => viewApprovalDetails(btn.dataset.approvalId, approvals));
+      });
+      container.querySelectorAll('.review-task-btn').forEach(btn => {
+        btn.addEventListener('click', () => openTaskSubmissionReviewModal(btn.dataset.approvalId, approvals));
+      });
+    }
+
+    // Department pending sort handler
+    el.querySelector('#dept-pending-sort')?.addEventListener('change', (e) => {
+      const sorted = sortApprovals(deptPendingApprovals, e.target.value);
+      const container = el.querySelector('#dept-pending-approvals-container');
+      container.innerHTML = sorted.map(a => renderApprovalCard(a, isAdmin)).join('');
+      attachApprovalListeners(container);
     });
 
-    el.querySelectorAll('.reject-btn').forEach(btn => {
-      btn.addEventListener('click', () => openRejectModal(btn.dataset.approvalId, approvals));
+    // Other pending sort handler
+    el.querySelector('#pending-sort')?.addEventListener('change', (e) => {
+      const sorted = sortApprovals(pendingApprovals, e.target.value);
+      const container = el.querySelector('#pending-approvals-container');
+      if (container) {
+        container.innerHTML = sorted.map(a => renderApprovalCard(a, isAdmin)).join('');
+        attachApprovalListeners(container);
+      }
     });
 
-    el.querySelectorAll('.view-details-btn').forEach(btn => {
-      btn.addEventListener('click', () => viewApprovalDetails(btn.dataset.approvalId, approvals));
+    // Initial event listeners for approval buttons
+    attachApprovalListeners(el);
+
+    // Bulk approve for department approvals
+    el.querySelector('#bulk-approve-dept-btn')?.addEventListener('click', async () => {
+      const today = getTodayDate();
+      const todayPending = deptPendingApprovals.filter(a =>
+        a.submitted_at?.slice(0, 10) === today &&
+        a.type !== 'attendance_correction'
+      );
+
+      if (todayPending.length === 0) {
+        showToast('No pending approvals for today in your department', 'info');
+        return;
+      }
+
+      const results = await Promise.allSettled(
+        todayPending.map(approval => processApproval(approval.id, 'approved', 'Bulk approved', approval))
+      );
+
+      const successCount = results.filter(r => r.status === 'fulfilled').length;
+      const failedCount = results.length - successCount;
+
+      if (failedCount === 0) {
+        showToast(`${successCount} items approved`, 'success');
+      } else {
+        showToast(`${successCount} approved, ${failedCount} failed`, successCount > 0 ? 'info' : 'error');
+      }
+      renderApprovalsPage();
     });
 
-    el.querySelectorAll('.review-task-btn').forEach(btn => {
-      btn.addEventListener('click', () => openTaskSubmissionReviewModal(btn.dataset.approvalId, approvals));
-    });
-
-    // Bulk approve
+    // Bulk approve for other approvals
     el.querySelector('#bulk-approve-btn')?.addEventListener('click', async () => {
       const today = getTodayDate();
       const todayPending = pendingApprovals.filter(a =>

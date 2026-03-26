@@ -34,14 +34,36 @@ export async function renderTeamNarrativesPage() {
   const internIds = (interns || []).map(i => i.id);
 
   // Generate date range options
-  const dateRangeOptions = [
-    { value: '7', label: 'Last 7 Days' },
-    { value: '14', label: 'Last 14 Days' },
-    { value: '30', label: 'Last 30 Days' },
-    { value: '60', label: 'Last 60 Days' },
-    { value: '90', label: 'Last 90 Days' },
-    { value: 'all', label: 'All Time' },
-  ];
+  const dateRangeOptions = [];
+  const setupDateRanges = () => {
+    const ranges = [
+      { value: '7', label: 'Last 7 Days' },
+      { value: '14', label: 'Last 14 Days' },
+      { value: '30', label: 'Last 30 Days' },
+      { value: '60', label: 'Last 60 Days' },
+      { value: '90', label: 'Last 90 Days' },
+    ];
+
+    ranges.forEach(range => {
+      const endDate = new Date();
+      const startDate = new Date();
+      startDate.setDate(startDate.getDate() - parseInt(range.value));
+      dateRangeOptions.push({
+        ...range,
+        start: formatDateKey(startDate),
+        end: formatDateKey(endDate),
+      });
+    });
+
+    dateRangeOptions.push({
+      value: 'all',
+      label: 'All Time',
+      start: null,
+      end: null,
+    });
+  };
+
+  setupDateRanges();
 
   // Filter state
   let selectedIntern = '';
@@ -124,9 +146,8 @@ export async function renderTeamNarrativesPage() {
         <div class="space-y-3">
           ${filtered.map(n => {
             const sessionColors = {
-              'am': 'bg-blue-100 text-blue-700',
-              'pm': 'bg-purple-100 text-purple-700',
-              'eod': 'bg-green-100 text-green-700'
+              'morning': 'bg-blue-100 text-blue-700',
+              'afternoon': 'bg-purple-100 text-purple-700',
             };
             const sessionColor = sessionColors[n.session] || 'bg-neutral-100 text-neutral-600';
 
@@ -188,9 +209,8 @@ export async function renderTeamNarrativesPage() {
           if (!n) return;
 
           const sessionColors = {
-            'am': 'bg-blue-100 text-blue-700',
-            'pm': 'bg-purple-100 text-purple-700',
-            'eod': 'bg-green-100 text-green-700'
+            'morning': 'bg-blue-100 text-blue-700',
+            'afternoon': 'bg-purple-100 text-purple-700',
           };
           const sessionColor = sessionColors[n.session] || 'bg-neutral-100 text-neutral-600';
 
@@ -278,7 +298,6 @@ export async function renderTeamNarrativesPage() {
     el.querySelector('#stat-approved').textContent = stats.approved;
     el.querySelector('#stat-rejected').textContent = stats.rejected;
     el.querySelector('#stat-late').textContent = stats.late;
-    el.querySelector('#stat-avg-hours').textContent = stats.avgHours + ' hrs';
   }
 
   const allInternsLabel = profile.department_id
@@ -303,7 +322,7 @@ export async function renderTeamNarrativesPage() {
     </div>
 
     <!-- Statistics Cards -->
-    <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-6 animate-fade-in-up" style="animation-delay: 0.1s;">
+    <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 mb-6 animate-fade-in-up" style="animation-delay: 0.1s;">
       <div class="card bg-linear-to-br from-blue-50 to-blue-100 border-blue-200">
         <div class="flex items-center justify-between">
           <div>
@@ -373,20 +392,6 @@ export async function renderTeamNarrativesPage() {
           </div>
         </div>
       </div>
-
-      <div class="card bg-linear-to-br from-purple-50 to-purple-100 border-purple-200">
-        <div class="flex items-center justify-between">
-          <div>
-            <p class="text-xs font-medium text-purple-600 uppercase tracking-wide">Avg Hours</p>
-            <p class="text-2xl font-bold text-purple-900 mt-1" id="stat-avg-hours">${stats.avgHours} hrs</p>
-          </div>
-          <div class="w-10 h-10 bg-purple-200 rounded-lg flex items-center justify-center">
-            <svg class="w-6 h-6 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path>
-            </svg>
-          </div>
-        </div>
-      </div>
     </div>
 
     <!-- Filters -->
@@ -407,7 +412,7 @@ export async function renderTeamNarrativesPage() {
             <span>Date Range</span>
           </label>
           <select id="filter-date-range" class="form-input font-medium">
-            ${dateRangeOptions.map(opt => `<option value="${opt.value}" ${opt.value === selectedDateRange ? 'selected' : ''}>${opt.label}</option>`).join('')}
+            ${dateRangeOptions.map(opt => `<option value="${opt.value}" ${opt.value === selectedDateRange ? 'selected' : ''}>${opt.label}${opt.start && opt.end ? ` (${formatDate(opt.start)} – ${formatDate(opt.end)})` : ''}</option>`).join('')}
           </select>
           <p class="text-xs text-neutral-500 mt-1">Select time period</p>
         </div>
@@ -451,9 +456,8 @@ export async function renderTeamNarrativesPage() {
           </label>
           <select id="filter-session" class="form-input">
             <option value="">All Sessions</option>
-            <option value="am">AM</option>
-            <option value="pm">PM</option>
-            <option value="eod">EOD</option>
+            <option value="morning">Morning</option>
+            <option value="afternoon">Afternoon</option>
           </select>
           <p class="text-xs text-neutral-500 mt-1">Filter by session type</p>
         </div>
@@ -472,7 +476,13 @@ export async function renderTeamNarrativesPage() {
           <p class="text-xs text-neutral-500 mt-1">Filter late submissions</p>
         </div>
 
-        <div class="flex items-end">
+        <div>
+          <label class="form-label flex items-center gap-2 invisible">
+            <svg class="w-4 h-4 text-primary-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+            </svg>
+            <span>Actions</span>
+          </label>
           <button id="reset-filters" class="btn-secondary w-full">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>

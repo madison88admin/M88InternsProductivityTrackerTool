@@ -40,6 +40,11 @@ export async function renderAttendanceOverviewPage() {
     const { data } = await query;
     let records = data || [];
 
+    // Client-side department filter (department_id is nested in intern object)
+    if (departmentFilter) {
+      records = records.filter(r => r.intern?.department_id === departmentFilter);
+    }
+
     // Client-side search only (text search can't be done server-side efficiently)
     if (searchQuery) {
       const lowerSearch = searchQuery.toLowerCase();
@@ -98,7 +103,7 @@ export async function renderAttendanceOverviewPage() {
       </div>
 
       <!-- Stats -->
-      <div class="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
+      <div class="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6" id="stats-grid" style="animation: fadeIn 0.3s ease-in-out;">
         <div class="card text-center">
           <p class="text-sm text-neutral-500">Total</p>
           <p class="text-2xl font-bold">${total}</p>
@@ -122,7 +127,7 @@ export async function renderAttendanceOverviewPage() {
       </div>
 
       <!-- Table -->
-      <div class="card">
+      <div class="card" id="records-card" style="animation: fadeIn 0.3s ease-in-out;">
         <div class="flex items-center justify-between mb-4 gap-3">
           <div class="relative flex-1 max-w-xs">
             <span class="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400 pointer-events-none">
@@ -199,8 +204,31 @@ export async function renderAttendanceOverviewPage() {
       el.querySelector('#search-intern').addEventListener('input', (e) => {
         searchQuery = e.target.value.trim();
         const filtered = filterBySearch(records, searchQuery);
+
+        // Update table
         el.querySelector('#records-tbody').innerHTML = renderRows(records, searchQuery);
         el.querySelector('#record-count').textContent = `${filtered.length} Records`;
+
+        // Recalculate and update stats based on filtered results
+        const total = filtered.length;
+        const approved = filtered.filter(r => r.status === 'approved').length;
+        const pending = filtered.filter(r => r.status === 'pending').length;
+        const late = filtered.filter(r => r.is_late).length;
+        const totalHours = filtered.reduce((s, r) => s + (r.total_hours || 0), 0);
+
+        // Update stats in DOM with fade animation
+        const statsGrid = el.querySelector('#stats-grid');
+        statsGrid.style.animation = 'none';
+        setTimeout(() => {
+          statsGrid.style.animation = 'fadeIn 0.3s ease-in-out';
+          const statValues = statsGrid.querySelectorAll('.text-2xl');
+          statValues[0].textContent = total;
+          statValues[1].textContent = approved;
+          statValues[2].textContent = pending;
+          statValues[3].textContent = late;
+          statValues[4].textContent = formatHoursBothFormats(totalHours);
+        }, 10);
+
         bindEditButtons(el.querySelector('#records-tbody'));
       });
 
