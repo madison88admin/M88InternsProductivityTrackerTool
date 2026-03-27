@@ -9,6 +9,10 @@ import { showToast } from '../lib/toast.js';
 import { renderAvatar, hydrateSignedAvatars } from '../lib/utils.js';
 import { supabase } from '../lib/supabase.js';
 
+function wait(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 /**
  * Get navigation items grouped by section based on role.
  */
@@ -215,15 +219,17 @@ export function renderLayout(contentHtml, init, guardPath) {
     btn.innerHTML = `${icons.spinner} <span>Signing out...</span>`;
     btn.style.pointerEvents = 'none';
 
-    // Failsafe: force navigation after 3 seconds if logout hangs
+    // Failsafe: warn and re-enable button if logout takes unusually long
     const failsafeTimeout = setTimeout(() => {
-      console.warn('Logout taking too long, forcing navigation');
-      window.location.replace(window.location.origin + window.location.pathname + '#/login');
-    }, 3000);
+      console.warn('Logout taking too long; allowing retry');
+      showToast('Sign out is taking longer than expected. Please try again.', 'warning');
+      btn.innerHTML = originalText;
+      btn.style.pointerEvents = '';
+    }, 4500);
 
     try {
-      // Call resilient logout (never throws, always clears state)
-      await logout();
+      // Bound logout wait; auth state is cleared immediately by logout(), so we can proceed to login.
+      await Promise.race([logout(), wait(1800)]);
       clearTimeout(failsafeTimeout);
 
       // Small delay to ensure storage clear operations complete

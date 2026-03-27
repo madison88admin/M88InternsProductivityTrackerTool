@@ -7,17 +7,97 @@ import { supabase } from './supabase.js';
 /** @type {{ user: object|null, profile: object|null }} */
 let currentSession = { user: null, profile: null };
 
+const AUTH_AUDIT_TIMEOUT_MS = 1200;
+const SIGN_OUT_TIMEOUT_MS = 900;
+
+function isAbortError(err) {
+  return err?.name === 'AbortError' || String(err?.message || '').toLowerCase().includes('aborted');
+}
+
+function createTimeoutController(timeoutMs) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  return {
+    signal: controller.signal,
+    clear: () => clearTimeout(timeoutId),
+  };
+}
+
+function wait(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 async function logAuthAudit(action, userId, details = null) {
+  const timeout = createTimeoutController(AUTH_AUDIT_TIMEOUT_MS);
   try {
-    await supabase.from('audit_logs').insert({
+    const { error } = await supabase.from('audit_logs').insert({
       user_id: userId || null,
       action,
       entity_type: 'auth',
       entity_id: userId || null,
       details: details || null,
-    });
+    }).abortSignal(timeout.signal);
+
+    if (error) {
+      throw error;
+    }
+
+    return true;
   } catch (err) {
-    console.error('Auth audit log failed:', err);
+    if (isAbortError(err)) {
+      console.warn('Auth audit timed out, trying REST fallback.');
+    } else {
+      console.error('Auth audit log failed:', err);
+    }
+    return false;
+  } finally {
+    timeout.clear();
+  }
+}
+
+async function logAuthAuditFallback(action, userId, details = null) {
+  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+  const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+
+  if (!supabaseUrl || !supabaseAnonKey) {
+    return false;
+  }
+
+  const timeout = createTimeoutController(AUTH_AUDIT_TIMEOUT_MS);
+  try {
+    const res = await fetch(`${supabaseUrl}/rest/v1/audit_logs`, {
+      method: 'POST',
+      headers: {
+        apikey: supabaseAnonKey,
+        Authorization: `Bearer ${supabaseAnonKey}`,
+        'Content-Type': 'application/json',
+        Prefer: 'return=minimal',
+      },
+      body: JSON.stringify({
+        user_id: userId || null,
+        action,
+        entity_type: 'auth',
+        entity_id: userId || null,
+        details: details || null,
+      }),
+      keepalive: true,
+      signal: timeout.signal,
+    });
+
+    if (!res.ok) {
+      throw new Error(`REST audit insert failed (${res.status})`);
+    }
+
+    return true;
+  } catch (err) {
+    if (isAbortError(err)) {
+      console.warn('Auth audit REST fallback timed out.');
+    } else {
+      console.error('Auth audit REST fallback failed:', err);
+    }
+    return false;
+  } finally {
+    timeout.clear();
   }
 }
 
@@ -146,32 +226,28 @@ export async function logout() {
     role: currentSession.profile?.role || null,
   };
 
-  // Try to log audit with timeout, but don't fail if session is expired
+  // Clear app auth state first so route guards immediately treat user as logged out.
+  currentSession = { user: null, profile: null };
+
+  // Fire-and-forget audit via REST fallback (session-independent) so logout UI never blocks.
   if (userId) {
-    try {
-      await Promise.race([
-        logAuthAudit('auth.logout', userId, details),
-        new Promise((_, reject) => setTimeout(() => reject(new Error('Audit timeout')), 1000))
-      ]);
-    } catch (err) {
-      console.warn('Audit log failed during logout (likely expired session):', err);
-      // Continue with logout regardless
-    }
+    void logAuthAuditFallback('auth.logout', userId, details).then((logged) => {
+      if (!logged) {
+        console.warn('Logout audit log failed on fallback path.');
+      }
+    });
   }
 
-  // Always try to sign out with timeout, even if it fails (session might be expired)
+  // Bound signOut wait time to avoid hanging logout UI on stale internal auth state.
   try {
     await Promise.race([
-      supabase.auth.signOut(),
-      new Promise((_, reject) => setTimeout(() => reject(new Error('SignOut timeout')), 1500))
+      supabase.auth.signOut({ scope: 'local' }),
+      wait(SIGN_OUT_TIMEOUT_MS),
     ]);
   } catch (err) {
-    console.warn('SignOut API failed (likely expired session):', err);
+    console.warn('SignOut failed during logout:', err);
     // Still clear local session below
   }
-
-  // Always clear local session state, even if server-side signOut failed
-  currentSession = { user: null, profile: null };
 
   // Force-clear all Supabase auth keys from storage as fallback
   try {
