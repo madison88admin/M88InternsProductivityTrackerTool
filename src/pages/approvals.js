@@ -491,10 +491,92 @@ async function processApproval(approvalId, status, comments, approval) {
     }
   }
 
-  const notificationTitle = `${approval.type.replace('_', ' ')} ${status}`;
-  const notificationMessage = status === 'approved'
-    ? `Your ${approval.type.replace('_', ' ')} has been approved.`
-    : `Your ${approval.type.replace('_', ' ')} was rejected. Reason: ${comments || 'No reason provided'}`;
+  // Build detailed notification title and message based on approval type
+  let notificationTitle = '';
+  let notificationMessage = '';
+  const statusCapitalized = status.charAt(0).toUpperCase() + status.slice(1);
+  const reviewerName = approval.reviewer?.full_name || 'A reviewer';
+
+  if (approval.type === 'narrative') {
+    // Fetch narrative details for richer message
+    const { data: narrative } = await supabase
+      .from('narratives')
+      .select('session, date')
+      .eq('id', approval.entity_id)
+      .single();
+
+    const sessionLabel = narrative?.session === 'morning' ? 'Morning' : narrative?.session === 'afternoon' ? 'Afternoon' : '';
+    const dateLabel = narrative?.date ? formatDate(narrative.date) : '';
+
+    notificationTitle = `${sessionLabel} Narrative ${statusCapitalized}`;
+    if (status === 'approved') {
+      notificationMessage = `Your ${sessionLabel.toLowerCase()} narrative for ${dateLabel} has been approved.`;
+    } else {
+      notificationMessage = `Your ${sessionLabel.toLowerCase()} narrative for ${dateLabel} was rejected. Reason: ${comments || 'No reason provided'}`;
+    }
+  } else if (approval.type === 'attendance') {
+    // Fetch attendance details
+    const { data: attendance } = await supabase
+      .from('attendance_records')
+      .select('date')
+      .eq('id', approval.entity_id)
+      .single();
+
+    const dateLabel = attendance?.date ? formatDate(attendance.date) : '';
+
+    notificationTitle = `Attendance ${statusCapitalized}`;
+    if (status === 'approved') {
+      notificationMessage = `Your attendance record for ${dateLabel} has been approved.`;
+    } else {
+      notificationMessage = `Your attendance record for ${dateLabel} was rejected. Reason: ${comments || 'No reason provided'}`;
+    }
+  } else if (approval.type === 'task_status' || approval.type === 'task_submission') {
+    // Fetch task details
+    const { data: task } = await supabase
+      .from('tasks')
+      .select('title')
+      .eq('id', approval.entity_id)
+      .single();
+
+    const taskTitle = task?.title || 'your task';
+    const typeLabel = approval.type === 'task_status' ? 'Task Status Change' : 'Task Submission';
+
+    notificationTitle = `${typeLabel} ${statusCapitalized}`;
+    if (status === 'approved') {
+      notificationMessage = `Your ${approval.type === 'task_status' ? 'status change request' : 'task submission'} for "${taskTitle}" has been approved.`;
+    } else {
+      notificationMessage = `Your ${approval.type === 'task_status' ? 'status change request' : 'task submission'} for "${taskTitle}" was rejected. Reason: ${comments || 'No reason provided'}`;
+    }
+  } else if (approval.type === 'attendance_correction') {
+    // Fetch correction details
+    const { data: correction } = await supabase
+      .from('attendance_corrections')
+      .select('punch_type, attendance:attendance_records!attendance_id(date)')
+      .eq('id', approval.entity_id)
+      .single();
+
+    const punchLabels = {
+      time_in_1: 'Morning Time In',
+      time_out_1: 'Lunch Time Out',
+      time_in_2: 'Afternoon Time In',
+      time_out_2: 'End of Day Time Out',
+    };
+    const punchLabel = punchLabels[correction?.punch_type] || 'time';
+    const dateLabel = correction?.attendance?.date ? formatDate(correction.attendance.date) : '';
+
+    notificationTitle = `Attendance Correction ${statusCapitalized}`;
+    if (status === 'approved') {
+      notificationMessage = `Your ${punchLabel.toLowerCase()} correction for ${dateLabel} has been approved and applied.`;
+    } else {
+      notificationMessage = `Your ${punchLabel.toLowerCase()} correction for ${dateLabel} was rejected. Reason: ${comments || 'No reason provided'}`;
+    }
+  } else {
+    // Fallback for unknown types
+    notificationTitle = `${approval.type.replace('_', ' ')} ${statusCapitalized}`;
+    notificationMessage = status === 'approved'
+      ? `Your ${approval.type.replace('_', ' ')} has been approved.`
+      : `Your ${approval.type.replace('_', ' ')} was rejected. Reason: ${comments || 'No reason provided'}`;
+  }
 
   const notificationPromise = supabase.from('notifications').insert({
     user_id: approval.intern_id,

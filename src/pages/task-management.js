@@ -35,6 +35,16 @@ export async function renderTaskManagementPage() {
   }
   const { data: interns } = canManageTasks ? await internsQuery : { data: [] };
 
+  // Fetch all departments for filtering (only if admin)
+  let departments = [];
+  if (isAdmin) {
+    const { data: deptData } = await supabase
+      .from('departments')
+      .select('id, name')
+      .order('name', { ascending: true });
+    departments = deptData || [];
+  }
+
   // For supervisors in a dept, get all co-supervisor IDs for shared task visibility
   let deptSupervisorIds = [profile.id];
   if (!isAdmin && profile.department_id) {
@@ -50,7 +60,7 @@ export async function renderTaskManagementPage() {
   // Fetch tasks — supervisors see all tasks created by dept co-supervisors; admins see all
   let tasksQuery = supabase
     .from('tasks')
-    .select('*, assigned_profile:profiles!tasks_assigned_to_fkey(full_name, department_id), creator_profile:profiles!tasks_created_by_fkey(full_name)')
+    .select('*, assigned_profile:profiles!tasks_assigned_to_fkey(full_name, department_id, departments(name)), creator_profile:profiles!tasks_created_by_fkey(full_name)')
     .eq('is_archived', false)
     .order('created_at', { ascending: false });
 
@@ -87,6 +97,12 @@ export async function renderTaskManagementPage() {
 
     <!-- Filters -->
     <div class="flex flex-wrap gap-2 mb-6">
+      ${isAdmin && departments.length > 0 ? `
+      <select id="filter-department" class="form-input w-auto">
+        <option value="">All Departments</option>
+        ${departments.map(d => `<option value="${d.id}">${d.name}</option>`).join('')}
+      </select>
+      ` : ''}
       <select id="filter-status" class="form-input w-auto">
         <option value="">All Statuses</option>
         <option value="not_started">Not Started</option>
@@ -107,6 +123,7 @@ export async function renderTaskManagementPage() {
             <tr>
               <th>Title</th>
               <th>Assigned To</th>
+              ${isAdmin ? '<th>Department</th>' : ''}
               <th>Status</th>
               <th>Est. Hours</th>
               <th>Due Date</th>
@@ -130,7 +147,7 @@ export async function renderTaskManagementPage() {
                   ? 'text-warning-600 font-medium'
                   : '';
                 return `
-              <tr data-status="${task.status}" data-intern="${task.assigned_to}" class="${rowClass}">
+              <tr data-status="${task.status}" data-intern="${task.assigned_to}" data-department="${task.assigned_profile?.department_id || ''}" class="${rowClass}">
                 <td>
                   <div>
                     <p class="font-medium">${task.title}</p>
@@ -138,6 +155,7 @@ export async function renderTaskManagementPage() {
                   </div>
                 </td>
                 <td>${task.assigned_profile?.full_name || '—'}</td>
+                ${isAdmin ? `<td>${task.assigned_profile?.departments?.name || '—'}</td>` : ''}
                 <td>
                   <span class="badge bg-${task.status === 'completed' ? 'success' : task.status === 'in_progress' ? 'warning' : 'neutral'}-50 text-${task.status === 'completed' ? 'success' : task.status === 'in_progress' ? 'warning' : 'neutral'}-600">
                     ${task.status.replace('_', ' ')}
@@ -171,7 +189,7 @@ export async function renderTaskManagementPage() {
                 `;
               })()}
             `).join('')}
-            ${(!tasks || tasks.length === 0) ? `<tr><td colspan="${canManageTasks ? 8 : 7}" class="text-center text-neutral-400 py-8">No tasks found</td></tr>` : ''}
+            ${(!tasks || tasks.length === 0) ? `<tr><td colspan="${isAdmin ? (canManageTasks ? 9 : 8) : (canManageTasks ? 8 : 7)}" class="text-center text-neutral-400 py-8">No tasks found</td></tr>` : ''}
           </tbody>
         </table>
       </div>
@@ -215,19 +233,23 @@ export async function renderTaskManagementPage() {
     });
 
     // Filters
+    const filterDepartment = el.querySelector('#filter-department');
     const filterStatus = el.querySelector('#filter-status');
     const filterIntern = el.querySelector('#filter-intern');
 
     const applyFilters = () => {
+      const department = filterDepartment?.value || '';
       const status = filterStatus.value;
       const intern = filterIntern.value;
       el.querySelectorAll('#tasks-table tbody tr').forEach(row => {
+        const matchDepartment = !department || row.dataset.department === department;
         const matchStatus = !status || row.dataset.status === status;
         const matchIntern = !intern || row.dataset.intern === intern;
-        row.style.display = (matchStatus && matchIntern) ? '' : 'none';
+        row.style.display = (matchDepartment && matchStatus && matchIntern) ? '' : 'none';
       });
     };
 
+    if (filterDepartment) filterDepartment.addEventListener('change', applyFilters);
     filterStatus.addEventListener('change', applyFilters);
     filterIntern.addEventListener('change', applyFilters);
   }, '/task-management');
