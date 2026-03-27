@@ -849,41 +849,81 @@ function openNarrativeModal(tasks, profile, today) {
 
         if (error) throw error;
 
-        // Create approval entries and notifications for each narrative
-        // Fetch admins once for bulk notification
-        const { data: adminsForNotif } = await supabase
-          .from('profiles')
-          .select('id')
-          .eq('role', 'admin')
-          .eq('is_active', true);
+        // Narrative insert succeeded - now clear the draft
+        clearDraft();
 
-        for (const narrative of data) {
-          if (profile.supervisor_id) {
-            await supabase.from('approvals').insert({
-              type: 'narrative',
-              entity_id: narrative.id,
-              intern_id: profile.id,
-              supervisor_id: profile.supervisor_id,
-            });
+        // Show success immediately - don't block on notifications/emails
+        showToast(`${data.length} narrative${data.length > 1 ? 's' : ''} submitted successfully`, 'success');
+        close();
+        renderNarrativesPage();
 
-            // Get all supervisors in the intern's department for multi-supervisor notifications
-            const deptSupervisors = await getDepartmentSupervisors(profile.id);
+        // --- Background operations (non-blocking) ---
+        // Fire these in background so user doesn't wait
+        (async () => {
+          try {
+            // Batch: Get admins and supervisors once
+            const [adminsResult, deptSupervisors] = await Promise.all([
+              supabase.from('profiles').select('id, email').eq('role', 'admin').eq('is_active', true),
+              getDepartmentSupervisors(profile.id),
+            ]);
+            const adminsForNotif = adminsResult.data || [];
             const deptSupervisorIds = deptSupervisors.map(s => s.id);
 
-            // Notify all department supervisors
-            if (deptSupervisors && deptSupervisors.length > 0) {
-              // Create notification records for all department supervisors
-              const supervisorNotifs = deptSupervisors.map(s => ({
-                user_id: s.id,
-                type: 'pending_approval',
-                title: 'Narrative Pending Review',
-                message: `${profile.full_name} submitted a ${narrative.session} narrative for ${formatDate(selectedDate)}${isLate ? ' (late submission)' : ''}`,
-                entity_type: 'narrative',
-                entity_id: narrative.id,
-              }));
-              await supabase.from('notifications').insert(supervisorNotifs);
+            // Batch: Collect all approvals to insert at once
+            const approvalsToInsert = [];
+            const allNotifications = [];
 
-              // Email template
+            for (const narrative of data) {
+              if (profile.supervisor_id) {
+                approvalsToInsert.push({
+                  type: 'narrative',
+                  entity_id: narrative.id,
+                  intern_id: profile.id,
+                  supervisor_id: profile.supervisor_id,
+                });
+
+                // Supervisor notifications
+                if (deptSupervisors.length > 0) {
+                  deptSupervisors.forEach(s => {
+                    allNotifications.push({
+                      user_id: s.id,
+                      type: 'pending_approval',
+                      title: 'Narrative Pending Review',
+                      message: `${profile.full_name} submitted a ${narrative.session} narrative for ${formatDate(selectedDate)}${isLate ? ' (late submission)' : ''}`,
+                      entity_type: 'narrative',
+                      entity_id: narrative.id,
+                    });
+                  });
+                }
+
+                // Admin notifications (exclude supervisors already notified)
+                adminsForNotif
+                  .filter(a => !deptSupervisorIds.includes(a.id))
+                  .forEach(a => {
+                    allNotifications.push({
+                      user_id: a.id,
+                      type: 'pending_approval',
+                      title: 'Narrative Pending Review',
+                      message: `${profile.full_name} submitted a ${narrative.session} narrative for ${formatDate(selectedDate)}${isLate ? ' (late submission)' : ''}`,
+                      entity_type: 'narrative',
+                      entity_id: narrative.id,
+                    });
+                  });
+              }
+            }
+
+            // Batch insert approvals and notifications in parallel
+            const dbOps = [];
+            if (approvalsToInsert.length > 0) {
+              dbOps.push(supabase.from('approvals').insert(approvalsToInsert));
+            }
+            if (allNotifications.length > 0) {
+              dbOps.push(supabase.from('notifications').insert(allNotifications));
+            }
+            await Promise.all(dbOps);
+
+            // Send emails (fire-and-forget) and audit logs
+            for (const narrative of data) {
               const emailHtml = `
                 <!DOCTYPE html>
                 <html>
@@ -916,95 +956,39 @@ function openNarrativeModal(tasks, profile, today) {
                 </html>
               `;
 
-              // Send email to each supervisor
+              // Email to supervisors
               deptSupervisors.forEach(supervisor => {
                 if (supervisor?.email) {
                   sendEmailNotification(
                     supervisor.email,
                     `Narrative Pending Review - ${profile.full_name} (${narrative.session === 'morning' ? 'Morning' : 'Afternoon'})`,
                     emailHtml
-                  ).catch(err => console.error('Failed to send narrative email to ' + supervisor.email + ':', err));
+                  ).catch(err => console.error('Failed to send narrative email:', err));
                 }
               });
+
+              // Email to admins (exclude supervisors)
+              adminsForNotif
+                .filter(a => !deptSupervisorIds.includes(a.id) && a.email)
+                .forEach(admin => {
+                  sendEmailNotification(
+                    admin.email,
+                    `Narrative Pending Review - ${profile.full_name} (${narrative.session === 'morning' ? 'Morning' : 'Afternoon'})`,
+                    emailHtml
+                  ).catch(err => console.error('Failed to send admin email:', err));
+                });
+
+              // Audit log (fire-and-forget)
+              logAudit('narrative.submitted', 'narrative', narrative.id, {
+                task_id: narrative.task_id,
+                session: narrative.session,
+                is_late: isLate,
+              }).catch(err => console.error('Failed to log audit:', err));
             }
-
-            // Also notify all active admins (exclude department supervisors to avoid duplicates)
-            if (adminsForNotif && adminsForNotif.length > 0) {
-              const adminNotifs = adminsForNotif
-                .filter(a => !deptSupervisorIds.includes(a.id))  // Exclude department supervisors
-                .map(a => ({
-                  user_id: a.id,
-                  type: 'pending_approval',
-                  title: 'Narrative Pending Review',
-                  message: `${profile.full_name} submitted a ${narrative.session} narrative for ${formatDate(selectedDate)}${isLate ? ' (late submission)' : ''}`,
-                  entity_type: 'narrative',
-                  entity_id: narrative.id,
-                }));
-              if (adminNotifs.length > 0) await supabase.from('notifications').insert(adminNotifs);
-
-              // Send email notifications to admins (exclude department supervisors)
-              for (const admin of adminsForNotif) {
-                if (!deptSupervisorIds.includes(admin.id)) {  // Exclude department supervisors
-                  const { data: adminProfile } = await supabase
-                    .from('profiles')
-                    .select('full_name, email')
-                    .eq('id', admin.id)
-                    .single();
-
-                  if (adminProfile?.email) {
-                    const emailHtml = `
-                      <!DOCTYPE html>
-                      <html>
-                        <head>
-                          <style>
-                            body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
-                            .container { max-width: 600px; margin: 0 auto; padding: 20px; }
-                            .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px; border-radius: 5px 5px 0 0; }
-                            .content { background: #f9f9f9; padding: 20px; border: 1px solid #ddd; border-radius: 0 0 5px 5px; }
-                            .badge { display: inline-block; background: #f59e0b; color: white; padding: 6px 12px; border-radius: 4px; font-weight: bold; font-size: 12px; margin-left: 8px; }
-                            .late-badge { background: #ef4444; }
-                            .footer { margin-top: 20px; padding-top: 20px; border-top: 1px solid #ddd; font-size: 12px; color: #666; }
-                          </style>
-                        </head>
-                        <body>
-                          <div class="container">
-                            <div class="header">
-                              <h1>Narrative Pending Review</h1>
-                            </div>
-                            <div class="content">
-                              <p><strong>${profile.full_name}</strong> submitted a <strong>${narrative.session === 'morning' ? 'Morning' : 'Afternoon'}</strong> narrative for <strong>${formatDate(selectedDate)}</strong>${isLate ? ' <span class="badge late-badge">LATE SUBMISSION</span>' : ''}</p>
-                              <p>The narrative is awaiting review and approval.</p>
-                              <p><a href="${window.location.origin}/#/approvals" style="background: #667eea; color: white; padding: 10px 20px; text-decoration: none; border-radius: 4px; display: inline-block; margin-top: 10px;">View in System</a></p>
-                            </div>
-                            <div class="footer">
-                              <p>This is an automated notification. Please do not reply to this email.</p>
-                            </div>
-                          </div>
-                        </body>
-                      </html>
-                    `;
-                    sendEmailNotification(
-                      adminProfile.email,
-                      `Narrative Pending Review - ${profile.full_name} (${narrative.session === 'morning' ? 'Morning' : 'Afternoon'})`,
-                      emailHtml
-                    ).catch(err => console.error('Failed to send admin narrative email to ' + adminProfile.email + ':', err));
-                  }
-                }
-              }
-            }
-
-          await logAudit('narrative.submitted', 'narrative', narrative.id, {
-            task_id: narrative.task_id,
-            session: narrative.session,
-            is_late: isLate,
-          });
+          } catch (bgErr) {
+            console.error('Background notification error:', bgErr);
           }
-        }
-
-        showToast(`${data.length} narrative${data.length > 1 ? 's' : ''} submitted successfully`, 'success');
-        clearDraft();
-        close();
-        renderNarrativesPage();
+        })();
       } catch (err) {
         showToast(err.message || 'Failed to submit narrative', 'error');
         submitBtn.disabled = false;

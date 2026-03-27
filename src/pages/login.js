@@ -262,7 +262,7 @@ export async function renderLoginPage() {
             <div class="inline-flex items-center justify-center w-16 h-16 rounded-2xl mb-4" style="background: linear-gradient(135deg, #4f46e5, #6366f1); box-shadow: 0 4px 16px rgba(79,70,229,0.3);">
               <img src="/favicon.png" alt="Logo" class="w-10 h-10 object-contain brightness-0 invert" />
             </div>
-            <h1 class="text-2xl font-bold text-neutral-900">Productivity Tracker</h1>
+            <h1 class="text-2xl font-bold text-neutral-900">Interns Productivity Tracker</h1>
             <p class="text-neutral-500 mt-1 text-sm">Madison 88 Business Solutions Asia Inc.</p>
           </div>
 

@@ -76,7 +76,7 @@ export async function renderApprovalsPage() {
           </select>
           ${actionableDeptPendingCount > 0 ? `
             <button id="bulk-approve-dept-btn" class="btn-sm btn-success">
-              ${icons.check} Approve All Today
+              ${icons.check} Approve All (${actionableDeptPendingCount})
             </button>
           ` : ''}
         </div>
@@ -101,7 +101,7 @@ export async function renderApprovalsPage() {
           </select>
           ${pendingApprovals.length > 0 && (actionablePendingCount - actionableDeptPendingCount) > 0 ? `
             <button id="bulk-approve-btn" class="btn-sm btn-success">
-              ${icons.check} Approve All Today
+              ${icons.check} Approve All (${actionablePendingCount - actionableDeptPendingCount})
             </button>
           ` : ''}
         </div>
@@ -212,19 +212,27 @@ export async function renderApprovalsPage() {
 
     // Bulk approve for department approvals
     el.querySelector('#bulk-approve-dept-btn')?.addEventListener('click', async () => {
-      const today = getTodayDate();
-      const todayPending = deptPendingApprovals.filter(a =>
-        a.submitted_at?.slice(0, 10) === today &&
+      // Get all actionable pending approvals (exclude attendance_correction for non-admins)
+      const actionablePending = deptPendingApprovals.filter(a =>
         a.type !== 'attendance_correction'
       );
 
-      if (todayPending.length === 0) {
-        showToast('No pending approvals for today in your department', 'info');
+      if (actionablePending.length === 0) {
+        showToast('No pending approvals to process', 'info');
         return;
       }
 
+      // Confirm before bulk action
+      if (!confirm(`Are you sure you want to approve all ${actionablePending.length} pending item(s) in your department?`)) {
+        return;
+      }
+
+      const btn = el.querySelector('#bulk-approve-dept-btn');
+      btn.disabled = true;
+      btn.innerHTML = `${icons.check} Approving...`;
+
       const results = await Promise.allSettled(
-        todayPending.map(approval => processApproval(approval.id, 'approved', 'Bulk approved', approval))
+        actionablePending.map(approval => processApproval(approval.id, 'approved', 'Bulk approved', approval))
       );
 
       const successCount = results.filter(r => r.status === 'fulfilled').length;
@@ -240,19 +248,27 @@ export async function renderApprovalsPage() {
 
     // Bulk approve for other approvals
     el.querySelector('#bulk-approve-btn')?.addEventListener('click', async () => {
-      const today = getTodayDate();
-      const todayPending = pendingApprovals.filter(a =>
-        a.submitted_at?.slice(0, 10) === today &&
-        (isAdmin || a.type !== 'attendance_correction')
+      // Get all actionable pending approvals
+      const actionablePending = pendingApprovals.filter(a =>
+        isAdmin || a.type !== 'attendance_correction'
       );
 
-      if (todayPending.length === 0) {
-        showToast('No pending approvals for today', 'info');
+      if (actionablePending.length === 0) {
+        showToast('No pending approvals to process', 'info');
         return;
       }
 
+      // Confirm before bulk action
+      if (!confirm(`Are you sure you want to approve all ${actionablePending.length} pending item(s)?`)) {
+        return;
+      }
+
+      const btn = el.querySelector('#bulk-approve-btn');
+      btn.disabled = true;
+      btn.innerHTML = `${icons.check} Approving...`;
+
       const results = await Promise.allSettled(
-        todayPending.map(approval => processApproval(approval.id, 'approved', 'Bulk approved', approval))
+        actionablePending.map(approval => processApproval(approval.id, 'approved', 'Bulk approved', approval))
       );
 
       const successCount = results.filter(r => r.status === 'fulfilled').length;
