@@ -6,7 +6,7 @@ import { renderLayout } from '../components/layout.js';
 import { supabase } from '../lib/supabase.js';
 import { showToast } from '../lib/toast.js';
 import { icons } from '../lib/icons.js';
-import { formatDate, formatDateKey, formatHoursDisplay, formatHoursBothFormats, formatTime } from '../lib/utils.js';
+import { formatDate, formatDateKey, formatHoursDisplay, formatHoursBothFormats, formatTime, getTrackingWeekStart, getTrackingWeekEnd } from '../lib/utils.js';
 import { createModal } from '../lib/component.js';
 import { logAudit } from '../lib/audit.js';
 import { getCurrentUser } from '../lib/auth.js';
@@ -312,24 +312,19 @@ function renderRows(records, searchQuery) {
 
 function getWeekRanges(count = 16) {
   const today = new Date();
-  const day = today.getDay();
-  const diff = day === 0 ? -6 : 1 - day;
-  const monday = new Date(today);
-  monday.setDate(today.getDate() + diff);
-  monday.setHours(0, 0, 0, 0);
+  const currentStart = getTrackingWeekStart(today);
 
   const fmt = d => formatDateKey(d);
-  const label = (mon, fri) => {
+  const label = (start, end) => {
     const opts = { month: 'short', day: 'numeric' };
-    return `${mon.toLocaleDateString('en-US', opts)} – ${fri.toLocaleDateString('en-US', { ...opts, year: 'numeric' })}`;
+    return `${start.toLocaleDateString('en-US', opts)} – ${end.toLocaleDateString('en-US', { ...opts, year: 'numeric' })}`;
   };
 
   return Array.from({ length: count }, (_, i) => {
-    const mon = new Date(monday);
-    mon.setDate(monday.getDate() - i * 7);
-    const fri = new Date(mon);
-    fri.setDate(mon.getDate() + 4);
-    return { from: fmt(mon), to: fmt(fri), label: label(mon, fri) };
+    const start = new Date(currentStart);
+    start.setDate(currentStart.getDate() - i * 7);
+    const end = getTrackingWeekEnd(start);
+    return { from: fmt(start), to: fmt(end), label: label(start, end) };
   });
 }
 

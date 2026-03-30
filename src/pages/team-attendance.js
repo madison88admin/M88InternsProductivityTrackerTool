@@ -6,7 +6,7 @@ import { getProfile } from '../lib/auth.js';
 import { renderLayout } from '../components/layout.js';
 import { supabase } from '../lib/supabase.js';
 import { icons } from '../lib/icons.js';
-import { formatDate, formatDateKey, formatTime, formatHoursDisplay, getMonday, getFriday, getTodayDate } from '../lib/utils.js';
+import { formatDate, formatDateKey, formatTime, formatHoursDisplay, getTrackingWeekStart, getTrackingWeekEnd, getTodayDate } from '../lib/utils.js';
 import { showToast } from '../lib/toast.js';
 import { logAudit } from '../lib/audit.js';
 import { createModal } from '../lib/component.js';
@@ -44,18 +44,18 @@ export async function renderTeamAttendancePage() {
   // Generate week options (current week + 8 past weeks = 9 weeks total)
   const weekOptions = [];
   const now = new Date();
+  const currentStart = getTrackingWeekStart(now);
   for (let i = 0; i < 9; i++) {
-    const weekDate = new Date(now);
-    weekDate.setDate(weekDate.getDate() - (i * 7));
-    const monday = getMonday(weekDate);
-    const friday = getFriday(monday);
+    const start = new Date(currentStart);
+    start.setDate(currentStart.getDate() - (i * 7));
+    const end = getTrackingWeekEnd(start);
     weekOptions.push({
       index: i,
       label: i === 0 ? 'Current Week' : i === 1 ? 'Last Week' : `${i} Weeks Ago`,
-      start: formatDateKey(monday),
-      end: formatDateKey(friday),
-      startDate: monday,
-      endDate: friday,
+      start: formatDateKey(start),
+      end: formatDateKey(end),
+      startDate: start,
+      endDate: end,
     });
   }
 

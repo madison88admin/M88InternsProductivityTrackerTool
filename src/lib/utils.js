@@ -81,6 +81,32 @@ export function getFriday(date) {
 }
 
 /**
+ * Get the Tracking Week Start (Friday) for a given date.
+ * @param {Date} date
+ * @returns {Date}
+ */
+export function getTrackingWeekStart(date) {
+  const d = new Date(date);
+  const day = d.getDay();
+  const daysSinceFriday = (day + 2) % 7;
+  d.setDate(d.getDate() - daysSinceFriday);
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
+
+/**
+ * Get the Tracking Week End (Thursday) for a given date.
+ * @param {Date} date
+ * @returns {Date}
+ */
+export function getTrackingWeekEnd(date) {
+  const friday = getTrackingWeekStart(date);
+  friday.setDate(friday.getDate() + 6);
+  friday.setHours(23, 59, 59, 999);
+  return friday;
+}
+
+/**
  * Debounce a function.
  * @param {Function} fn
  * @param {number} delay

@@ -7,7 +7,7 @@ import { renderLayout } from '../components/layout.js';
 import { supabase } from '../lib/supabase.js';
 import { showToast } from '../lib/toast.js';
 import { icons } from '../lib/icons.js';
-import { formatDate, formatDateKey, formatTime, formatHoursDisplay, formatHoursBothFormats, formatHoursAsHHMM, formatCurrency, calculateSessionHours, getMonday, getFriday, getTodayDate } from '../lib/utils.js';
+import { formatDate, formatDateKey, formatTime, formatHoursDisplay, formatHoursBothFormats, formatHoursAsHHMM, formatCurrency, calculateSessionHours, getTrackingWeekStart, getTrackingWeekEnd, getTodayDate } from '../lib/utils.js';
 import { logAudit } from '../lib/audit.js';
 import { getSignedStorageUrls, getPublicStorageUrl } from '../lib/storage.js';
 
@@ -312,30 +312,30 @@ async function populateDarWeeks(el) {
 
   records.forEach(r => {
     const date = new Date(r.date + 'T00:00:00');
-    const monday = getMonday(date);
-    const friday = getFriday(date);
-    const key = toLocalDateStr(monday);
+    const start = getTrackingWeekStart(date);
+    const end = getTrackingWeekEnd(date);
+    const key = toLocalDateStr(start);
 
     if (!weeks.has(key)) {
       let weekNum = 1;
       if (ojtStart) {
-        const ojtMonday = getMonday(ojtStart);
-        const diffMs = monday - ojtMonday;
+        const ojtStartWeek = getTrackingWeekStart(ojtStart);
+        const diffMs = start - ojtStartWeek;
         weekNum = Math.floor(diffMs / (7 * 24 * 60 * 60 * 1000)) + 1;
         if (weekNum < 1) weekNum = 1;
       }
       weeks.set(key, {
-        monday: key,
-        friday: toLocalDateStr(friday),
+        start: key,
+        end: toLocalDateStr(end),
         weekNum,
       });
     }
   });
 
   const weekSelect = el.querySelector('#dar-week');
-  const weeksArr = Array.from(weeks.values()).sort((a, b) => b.monday.localeCompare(a.monday));
+  const weeksArr = Array.from(weeks.values()).sort((a, b) => b.start.localeCompare(a.start));
   weekSelect.innerHTML = weeksArr.map(w =>
-    `<option value="${w.monday}|${w.friday}|${w.weekNum}">Week ${w.weekNum} (${formatDateMMDDYYYY(w.monday)} – ${formatDateMMDDYYYY(w.friday)})</option>`
+    `<option value="${w.start}|${w.end}|${w.weekNum}">Week ${w.weekNum} (${formatDateMMDDYYYY(w.start)} – ${formatDateMMDDYYYY(w.end)})</option>`
   ).join('');
 
   // Trigger preview whenever weeks are (re)populated
@@ -365,7 +365,7 @@ async function updateDarPreview(el) {
     return;
   }
 
-  const [mondayDate, fridayDate, weekNumStr] = weekValue.split('|');
+  const [startDate, endDate, weekNumStr] = weekValue.split('|');
   const weekNum = parseInt(weekNumStr, 10);
 
   previewSection.style.display = '';
@@ -373,10 +373,10 @@ async function updateDarPreview(el) {
   previewFrame.style.opacity = '0.4';
 
   try {
-    const darData = await fetchDarData(selectedIds[0], mondayDate, fridayDate);
+    const darData = await fetchDarData(selectedIds[0], startDate, endDate);
     // Calculate week number for the selected intern
-    const internWeekNum = calculateInternWeekNumber(darData.intern?.ojt_start_date, mondayDate);
-    const doc = await generateDarPdf(darData, internWeekNum, mondayDate);
+    const internWeekNum = calculateInternWeekNumber(darData.intern?.ojt_start_date, startDate);
+    const doc = await generateDarPdf(darData, internWeekNum, startDate);
     const blob = doc.output('blob');
 
     if (previewFrame._blobUrl) URL.revokeObjectURL(previewFrame._blobUrl);
@@ -395,21 +395,21 @@ async function updateDarPreview(el) {
 }
 
 /**
- * Calculate week number for an intern based on OJT start date and target Monday
+ * Calculate week number for an intern based on OJT start date and target start
  */
-function calculateInternWeekNumber(ojtStartDate, mondayDate) {
+function calculateInternWeekNumber(ojtStartDate, startDate) {
   if (!ojtStartDate) return 1;
 
   const ojtStart = new Date(ojtStartDate + 'T00:00:00');
-  const monday = new Date(mondayDate + 'T00:00:00');
-  const ojtMonday = getMonday(ojtStart);
-  const diffMs = monday - ojtMonday;
+  const start = new Date(startDate + 'T00:00:00');
+  const ojtStartWeek = getTrackingWeekStart(ojtStart);
+  const diffMs = start - ojtStartWeek;
   let weekNum = Math.floor(diffMs / (7 * 24 * 60 * 60 * 1000)) + 1;
   if (weekNum < 1) weekNum = 1;
   return weekNum;
 }
 
-export async function fetchDarData(internId, mondayDate, fridayDate) {
+export async function fetchDarData(internId, startDate, endDate) {
   const [
     { data: intern },
     { data: attendance },
@@ -427,28 +427,28 @@ export async function fetchDarData(internId, mondayDate, fridayDate) {
       .from('attendance_records')
       .select('*')
       .eq('intern_id', internId)
-      .gte('date', mondayDate)
-      .lte('date', fridayDate)
+      .gte('date', startDate)
+      .lte('date', endDate)
       .order('date', { ascending: true }),
     supabase
       .from('narratives')
       .select('*, task:tasks(title)')
       .eq('intern_id', internId)
-      .gte('date', mondayDate)
-      .lte('date', fridayDate)
+      .gte('date', startDate)
+      .lte('date', endDate)
       .neq('status', 'draft')  // Exclude drafts from reports
       .order('date', { ascending: true }),
     supabase
       .from('holidays')
       .select('date, name')
-      .gte('date', mondayDate)
-      .lte('date', fridayDate)
+      .gte('date', startDate)
+      .lte('date', endDate)
       .order('date', { ascending: true }),
     supabase
       .from('allowance_periods')
       .select('total_amount, total_hours, hourly_rate, status')
       .eq('intern_id', internId)
-      .eq('week_start', mondayDate)
+      .eq('week_start', startDate)
       .maybeSingle(),
     supabase
       .from('allowance_config')
@@ -511,7 +511,7 @@ function formatHolidayName(name) {
 
 // ─── DAR: PDF generation ────────────────────────────────────────────────────
 
-export async function generateDarPdf(darData, weekNum, mondayDate, existingDoc) {
+export async function generateDarPdf(darData, weekNum, startDate, existingDoc) {
   const { default: jsPDF } = await import('jspdf');
   const { default: autoTable } = await import('jspdf-autotable');
 
@@ -614,14 +614,32 @@ export async function generateDarPdf(darData, weekNum, mondayDate, existingDoc) 
 
   y += 6;
 
-  // Build 5 weekdays (Mon-Fri)
-  const monday = new Date(mondayDate + 'T00:00:00');
+  // Build 5 target days: Friday, Monday, Tuesday, Wednesday, Thursday
+  const startWeekDate = new Date(startDate + 'T00:00:00'); // This is a Friday
   const weekdays = [];
-  for (let i = 0; i < 5; i++) {
-    const d = new Date(monday);
-    d.setDate(d.getDate() + i);
-    weekdays.push(toLocalDateStr(d));
-  }
+  
+  // 1) Friday (Last week)
+  weekdays.push(toLocalDateStr(startWeekDate));
+  
+  // 2) Monday (This week)
+  const mondayOfThisWeek = new Date(startWeekDate);
+  mondayOfThisWeek.setDate(startWeekDate.getDate() + 3);
+  weekdays.push(toLocalDateStr(mondayOfThisWeek));
+  
+  // 3) Tuesday (This week)
+  const tuesdayOfThisWeek = new Date(startWeekDate);
+  tuesdayOfThisWeek.setDate(startWeekDate.getDate() + 4);
+  weekdays.push(toLocalDateStr(tuesdayOfThisWeek));
+
+  // 4) Wednesday (This week)
+  const wednesdayOfThisWeek = new Date(startWeekDate);
+  wednesdayOfThisWeek.setDate(startWeekDate.getDate() + 5);
+  weekdays.push(toLocalDateStr(wednesdayOfThisWeek));
+
+  // 5) Thursday (This week)
+  const thursdayOfThisWeek = new Date(startWeekDate);
+  thursdayOfThisWeek.setDate(startWeekDate.getDate() + 6);
+  weekdays.push(toLocalDateStr(thursdayOfThisWeek));
 
   // Build table body (10 rows: 2 per day)
   const tableBody = [];
@@ -796,7 +814,7 @@ async function handleDarGeneration(el) {
     return;
   }
 
-  const [mondayDate, fridayDate, weekNumStr] = weekValue.split('|');
+  const [startDate, endDate, weekNumStr] = weekValue.split('|');
   const weekNum = parseInt(weekNumStr, 10);
 
   const btn = el.querySelector('#generate-btn');
@@ -806,9 +824,9 @@ async function handleDarGeneration(el) {
   try {
     if (selectedInternIds.length === 1 || bulkMode === 'single') {
       for (const internId of selectedInternIds) {
-        const darData = await fetchDarData(internId, mondayDate, fridayDate);
-        const internWeekNum = calculateInternWeekNumber(darData.intern?.ojt_start_date, mondayDate);
-        const doc = await generateDarPdf(darData, internWeekNum, mondayDate);
+        const darData = await fetchDarData(internId, startDate, endDate);
+        const internWeekNum = calculateInternWeekNumber(darData.intern?.ojt_start_date, startDate);
+        const doc = await generateDarPdf(darData, internWeekNum, startDate);
         const fileName = `DAR_${darData.intern?.full_name?.replace(/\s+/g, '_') || 'intern'}_Week${internWeekNum}.pdf`;
         doc.save(fileName);
       }
@@ -818,8 +836,8 @@ async function handleDarGeneration(el) {
         mode: selectedInternIds.length === 1 ? 'single' : 'multiple_single',
         intern_count: selectedInternIds.length,
         week: weekNum,
-        date_from: mondayDate,
-        date_to: fridayDate,
+        date_from: startDate,
+        date_to: endDate,
       });
       showToast(`${selectedInternIds.length} DAR PDF(s) generated`, 'success');
 
@@ -828,9 +846,9 @@ async function handleDarGeneration(el) {
       const zip = new JSZip();
 
       for (const internId of selectedInternIds) {
-        const darData = await fetchDarData(internId, mondayDate, fridayDate);
-        const internWeekNum = calculateInternWeekNumber(darData.intern?.ojt_start_date, mondayDate);
-        const doc = await generateDarPdf(darData, internWeekNum, mondayDate);
+        const darData = await fetchDarData(internId, startDate, endDate);
+        const internWeekNum = calculateInternWeekNumber(darData.intern?.ojt_start_date, startDate);
+        const doc = await generateDarPdf(darData, internWeekNum, startDate);
         const fileName = `DAR_${darData.intern?.full_name?.replace(/\s+/g, '_') || 'intern'}_Week${internWeekNum}.pdf`;
         const pdfBlob = doc.output('blob');
         zip.file(fileName, pdfBlob);
@@ -840,7 +858,7 @@ async function handleDarGeneration(el) {
       const url = URL.createObjectURL(zipBlob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `DAR_${formatDateKey(mondayDate)}_to_${formatDateKey(fridayDate)}.zip`;
+      a.download = `DAR_${formatDateKey(startDate)}_to_${formatDateKey(endDate)}.zip`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
@@ -851,8 +869,8 @@ async function handleDarGeneration(el) {
         mode: 'zip',
         intern_count: selectedInternIds.length,
         week: weekNum,
-        date_from: mondayDate,
-        date_to: fridayDate,
+        date_from: startDate,
+        date_to: endDate,
       });
       showToast('DAR ZIP downloaded', 'success');
 
@@ -860,26 +878,26 @@ async function handleDarGeneration(el) {
       let doc = null;
 
       for (let i = 0; i < selectedInternIds.length; i++) {
-        const darData = await fetchDarData(selectedInternIds[i], mondayDate, fridayDate);
-        const internWeekNum = calculateInternWeekNumber(darData.intern?.ojt_start_date, mondayDate);
+        const darData = await fetchDarData(selectedInternIds[i], startDate, endDate);
+        const internWeekNum = calculateInternWeekNumber(darData.intern?.ojt_start_date, startDate);
         if (i === 0) {
-          doc = await generateDarPdf(darData, internWeekNum, mondayDate);
+          doc = await generateDarPdf(darData, internWeekNum, startDate);
         } else {
           doc.addPage('a4', 'portrait');
-          await generateDarPdf(darData, internWeekNum, mondayDate, doc);
+          await generateDarPdf(darData, internWeekNum, startDate, doc);
         }
       }
 
       if (doc) {
-        doc.save(`DAR_Combined_${formatDateKey(mondayDate)}_to_${formatDateKey(fridayDate)}.pdf`);
+        doc.save(`DAR_Combined_${formatDateKey(startDate)}_to_${formatDateKey(endDate)}.pdf`);
         await logAudit('report.export_pdf', 'report', null, {
           report_type: 'dar',
           format: 'pdf',
           mode: 'combined',
           intern_count: selectedInternIds.length,
           week: weekNum,
-          date_from: mondayDate,
-          date_to: fridayDate,
+          date_from: startDate,
+          date_to: endDate,
         });
         showToast('Combined DAR PDF generated', 'success');
       }

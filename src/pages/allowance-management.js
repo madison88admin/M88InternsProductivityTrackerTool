@@ -8,7 +8,7 @@ import { supabase } from '../lib/supabase.js';
 import { showToast } from '../lib/toast.js';
 import { logAudit } from '../lib/audit.js';
 import { icons } from '../lib/icons.js';
-import { formatDate, formatHoursDisplay, getMonday, getFriday } from '../lib/utils.js';
+import { formatDate, formatHoursDisplay, getTrackingWeekStart, getTrackingWeekEnd } from '../lib/utils.js';
 import { createModal, confirmDialog } from '../lib/component.js';
 
 export async function renderAllowanceManagementPage() {
@@ -505,17 +505,17 @@ async function computeWeeklyAllowances(currentRate, internRates, allowanceRateMo
 
   const customRateCount = Object.keys(internRates).length;
 
-  // Default to the current week's Monday
+  // Default to the current tracking week's Friday
   const now = new Date();
-  const thisMonday = getMonday(now);
-  const defaultWeekStart = thisMonday.toLocaleDateString('en-CA');
+  const thisWeekStart = getTrackingWeekStart(now);
+  const defaultWeekStart = thisWeekStart.toLocaleDateString('en-CA');
 
   createModal('Compute Weekly Allowances', `
     <div class="space-y-4">
       <div>
-        <label class="form-label">Week Starting (Monday) <span class="text-danger-500">*</span></label>
+        <label class="form-label">Starting date (Friday) <span class="text-danger-500">*</span></label>
         <input type="date" id="compute-week-start" class="form-input" value="${defaultWeekStart}" />
-        <p class="text-xs text-neutral-400 mt-1">The Friday of the selected week will be the end date.</p>
+        <p class="text-xs text-neutral-400 mt-1">The Thursday of the selected week will be the end date.</p>
       </div>
       <p class="text-sm text-neutral-500">
         Active mode: <strong>${allowanceRateMode === 'global' ? 'Global Rate' : 'Per-Intern Rates'}</strong>.
@@ -536,9 +536,9 @@ async function computeWeeklyAllowances(currentRate, internRates, allowanceRateMo
 
     function updateLabel() {
       const picked = new Date(weekStartInput.value + 'T00:00:00');
-      const monday = getMonday(picked);
-      const friday = getFriday(monday);
-      weekLabel.textContent = `Will compute: ${formatDate(monday)} – ${formatDate(friday)}`;
+      const weekStart = getTrackingWeekStart(picked);
+      const weekEnd = getTrackingWeekEnd(weekStart);
+      weekLabel.textContent = `Will compute: ${formatDate(weekStart)} – ${formatDate(weekEnd)}`;
     }
     updateLabel();
     weekStartInput.addEventListener('change', updateLabel);
@@ -552,10 +552,10 @@ async function computeWeeklyAllowances(currentRate, internRates, allowanceRateMo
 
       try {
         const picked = new Date(weekStartInput.value + 'T00:00:00');
-        const monday = getMonday(picked);
-        const friday = getFriday(monday);
-        const weekStart = monday.toLocaleDateString('en-CA');
-        const weekEnd = friday.toLocaleDateString('en-CA');
+        const start = getTrackingWeekStart(picked);
+        const end = getTrackingWeekEnd(start);
+        const weekStart = start.toLocaleDateString('en-CA');
+        const weekEnd = end.toLocaleDateString('en-CA');
 
         // Get all active interns
         const { data: interns } = await supabase
