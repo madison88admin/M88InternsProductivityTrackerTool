@@ -33,6 +33,19 @@ const PUNCH_CUTOFFS = {
   time_out_2: 19 * 60 + 30,  // 7:30 PM
 };
 
+function sanitizeIpForInet(value) {
+  if (!value || value === 'unknown') return null;
+  return value;
+}
+
+function getAttendanceErrorMessage(err) {
+  const rawMessage = err?.message || '';
+  if (/invalid input syntax for type inet/i.test(rawMessage)) {
+    return 'Unable to record attendance right now due to a network identity issue. Please try again.';
+  }
+  return rawMessage || 'Failed to log attendance';
+}
+
 function getNowInPH() {
   return new Date(new Date().toLocaleString('en-US', { timeZone: PH_TIMEZONE }));
 }
@@ -418,6 +431,7 @@ export async function renderAttendancePage() {
 
         try {
           const ip = await getPublicIP();
+          const ipForDb = sanitizeIpForInet(ip);
           const now = new Date().toISOString();
 
           if (!todayRecord) {
@@ -428,7 +442,7 @@ export async function renderAttendancePage() {
                 intern_id: profile.id,
                 date: today,
                 [punchType]: now,
-                [`ip_address_${punchType.replace('time_', '')}`]: ip,
+                [`ip_address_${punchType.replace('time_', '')}`]: ipForDb,
                 supervisor_id: profile.supervisor_id,
               })
               .select()
@@ -439,7 +453,7 @@ export async function renderAttendancePage() {
           } else {
             // Validate IP consistency (use first available IP as reference)
             const firstIP = todayRecord.ip_address_in_1 || todayRecord.ip_address_in_2;
-            if (firstIP && ip !== 'unknown' && ip !== firstIP) {
+            if (firstIP && ipForDb && ipForDb !== firstIP) {
               showToast('Your IP address has changed. All daily punches must come from the same network.', 'error');
               punchBtn.disabled = false;
               punchBtn.innerHTML = `${icons.clock}<span class="ml-2">${getPunchLabel(punchType)}</span>`;
@@ -450,7 +464,7 @@ export async function renderAttendancePage() {
               .from('attendance_records')
               .update({
                 [punchType]: now,
-                [`ip_address_${punchType.replace('time_', '')}`]: ip,
+                [`ip_address_${punchType.replace('time_', '')}`]: ipForDb,
               })
               .eq('id', todayRecord.id);
 
@@ -580,7 +594,7 @@ export async function renderAttendancePage() {
           // Re-render the page
           renderAttendancePage();
         } catch (err) {
-          showToast(err.message || 'Failed to log attendance', 'error');
+          showToast(getAttendanceErrorMessage(err), 'error');
           punchBtn.disabled = false;
           punchBtn.innerHTML = `${icons.clock}<span class="ml-2">${punchLabel}</span>`;
         }
