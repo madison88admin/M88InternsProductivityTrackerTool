@@ -160,6 +160,30 @@ setBeforeEach(async (path) => {
     return false;
   }
 
+  // Feature-gated routes
+  if (path === '/my-dar-draft') {
+    try {
+      const { data: settingRow, error } = await supabase
+        .from('system_settings')
+        .select('value')
+        .eq('key', 'intern_dar_draft_view')
+        .maybeSingle();
+      if (error) throw error;
+
+      const enabled = settingRow?.value?.enabled === true || settingRow?.value === true;
+      if (!enabled) {
+        showToast('My DAR Draft is currently disabled by administrators', 'info');
+        navigateTo('/dashboard');
+        return false;
+      }
+    } catch (err) {
+      console.error('Failed to check intern_dar_draft_view setting:', err);
+      showToast('My DAR Draft is currently unavailable', 'error');
+      navigateTo('/dashboard');
+      return false;
+    }
+  }
+
   return true;
 });
 

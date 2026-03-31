@@ -15,6 +15,8 @@ import {
   getTrackingWeekEnd,
 } from '../lib/utils.js';
 import { fetchDarData, generateDarPdf } from './reports.js';
+import { showToast } from '../lib/toast.js';
+import { navigateTo } from '../lib/router.js';
 
 function calculateInternWeekNumber(ojtStartDate, startDate) {
   if (!ojtStartDate) return 1;
@@ -199,7 +201,9 @@ export async function renderMyDarDraftPage() {
       const enabled = settingRow?.value?.enabled === true || settingRow?.value === true;
       if (!enabled) {
         loadingRow.classList.add('hidden');
-        disabledBox.classList.remove('hidden');
+        disabledBox.classList.add('hidden');
+        showToast('My DAR Draft is currently disabled by administrators', 'info');
+        navigateTo('/dashboard');
         return;
       }
 

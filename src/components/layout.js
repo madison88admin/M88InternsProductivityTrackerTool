@@ -141,7 +141,8 @@ export function renderLayout(contentHtml, init, guardPath) {
           ${section.items.map(item => `
             <a href="#${item.path}"
                ${item.id ? `id="${item.id}"` : ''}
-               class="sidebar-link ${currentPath === item.path ? 'active' : ''} ${item.hidden ? 'hidden' : ''}"
+               class="sidebar-link ${currentPath === item.path ? 'active' : ''}"
+               ${item.hidden ? 'style="display:none"' : ''}
                data-path="${item.path}">
               ${item.icon}
               <span>${item.label}</span>
@@ -290,6 +291,10 @@ export function renderLayout(contentHtml, init, guardPath) {
 
   // Feature-toggle: show/hide Intern DAR Draft link
   if (role === 'intern') {
+    const link = document.getElementById('nav-my-dar-draft');
+    // Fail-closed: keep hidden unless we can confirm it's enabled.
+    if (link) link.style.display = 'none';
+
     supabase
       .from('system_settings')
       .select('value')
@@ -298,11 +303,12 @@ export function renderLayout(contentHtml, init, guardPath) {
       .then(({ data, error }) => {
         if (error) throw error;
         const enabled = data?.value?.enabled === true || data?.value === true;
-        const link = document.getElementById('nav-my-dar-draft');
-        if (link) link.classList.toggle('hidden', !enabled);
+        if (link) link.style.display = enabled ? '' : 'none';
       })
       .catch((err) => {
         console.error('Failed to fetch intern_dar_draft_view setting:', err);
+        // Keep it hidden if we can't read the setting.
+        if (link) link.style.display = 'none';
       });
   }
 }
