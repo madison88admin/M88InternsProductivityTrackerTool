@@ -6,7 +6,7 @@ import { getUserRole, getProfile, refreshProfile } from '../lib/auth.js';
 import { renderLayout } from '../components/layout.js';
 import { supabase } from '../lib/supabase.js';
 import { icons } from '../lib/icons.js';
-import { formatDate, formatDateKey, formatHoursDisplay, getTodayDate, computeEstimatedEndDate, renderAvatar, getMonday } from '../lib/utils.js';
+import { formatDate, formatDateKey, formatHoursDisplay, getTodayDate, computeEstimatedEndDate, renderAvatar, getMonday, PH_TIMEZONE } from '../lib/utils.js';
 import { openOjtCompletionModal } from '../lib/ojt-completion.js';
 
 export async function renderDashboard() {
@@ -97,6 +97,77 @@ let _internKPIData = [];
 
 /** Raw data for the intern performance panel — used by the week filter */
 let _internDashData = null;
+
+const DASHBOARD_PUNCH_CUTOFFS = {
+  time_in_1: 10 * 60 + 30,
+  time_out_1: 13 * 60,
+  time_in_2: 15 * 60,
+  time_out_2: 19 * 60 + 30,
+};
+
+function getNowInPH() {
+  return new Date(new Date().toLocaleString('en-US', { timeZone: PH_TIMEZONE }));
+}
+
+function getCurrentMinutesInPH() {
+  const now = getNowInPH();
+  return now.getHours() * 60 + now.getMinutes();
+}
+
+function getDashboardPunchLabel(type) {
+  const labels = {
+    time_in_1: 'Morning In',
+    time_out_1: 'Lunch Out',
+    time_in_2: 'Afternoon In',
+    time_out_2: 'End Day Out',
+  };
+  return labels[type] || 'Log Attendance';
+}
+
+function getNextDashboardPunch(record) {
+  const currentMinutes = getCurrentMinutesInPH();
+  const punchOrder = ['time_in_1', 'time_out_1', 'time_in_2', 'time_out_2'];
+
+  for (const punch of punchOrder) {
+    if (record?.[punch]) continue;
+    if (currentMinutes >= DASHBOARD_PUNCH_CUTOFFS[punch]) continue;
+    if (punch === 'time_out_1' && !record?.time_in_1) continue;
+    if (punch === 'time_out_2' && !record?.time_in_2) continue;
+    return punch;
+  }
+
+  return null;
+}
+
+function getInternAttendanceStatus(record) {
+  if (record?.time_out_2) {
+    return {
+      label: 'Complete',
+      colorClass: 'text-success-600',
+    };
+  }
+
+  const nextPunch = getNextDashboardPunch(record);
+  if (nextPunch) {
+    return {
+      label: `Next: ${getDashboardPunchLabel(nextPunch)}`,
+      colorClass: 'text-primary-600',
+    };
+  }
+
+  const hasSomePunches = !!(record?.time_in_1 || record?.time_out_1 || record?.time_in_2);
+  if (hasSomePunches) {
+    return {
+      label: 'Auto-Submit Pending',
+      colorClass: 'text-warning-600',
+    };
+  }
+
+  return {
+    label: 'No Punch Available',
+    colorClass: 'text-neutral-500',
+  };
+}
 
 async function buildInternDashboard(profile) {
   await refreshProfile();
@@ -194,12 +265,9 @@ async function buildInternDashboard(profile) {
   const narrativeRate = reviewedNarr > 0 ? Math.round((approvedNarr / reviewedNarr) * 100) : null;
 
   // ── Today's attendance status ─────────────────────────────────────────────
-  const attendanceStatus = todayAttendance
-    ? (todayAttendance.time_out_2 ? 'Complete' : 'Logged In')
-    : 'Not Logged';
-  const attendanceColor = todayAttendance
-    ? (todayAttendance.time_out_2 ? 'text-success-600' : 'text-primary-600')
-    : 'text-neutral-400';
+  const attendanceState = getInternAttendanceStatus(todayAttendance);
+  const attendanceStatus = attendanceState.label;
+  const attendanceColor = attendanceState.colorClass;
 
   // ── KPI score helpers ─────────────────────────────────────────────────────
   // Returns color class + bar hex based on rate value (null = no data)
