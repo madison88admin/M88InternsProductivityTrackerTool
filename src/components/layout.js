@@ -9,8 +9,40 @@ import { showToast } from '../lib/toast.js';
 import { renderAvatar, hydrateSignedAvatars } from '../lib/utils.js';
 import { supabase } from '../lib/supabase.js';
 
+const PST_TIMEZONE = 'Asia/Manila';
+const pstTimeFormatter = new Intl.DateTimeFormat('en-PH', {
+  timeZone: PST_TIMEZONE,
+  hour: 'numeric',
+  minute: '2-digit',
+  second: '2-digit',
+  hour12: true,
+});
+const pstDateFormatter = new Intl.DateTimeFormat('en-PH', {
+  timeZone: PST_TIMEZONE,
+  weekday: 'short',
+  month: 'short',
+  day: 'numeric',
+  year: 'numeric',
+});
+
 function wait(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function startPstClock() {
+  const timeEl = document.getElementById('pst-time');
+  const dateEl = document.getElementById('pst-date');
+  if (!timeEl) return () => {};
+
+  const updateClock = () => {
+    const now = new Date();
+    timeEl.textContent = pstTimeFormatter.format(now);
+    if (dateEl) dateEl.textContent = pstDateFormatter.format(now);
+  };
+
+  updateClock();
+  const intervalId = window.setInterval(updateClock, 1000);
+  return () => window.clearInterval(intervalId);
 }
 
 /**
@@ -165,6 +197,12 @@ export function renderLayout(contentHtml, init, guardPath) {
           ${icons.logout}
           <span>Sign Out</span>
         </button>
+
+        <div class="mt-3 mx-1 px-3 py-2.5 rounded-xl border border-neutral-200 bg-neutral-50/80">
+          <p class="text-[11px] font-semibold uppercase tracking-widest text-neutral-500">Philippine Standard Time</p>
+          <p id="pst-time" class="mt-1 text-base font-bold text-neutral-900">--:--:--</p>
+          <p id="pst-date" class="text-xs text-neutral-500">Loading...</p>
+        </div>
       </div>
     </aside>
 
@@ -256,12 +294,15 @@ export function renderLayout(contentHtml, init, guardPath) {
   sidebar?.addEventListener('click', handleSidebarNavigation);
   logoutBtn?.addEventListener('click', handleLogout);
 
+  const stopPstClock = startPstClock();
+
   // Store cleanup function
   layoutCleanup = () => {
     mobileBtn?.removeEventListener('click', handleMobileMenuToggle);
     overlay?.removeEventListener('click', handleOverlayClick);
     sidebar?.removeEventListener('click', handleSidebarNavigation);
     logoutBtn?.removeEventListener('click', handleLogout);
+    stopPstClock();
   };
 
   if (init) {
