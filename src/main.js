@@ -22,6 +22,7 @@ import { renderAttendancePage } from './pages/attendance.js';
 import { renderMyTasksPage } from './pages/my-tasks.js';
 import { renderNarrativesPage } from './pages/narratives.js';
 import { renderMyAllowancePage } from './pages/my-allowance.js';
+import { renderMyDarDraftPage } from './pages/my-dar-draft.js';
 import { renderTaskManagementPage } from './pages/task-management.js';
 import { renderApprovalsPage } from './pages/approvals.js';
 import { renderTeamAttendancePage } from './pages/team-attendance.js';
@@ -61,6 +62,7 @@ addRoute('/attendance', renderAttendancePage, ['intern']);
 addRoute('/my-tasks', renderMyTasksPage, ['intern']);
 addRoute('/narratives', renderNarrativesPage, ['intern']);
 addRoute('/my-allowance', renderMyAllowancePage, ['intern']);
+addRoute('/my-dar-draft', renderMyDarDraftPage, ['intern']);
 
 // Supervisor
 addRoute('/approvals', renderApprovalsPage, ['supervisor', 'admin']);
@@ -177,6 +179,7 @@ registerRoles('/attendance', ['intern']);
 registerRoles('/my-tasks', ['intern']);
 registerRoles('/narratives', ['intern']);
 registerRoles('/my-allowance', ['intern']);
+registerRoles('/my-dar-draft', ['intern']);
 registerRoles('/approvals', ['supervisor', 'admin']);
 registerRoles('/task-management', ['supervisor', 'admin']);
 registerRoles('/team-attendance', ['supervisor', 'admin']);

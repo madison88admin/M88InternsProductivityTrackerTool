@@ -509,9 +509,42 @@ function formatHolidayName(name) {
   return String(name || 'Holiday').toUpperCase();
 }
 
+function addPdfHeaderStamp(doc, text, opts = {}) {
+  if (!text) return;
+
+  const margin = typeof opts.margin === 'number' ? opts.margin : 10;
+  const yTop = typeof opts.yTop === 'number' ? opts.yTop : margin;
+  const opacity = typeof opts.opacity === 'number' ? opts.opacity : 0.25;
+  const fontSize = typeof opts.fontSize === 'number' ? opts.fontSize : 10;
+
+  const pageWidth = doc.internal.pageSize.getWidth();
+
+  const canSaveState = typeof doc.saveGraphicsState === 'function' && typeof doc.restoreGraphicsState === 'function';
+  if (canSaveState) doc.saveGraphicsState();
+
+  try {
+    if (typeof doc.setGState === 'function' && typeof doc.GState === 'function') {
+      doc.setGState(new doc.GState({ opacity }));
+      doc.setTextColor(60, 60, 60);
+    } else {
+      doc.setTextColor(170, 170, 170);
+    }
+  } catch {
+    doc.setTextColor(170, 170, 170);
+  }
+
+  doc.setFont(undefined, 'bold');
+  doc.setFontSize(fontSize);
+
+  // Upper-right stamp aligned with the logo row.
+  doc.text(String(text), pageWidth - margin, yTop + 8, { align: 'right' });
+
+  if (canSaveState) doc.restoreGraphicsState();
+}
+
 // ─── DAR: PDF generation ────────────────────────────────────────────────────
 
-export async function generateDarPdf(darData, weekNum, startDate, existingDoc) {
+export async function generateDarPdf(darData, weekNum, startDate, existingDoc, options = {}) {
   const { default: jsPDF } = await import('jspdf');
   const { default: autoTable } = await import('jspdf-autotable');
 
@@ -569,6 +602,10 @@ export async function generateDarPdf(darData, weekNum, startDate, existingDoc) {
   let y = margin;
   if (logoDataUrl) {
     doc.addImage(logoDataUrl, 'PNG', margin, y, 65, 13);
+  }
+
+  if (options?.watermarkText) {
+    addPdfHeaderStamp(doc, options.watermarkText, { margin, yTop: y, opacity: 0.18, fontSize: 10 });
   }
   y += 17;
 
@@ -775,22 +812,28 @@ export async function generateDarPdf(darData, weekNum, startDate, existingDoc) {
     },
   });
 
-  const finalY = doc.lastAutoTable.finalY + 6;
-  doc.setFontSize(10);
-  doc.setFont(undefined, 'bold');
+  if (!options?.hideTotals) {
+    const finalY = doc.lastAutoTable.finalY + 6;
+    doc.setFontSize(10);
+    doc.setFont(undefined, 'bold');
 
-  const appliedHourlyRate = allowancePeriod?.hourly_rate ?? hourlyRate ?? 0;
-  const computedAllowance = totalHours * appliedHourlyRate;
-  const allowanceTotal = Number.isFinite(allowancePeriod?.total_amount)
-    ? allowancePeriod.total_amount
-    : (Number.isFinite(computedAllowance) ? computedAllowance : 0);
+    const appliedHourlyRate = allowancePeriod?.hourly_rate ?? hourlyRate ?? 0;
+    const computedAllowance = totalHours * appliedHourlyRate;
+    const allowanceTotal = Number.isFinite(allowancePeriod?.total_amount)
+      ? allowancePeriod.total_amount
+      : (Number.isFinite(computedAllowance) ? computedAllowance : 0);
 
-  // Place totals on the same row, left and right
-  // Show hours in both formats for transparency: "28h 45m (28.75 hrs)"
-  // Show allowance with 2 decimal places: "PHP 719.16"
-  const totalHoursDisplay = formatHoursBothFormats(totalHours);
-  doc.text(`TOTAL NUMBER OF HOURS: ${totalHoursDisplay}`, margin, finalY);
-  doc.text(`TOTAL ALLOWANCE FOR THIS WEEK: PHP ${allowanceTotal.toFixed(2)}`, pageWidth - margin, finalY, { align: 'right' });
+    const shouldMaskAllowance = options?.maskAllowanceUnlessApproved === true
+      && allowancePeriod?.status !== 'approved';
+    const allowanceForDisplay = shouldMaskAllowance ? 0 : allowanceTotal;
+
+    // Place totals on the same row, left and right
+    // Show hours in both formats for transparency: "28h 45m (28.75 hrs)"
+    // Show allowance with 2 decimal places: "PHP 719.16"
+    const totalHoursDisplay = formatHoursBothFormats(totalHours);
+    doc.text(`TOTAL NUMBER OF HOURS: ${totalHoursDisplay}`, margin, finalY);
+    doc.text(`TOTAL ALLOWANCE FOR THIS WEEK: PHP ${allowanceForDisplay.toFixed(2)}`, pageWidth - margin, finalY, { align: 'right' });
+  }
 
   return doc;
 }

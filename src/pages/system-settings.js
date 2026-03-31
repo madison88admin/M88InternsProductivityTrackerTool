@@ -43,6 +43,10 @@ export async function renderSystemSettingsPage() {
   const internTaskSubmission = settingsMap.intern_task_submission?.value || {};
   const taskSubmissionEnabled = internTaskSubmission.enabled === true;
 
+  // Intern App settings
+  const internDarDraftView = settingsMap.intern_dar_draft_view?.value || {};
+  const darDraftViewEnabled = internDarDraftView.enabled === true;
+
   // Security settings
   const forgotPasswordSettings = settingsMap.enable_forgot_password?.value || {};
   const forgotPasswordEnabled = forgotPasswordSettings.enabled !== false;
@@ -109,6 +113,20 @@ export async function renderSystemSettingsPage() {
           <label class="form-label">Retention Period (months)</label>
           <input type="number" id="retention-months" class="form-input" min="6" max="120" value="${retentionMonths}" />
           <p class="text-xs text-neutral-400 mt-1">How long to keep historical records</p>
+        </div>
+      </div>
+
+      <!-- Intern App Settings -->
+      <div class="card">
+        <h3 class="text-base font-bold text-neutral-900 mb-4 flex items-center gap-2">${icons.settings} Intern App Settings</h3>
+        <div class="space-y-4">
+          <label class="flex items-center gap-3 cursor-pointer">
+            <input type="checkbox" id="intern-dar-draft-view" ${darDraftViewEnabled ? 'checked' : ''} />
+            <div>
+              <p class="text-sm font-medium text-neutral-800">Enable Intern DAR Draft View</p>
+              <p class="text-xs text-neutral-400 mt-0.5">Allows interns to preview a draft of their current tracking week DAR for validation purposes only (no totals or allowance computations shown).</p>
+            </div>
+          </label>
         </div>
       </div>
 
@@ -199,6 +217,10 @@ export async function renderSystemSettingsPage() {
           {
             key: 'intern_task_submission',
             value: { enabled: el.querySelector('#intern-task-submission').checked },
+          },
+          {
+            key: 'intern_dar_draft_view',
+            value: { enabled: el.querySelector('#intern-dar-draft-view').checked },
           },
           {
             key: 'enable_forgot_password',

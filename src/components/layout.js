@@ -30,6 +30,7 @@ function getNavSections(role, profile) {
       ]},
       { label: 'Compensation', items: [
         { path: '/my-allowance', label: 'My Allowance', icon: icons.php },
+        { path: '/my-dar-draft', label: 'My DAR Draft', icon: icons.reports, id: 'nav-my-dar-draft', hidden: true },
       ]},
     ],
     supervisor: [
@@ -139,7 +140,8 @@ export function renderLayout(contentHtml, init, guardPath) {
           <div class="sidebar-section">${section.label}</div>
           ${section.items.map(item => `
             <a href="#${item.path}"
-               class="sidebar-link ${currentPath === item.path ? 'active' : ''}"
+               ${item.id ? `id="${item.id}"` : ''}
+               class="sidebar-link ${currentPath === item.path ? 'active' : ''} ${item.hidden ? 'hidden' : ''}"
                data-path="${item.path}">
               ${item.icon}
               <span>${item.label}</span>
@@ -284,5 +286,23 @@ export function renderLayout(contentHtml, init, guardPath) {
       }
       notificationCheckTimer = null;
     }, NOTIFICATION_CHECK_DEBOUNCE);
+  }
+
+  // Feature-toggle: show/hide Intern DAR Draft link
+  if (role === 'intern') {
+    supabase
+      .from('system_settings')
+      .select('value')
+      .eq('key', 'intern_dar_draft_view')
+      .maybeSingle()
+      .then(({ data, error }) => {
+        if (error) throw error;
+        const enabled = data?.value?.enabled === true || data?.value === true;
+        const link = document.getElementById('nav-my-dar-draft');
+        if (link) link.classList.toggle('hidden', !enabled);
+      })
+      .catch((err) => {
+        console.error('Failed to fetch intern_dar_draft_view setting:', err);
+      });
   }
 }
