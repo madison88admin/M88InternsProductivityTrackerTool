@@ -343,6 +343,25 @@ function applyDeptSupervisor(deptId, supervisors, selectEl, currentValue = null,
   }
 }
 
+function normalizeEmail(email) {
+  return (email || '').trim().toLowerCase();
+}
+
+async function emailExistsInSystem(email) {
+  const normalized = normalizeEmail(email);
+  if (!normalized) return false;
+
+  // Most records are stored in normalized form; checking with eq avoids wildcard issues from ilike.
+  const { data, error } = await supabase
+    .from('profiles')
+    .select('id')
+    .eq('email', normalized)
+    .limit(1);
+
+  if (error) throw error;
+  return (data || []).length > 0;
+}
+
 function openInviteModal(departments, locations, supervisors) {
   createModal('Invite New User', `
     <form id="invite-form" class="space-y-4">
@@ -439,7 +458,60 @@ function openInviteModal(departments, locations, supervisors) {
       </div>
     </form>
   `, (el, close) => {
-    el.querySelector('#invite-cancel').addEventListener('click', close);
+    let isClosing = false;
+    let duplicateEmailDetected = false;
+    let duplicatePromptShownForEmail = '';
+
+    el.querySelector('#invite-cancel').addEventListener('click', () => {
+      isClosing = true;
+      close();
+    });
+    const inviteForm = el.querySelector('#invite-form');
+    const emailInput = el.querySelector('#invite-email');
+    const submitBtn = el.querySelector('#invite-submit');
+
+    const setInviteEmailError = (message = '') => {
+      emailInput.setCustomValidity(message);
+    };
+
+    emailInput.addEventListener('input', () => {
+      // Clear previous server-side and duplicate-email errors while user edits.
+      emailInput.setCustomValidity('');
+      duplicateEmailDetected = false;
+      duplicatePromptShownForEmail = '';
+      submitBtn.disabled = false;
+    });
+
+    emailInput.addEventListener('blur', async () => {
+      if (isClosing) return;
+      const email = normalizeEmail(emailInput.value);
+      if (!email) return;
+
+      try {
+        const exists = await emailExistsInSystem(email);
+        if (isClosing) return;
+
+        if (exists) {
+          duplicateEmailDetected = true;
+          setInviteEmailError('This email is already registered. Please use a different email address.');
+          emailInput.reportValidity();
+          if (duplicatePromptShownForEmail !== email) {
+            showToast('This email is already registered. Please use a different email address.', 'error');
+            duplicatePromptShownForEmail = email;
+          }
+          submitBtn.disabled = true;
+          return;
+        }
+
+        duplicateEmailDetected = false;
+        duplicatePromptShownForEmail = '';
+        emailInput.setCustomValidity('');
+        submitBtn.disabled = false;
+      } catch (err) {
+        // Keep UX permissive on lookup failure; final backend validation still applies.
+        emailInput.setCustomValidity('');
+      }
+    });
 
     // Show/hide role-specific fields based on selected role
     el.querySelector('#invite-role').addEventListener('change', (e) => {
@@ -463,19 +535,26 @@ function openInviteModal(departments, locations, supervisors) {
       applyDeptSupervisor(e.target.value, supervisors, el.querySelector('#invite-supervisor'));
     });
 
-    el.querySelector('#invite-form').addEventListener('submit', async (e) => {
+    inviteForm.addEventListener('submit', async (e) => {
       e.preventDefault();
-      const submitBtn = el.querySelector('#invite-submit');
       submitBtn.disabled = true;
       submitBtn.textContent = 'Sending...';
 
-      const email = el.querySelector('#invite-email').value;
+      const email = normalizeEmail(el.querySelector('#invite-email').value);
       const fullName = el.querySelector('#invite-name').value.trim();
       const role = el.querySelector('#invite-role').value;
       const locationId = el.querySelector('#invite-location')?.value || null;
       const departmentId = el.querySelector('#invite-department')?.value || null;
 
       try {
+        if (duplicateEmailDetected) {
+          setInviteEmailError('This email is already registered. Please use a different email address.');
+          emailInput.reportValidity();
+          submitBtn.disabled = false;
+          submitBtn.textContent = 'Send Invitation';
+          return;
+        }
+
         // Collect all fields and delegate to the invite-user Edge Function
         const body = {
           email,
@@ -506,6 +585,12 @@ function openInviteModal(departments, locations, supervisors) {
         close();
         renderUserManagementPage();
       } catch (err) {
+        const errMessage = err?.message || 'Failed to send invitation';
+        if (/already|exists|duplicate|registered/i.test(errMessage)) {
+          duplicateEmailDetected = true;
+          setInviteEmailError('This email is already registered. Please use a different email address.');
+          emailInput.reportValidity();
+        }
         showToast(err.message || 'Failed to send invitation', 'error');
         submitBtn.disabled = false;
         submitBtn.textContent = 'Send Invitation';
