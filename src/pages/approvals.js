@@ -779,7 +779,7 @@ async function viewApprovalDetails(approvalId, approvals) {
             </div>
           </div>
           ${record.is_late ? '<p class="text-sm text-warning-600">⚠ Late arrival flagged</p>' : ''}
-          ${record.is_outside_hours ? '<p class="text-sm text-danger-600">⚠ Outside allowed hours</p>' : ''}
+          ${record.is_outside_hours ? '<p class="text-sm text-danger-600">⚠ Overtime flagged</p>' : ''}
         </div>
       `;
     }

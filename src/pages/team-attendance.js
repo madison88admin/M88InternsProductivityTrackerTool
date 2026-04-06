@@ -130,7 +130,7 @@ export async function renderTeamAttendancePage() {
         <td>
           <div class="flex flex-wrap gap-1">
             ${a.is_late ? '<span class="badge-warning text-xs">Late</span>' : ''}
-            ${a.is_outside_hours ? '<span class="badge-danger text-xs">Outside</span>' : ''}
+            ${a.is_outside_hours ? '<span class="badge-danger text-xs">Overtime</span>' : ''}
             ${ipConsistencyBadge(a.ip_consistent)}
           </div>
         </td>

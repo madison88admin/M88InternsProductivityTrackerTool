@@ -298,7 +298,7 @@ function renderRows(records, searchQuery) {
       <td><span class="badge-${r.status === 'approved' ? 'success' : r.status === 'rejected' ? 'danger' : 'pending'}">${r.status}</span></td>
       <td>
         ${r.is_late ? '<span class="badge-warning text-xs">Late</span>' : ''}
-        ${r.is_outside_hours ? '<span class="badge-danger text-xs ml-1">Outside</span>' : ''}
+        ${r.is_outside_hours ? '<span class="badge-danger text-xs ml-1">Overtime</span>' : ''}
         ${ipConsistencyBadge(r.ip_consistent)}
       </td>
       <td>

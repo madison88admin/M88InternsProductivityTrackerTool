@@ -311,7 +311,7 @@ export async function renderAttendancePage() {
           ${icons.clock}
           <span>Total Hours: <strong>${formatHoursDisplay(todayRecord.total_hours)}</strong></span>
           ${todayRecord.is_late ? '<span class="badge-pending ml-2">Late</span>' : ''}
-          ${todayRecord.is_outside_hours ? '<span class="badge-rejected ml-2">Outside Hours</span>' : ''}
+          ${todayRecord.is_outside_hours ? '<span class="badge-rejected ml-2">Overtime</span>' : ''}
         </div>
       ` : ''}
 
@@ -397,7 +397,7 @@ export async function renderAttendancePage() {
                 </td>
                 <td>
                   ${record.is_late ? '<span class="badge-pending">Late</span>' : ''}
-                  ${record.is_outside_hours ? '<span class="badge-rejected">Outside</span>' : ''}
+                  ${record.is_outside_hours ? '<span class="badge-rejected">Overtime</span>' : ''}
                   ${record.admin_logged ? '<span class="badge-secondary">Admin</span>' : ''}
                   ${ipConsistencyBadge(record.ip_consistent, 'sm')}
                 </td>

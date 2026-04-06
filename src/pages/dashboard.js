@@ -1347,7 +1347,7 @@ async function buildAdminDashboard(profile) {
         <div class="rounded-xl p-4" style="background: var(--color-primary-50);">
           <p class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-primary-600);">Active Interns</p>
           <p class="text-2xl font-bold mt-1" style="color: var(--color-primary-700);">${activeCount}</p>
-          ${completedCount > 0 ? `<p class="text-xs mt-0.5" style="color: var(--color-primary-500);">${completedCount} completed</p>` : ''}
+          ${completedCount >= 0 ? `<p class="text-xs mt-0.5" style="color: var(--color-primary-500);">${completedCount} completed</p>` : ''}
         </div>
         <div class="rounded-xl p-4" style="background: var(--color-neutral-100);">
           <p class="text-xs font-semibold uppercase tracking-wider text-neutral-500">Avg OJT Progress</p>
