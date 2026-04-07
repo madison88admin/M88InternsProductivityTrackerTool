@@ -17,11 +17,18 @@ export async function renderApprovalsPage() {
   const role = getUserRole();
   const isAdmin = role === 'admin';
 
-  let query = supabase
+  let pendingQuery = supabase
     .from('approvals')
     .select('*, intern:profiles!approvals_intern_id_fkey(full_name, email, department_id, departments(name)), reviewer:profiles!approvals_reviewed_by_fkey(full_name, email)')
+    .eq('status', 'pending')
+    .order('created_at', { ascending: false });
+
+  let reviewedQuery = supabase
+    .from('approvals')
+    .select('*, intern:profiles!approvals_intern_id_fkey(full_name, email, department_id, departments(name)), reviewer:profiles!approvals_reviewed_by_fkey(full_name, email)')
+    .neq('status', 'pending')
     .order('created_at', { ascending: false })
-    .limit(100);
+    .limit(50);
 
   if (!isAdmin) {
     if (profile.department_id) {
@@ -33,16 +40,18 @@ export async function renderApprovalsPage() {
         .eq('role', 'supervisor');
       const deptSupervisorIds = (deptSups || []).map(s => s.id);
       if (!deptSupervisorIds.includes(profile.id)) deptSupervisorIds.push(profile.id);
-      query = query.in('supervisor_id', deptSupervisorIds);
+      pendingQuery = pendingQuery.in('supervisor_id', deptSupervisorIds);
+      reviewedQuery = reviewedQuery.in('supervisor_id', deptSupervisorIds);
     } else {
-      query = query.eq('supervisor_id', profile.id);
+      pendingQuery = pendingQuery.eq('supervisor_id', profile.id);
+      reviewedQuery = reviewedQuery.eq('supervisor_id', profile.id);
     }
   }
 
-  const { data: approvals } = await query;
-
-  const allPendingApprovals = (approvals || []).filter(a => a.status === 'pending');
-  const reviewedApprovals = (approvals || []).filter(a => a.status !== 'pending');
+  const [pendingRes, reviewedRes] = await Promise.all([pendingQuery, reviewedQuery]);
+  const allPendingApprovals = pendingRes.data || [];
+  const reviewedApprovals = reviewedRes.data || [];
+  const approvals = [...allPendingApprovals, ...reviewedApprovals];
   
   // For admins with departments, separate into department and other approvals
   let pendingApprovals = allPendingApprovals;
