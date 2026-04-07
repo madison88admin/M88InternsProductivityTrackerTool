@@ -265,7 +265,7 @@ export async function openNarrativeModal(options) {
           <div>
             <label class="form-label">Narrative</label>
             <div id="morning-editor"></div>
-            <p id="morning-char-count" class="text-xs text-neutral-400 mt-1 text-right">0 / 250</p>
+            <p id="morning-char-count" class="text-xs text-neutral-400 mt-1 text-right">0 / 175</p>
           </div>
         </div>
         <p id="morning-existing" class="text-xs text-neutral-400 mt-2 hidden"></p>
@@ -295,7 +295,7 @@ export async function openNarrativeModal(options) {
           <div>
             <label class="form-label">Narrative</label>
             <div id="afternoon-editor"></div>
-            <p id="afternoon-char-count" class="text-xs text-neutral-400 mt-1 text-right">0 / 250</p>
+            <p id="afternoon-char-count" class="text-xs text-neutral-400 mt-1 text-right">0 / 175</p>
           </div>
         </div>
         <p id="afternoon-existing" class="text-xs text-neutral-400 mt-2 hidden"></p>
@@ -350,7 +350,7 @@ export async function openNarrativeModal(options) {
     morningQuill.root.addEventListener('drop', blockPaste, true);
     afternoonQuill.root.addEventListener('drop', blockPaste, true);
 
-    const CHAR_LIMIT = 250;
+    const CHAR_LIMIT = 175;
 
     function updateCharCount(quillInstance, counterId) {
       const len = quillInstance.getText().trim().length;

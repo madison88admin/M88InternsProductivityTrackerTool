@@ -7,7 +7,7 @@ import { renderLayout } from '../components/layout.js';
 import { supabase } from '../lib/supabase.js';
 import { showToast } from '../lib/toast.js';
 import { icons } from '../lib/icons.js';
-import { formatDate, formatDateKey, formatTime, formatHoursDisplay, formatHoursBothFormats, formatHoursAsHHMM, formatCurrency, calculateSessionHours, getTrackingWeekStart, getTrackingWeekEnd, getTodayDate } from '../lib/utils.js';
+import { formatDate, formatDateKey, formatTime, formatHoursDisplay, formatHoursBothFormats, formatHoursAsHHMM, formatCurrency, calculateSessionHours, getTrackingWeekStart, getTrackingWeekEnd, getInternTrackingWeekNumber, getTodayDate } from '../lib/utils.js';
 import { logAudit } from '../lib/audit.js';
 import { getSignedStorageUrls, getPublicStorageUrl } from '../lib/storage.js';
 
@@ -374,8 +374,7 @@ async function updateDarPreview(el) {
 
   try {
     const darData = await fetchDarData(selectedIds[0], startDate, endDate);
-    // Calculate week number for the selected intern
-    const internWeekNum = calculateInternWeekNumber(darData.intern?.ojt_start_date, startDate);
+    const internWeekNum = getInternTrackingWeekNumber(darData.intern?.ojt_start_date, startDate);
     const doc = await generateDarPdf(darData, internWeekNum, startDate);
     const blob = doc.output('blob');
 
@@ -392,21 +391,6 @@ async function updateDarPreview(el) {
     previewLabel.textContent = 'Preview unavailable';
     previewSection.style.display = 'none';
   }
-}
-
-/**
- * Calculate week number for an intern based on OJT start date and target start
- */
-function calculateInternWeekNumber(ojtStartDate, startDate) {
-  if (!ojtStartDate) return 1;
-
-  const ojtStart = new Date(ojtStartDate + 'T00:00:00');
-  const start = new Date(startDate + 'T00:00:00');
-  const ojtStartWeek = getTrackingWeekStart(ojtStart);
-  const diffMs = start - ojtStartWeek;
-  let weekNum = Math.floor(diffMs / (7 * 24 * 60 * 60 * 1000)) + 1;
-  if (weekNum < 1) weekNum = 1;
-  return weekNum;
 }
 
 export async function fetchDarData(internId, startDate, endDate) {
@@ -765,7 +749,7 @@ export async function generateDarPdf(darData, weekNum, startDate, existingDoc, o
 
   const pageHeight = doc.internal.pageSize.getHeight();
   const approxHeaderRowH = 14;
-  const footerSpace = 18;
+  const footerSpace = 28;
   const bodyRowH = (pageHeight - y - margin - footerSpace - approxHeaderRowH) / 10;
 
   autoTable(doc, {
@@ -831,8 +815,17 @@ export async function generateDarPdf(darData, weekNum, startDate, existingDoc, o
     // Show hours in both formats for transparency: "28h 45m (28.75 hrs)"
     // Show allowance with 2 decimal places: "PHP 719.16"
     const totalHoursDisplay = formatHoursBothFormats(totalHours);
+    const issuedToName = allowancePeriod?.status === 'approved' ? (intern?.full_name || '—').toUpperCase() : '';
+    const issuedByName = allowancePeriod?.status === 'approved' ? 'MICHAEL CASTILLO' : '';
+
+    doc.setFont(undefined, 'bold');
     doc.text(`TOTAL NUMBER OF HOURS: ${totalHoursDisplay}`, margin, finalY);
     doc.text(`TOTAL ALLOWANCE FOR THIS WEEK: PHP ${allowanceForDisplay.toFixed(2)}`, pageWidth - margin, finalY, { align: 'right' });
+
+    doc.setFont(undefined, 'bold');
+    const issuedLineY = finalY + 15;
+    doc.text(`ISSUED BY: ${issuedByName}`, margin, issuedLineY);
+    doc.text(`ISSUED TO: ${issuedToName}`, pageWidth - margin, issuedLineY, { align: 'right' });
   }
 
   return doc;
@@ -868,7 +861,7 @@ async function handleDarGeneration(el) {
     if (selectedInternIds.length === 1 || bulkMode === 'single') {
       for (const internId of selectedInternIds) {
         const darData = await fetchDarData(internId, startDate, endDate);
-        const internWeekNum = calculateInternWeekNumber(darData.intern?.ojt_start_date, startDate);
+        const internWeekNum = getInternTrackingWeekNumber(darData.intern?.ojt_start_date, startDate);
         const doc = await generateDarPdf(darData, internWeekNum, startDate);
         const fileName = `DAR_${darData.intern?.full_name?.replace(/\s+/g, '_') || 'intern'}_Week${internWeekNum}.pdf`;
         doc.save(fileName);
@@ -890,7 +883,7 @@ async function handleDarGeneration(el) {
 
       for (const internId of selectedInternIds) {
         const darData = await fetchDarData(internId, startDate, endDate);
-        const internWeekNum = calculateInternWeekNumber(darData.intern?.ojt_start_date, startDate);
+        const internWeekNum = getInternTrackingWeekNumber(darData.intern?.ojt_start_date, startDate);
         const doc = await generateDarPdf(darData, internWeekNum, startDate);
         const fileName = `DAR_${darData.intern?.full_name?.replace(/\s+/g, '_') || 'intern'}_Week${internWeekNum}.pdf`;
         const pdfBlob = doc.output('blob');
@@ -922,7 +915,7 @@ async function handleDarGeneration(el) {
 
       for (let i = 0; i < selectedInternIds.length; i++) {
         const darData = await fetchDarData(selectedInternIds[i], startDate, endDate);
-        const internWeekNum = calculateInternWeekNumber(darData.intern?.ojt_start_date, startDate);
+        const internWeekNum = getInternTrackingWeekNumber(darData.intern?.ojt_start_date, startDate);
         if (i === 0) {
           doc = await generateDarPdf(darData, internWeekNum, startDate);
         } else {

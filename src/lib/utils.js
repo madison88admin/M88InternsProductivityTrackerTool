@@ -107,6 +107,29 @@ export function getTrackingWeekEnd(date) {
 }
 
 /**
+ * Calculate intern tracking week number using Friday-Thursday week boundaries.
+ * @param {string|Date|null} ojtStartDate
+ * @param {string|Date|null} weekStartDate
+ * @returns {number}
+ */
+export function getInternTrackingWeekNumber(ojtStartDate, weekStartDate) {
+  if (!ojtStartDate || !weekStartDate) return 1;
+
+  const ojtStart = new Date(ojtStartDate);
+  const weekStart = new Date(weekStartDate);
+
+  if (Number.isNaN(ojtStart.getTime()) || Number.isNaN(weekStart.getTime())) return 1;
+
+  const ojtStartWeek = getTrackingWeekStart(ojtStart);
+  const targetWeekStart = getTrackingWeekStart(weekStart);
+  const diffMs = targetWeekStart - ojtStartWeek;
+
+  let weekNum = Math.floor(diffMs / (7 * 24 * 60 * 60 * 1000)) + 1;
+  if (weekNum < 1) weekNum = 1;
+  return weekNum;
+}
+
+/**
  * Debounce a function.
  * @param {Function} fn
  * @param {number} delay

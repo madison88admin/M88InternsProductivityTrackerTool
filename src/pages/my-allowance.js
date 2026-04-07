@@ -6,7 +6,7 @@ import { getProfile } from '../lib/auth.js';
 import { renderLayout } from '../components/layout.js';
 import { supabase } from '../lib/supabase.js';
 import { icons } from '../lib/icons.js';
-import { formatDate, formatHoursDisplay, getMonday } from '../lib/utils.js';
+import { formatDate, formatHoursDisplay, getInternTrackingWeekNumber } from '../lib/utils.js';
 import { showToast } from '../lib/toast.js';
 import { fetchDarData, generateDarPdf } from './reports.js';
 
@@ -40,15 +40,9 @@ export async function renderMyAllowancePage() {
   const totalEarnings = approved.reduce((s, p) => s + (p.total_amount || 0), 0);
   const totalHours = approved.reduce((s, p) => s + (p.total_hours || 0), 0);
 
-  // Compute week number relative to OJT start date
-  const ojtStart = profile.ojt_start_date ? new Date(profile.ojt_start_date + 'T00:00:00') : null;
-  const ojtMonday = ojtStart ? getMonday(ojtStart) : null;
-
   function getWeekNum(weekStart) {
-    if (!ojtMonday || !weekStart) return '—';
-    const wMonday = getMonday(new Date(weekStart + 'T00:00:00'));
-    const num = Math.floor((wMonday - ojtMonday) / (7 * 24 * 60 * 60 * 1000)) + 1;
-    return num < 1 ? 1 : num;
+    if (!weekStart) return '—';
+    return getInternTrackingWeekNumber(profile.ojt_start_date, weekStart);
   }
 
   const statusBadge = (status) => {

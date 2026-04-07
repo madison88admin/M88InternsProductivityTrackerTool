@@ -453,7 +453,7 @@ function openNarrativeModal(tasks, profile, today) {
           <div>
             <label class="form-label">Narrative</label>
             <div id="morning-editor"></div>
-            <p id="morning-char-count" class="text-xs text-neutral-400 mt-1 text-right">0 / 250</p>
+            <p id="morning-char-count" class="text-xs text-neutral-400 mt-1 text-right">0 / 175</p>
           </div>
         </div>
         <p id="morning-existing" class="text-xs text-neutral-400 mt-2 hidden"></p>
@@ -475,7 +475,7 @@ function openNarrativeModal(tasks, profile, today) {
           <div>
             <label class="form-label">Narrative</label>
             <div id="afternoon-editor"></div>
-            <p id="afternoon-char-count" class="text-xs text-neutral-400 mt-1 text-right">0 / 250</p>
+            <p id="afternoon-char-count" class="text-xs text-neutral-400 mt-1 text-right">0 / 175</p>
           </div>
         </div>
         <p id="afternoon-existing" class="text-xs text-neutral-400 mt-2 hidden"></p>
@@ -521,7 +521,7 @@ function openNarrativeModal(tasks, profile, today) {
     morningQuill.root.addEventListener('drop', blockPaste, true);
     afternoonQuill.root.addEventListener('drop', blockPaste, true);
 
-    const CHAR_LIMIT = 250;
+    const CHAR_LIMIT = 175;
 
     function updateCharCount(quillInstance, counterId) {
       const len = quillInstance.getText().trim().length;
@@ -1033,7 +1033,7 @@ function openEditNarrativeModal(narrative, tasks, profile) {
       <div>
         <label class="form-label">Narrative <span class="text-danger-500">*</span></label>
         <div id="edit-narrative-editor"></div>
-        <p id="edit-char-count" class="text-xs text-neutral-400 mt-1 text-right">0 / 250</p>
+        <p id="edit-char-count" class="text-xs text-neutral-400 mt-1 text-right">0 / 175</p>
       </div>
 
       <div class="flex justify-end gap-3 pt-2">
@@ -1055,7 +1055,7 @@ function openEditNarrativeModal(narrative, tasks, profile) {
     });
     quill.root.innerHTML = narrative.content;
 
-    const CHAR_LIMIT = 250;
+    const CHAR_LIMIT = 175;
     const blockPasteEdit = (e) => {
       e.preventDefault();
       e.stopImmediatePropagation();
