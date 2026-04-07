@@ -184,6 +184,56 @@ body {
 .btn-warning:hover { box-shadow: 0 4px 14px rgba(217, 119, 6, 0.35); transform: translateY(-1px); }
 .btn-warning:focus { @apply ring-warning-500; }
 
+/* Performance dot tooltip */
+.performance-day-dot {
+  position: relative;
+}
+
+.performance-day-dot::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 8px);
+  transform: translateX(-50%) translateY(4px);
+  padding: 0.45rem 0.65rem;
+  border-radius: 0.6rem;
+  background: rgba(15, 23, 42, 0.96);
+  color: #fff;
+  font-size: 0.75rem;
+  line-height: 1.2;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.15s ease, transform 0.15s ease, visibility 0.15s ease;
+  z-index: 30;
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.2);
+}
+
+.performance-day-dot::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 2px);
+  transform: translateX(-50%) translateY(4px);
+  border: 5px solid transparent;
+  border-top-color: rgba(15, 23, 42, 0.96);
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.15s ease, transform 0.15s ease, visibility 0.15s ease;
+  z-index: 30;
+}
+
+.performance-day-dot:hover::after,
+.performance-day-dot:hover::before,
+.performance-day-dot:focus-visible::after,
+.performance-day-dot:focus-visible::before {
+  opacity: 1;
+  visibility: visible;
+  transform: translateX(-50%) translateY(0);
+}
+
 .btn-sm {
   @apply px-3 py-1.5 text-xs rounded-lg;
 }

@@ -6,7 +6,8 @@ import { getUserRole, getProfile, refreshProfile } from '../lib/auth.js';
 import { renderLayout } from '../components/layout.js';
 import { supabase } from '../lib/supabase.js';
 import { icons } from '../lib/icons.js';
-import { formatDate, formatDateKey, formatHoursDisplay, getTodayDate, computeEstimatedEndDate, renderAvatar, getMonday, PH_TIMEZONE } from '../lib/utils.js';
+import { formatDate, formatDateKey, formatHoursDisplay, getTodayDate, computeEstimatedEndDate, renderAvatar, getMonday, getTrackingWeekStart, getTrackingWeekEnd, PH_TIMEZONE } from '../lib/utils.js';
+import { isHoliday } from '../lib/holidays.js';
 import { openOjtCompletionModal } from '../lib/ojt-completion.js';
 
 export async function renderDashboard() {
@@ -49,29 +50,30 @@ export async function renderDashboard() {
       const grid      = el.querySelector('#performance-kpi-grid');
       if (!grid) return;
 
-      const refresh = () => {
+      const refresh = async () => {
         let att, tasks, narr, ws;
         if (weekOffset === null) {
           att   = _internDashData.allAttendance;
           tasks = _internDashData.allTasks;
           narr  = _internDashData.allNarratives;
-          ws    = getMonday(new Date());
+          ws    = getTrackingWeekStart(new Date());
           weekLabel.textContent = 'All Time';
         } else {
-          const mon = getMonday(new Date());
-          mon.setDate(mon.getDate() + weekOffset * 7);
-          const sun = new Date(mon);
-          sun.setDate(sun.getDate() + 6);
-          const start = mon.toLocaleDateString('en-CA');
-          const end   = sun.toLocaleDateString('en-CA');
+          const startDate = getTrackingWeekStart(new Date());
+          startDate.setDate(startDate.getDate() + weekOffset * 7);
+          const endDate = getTrackingWeekEnd(startDate);
+          const start = formatDateKey(startDate);
+          const end   = formatDateKey(endDate);
           att   = _internDashData.allAttendance.filter(r => r.date >= start && r.date <= end);
           tasks = _internDashData.allTasks.filter(t => t.due_date && t.due_date >= start && t.due_date <= end);
           narr  = _internDashData.allNarratives.filter(n => n.date >= start && n.date <= end);
-          ws    = mon;
-          weekLabel.textContent = `${formatDate(mon, { month: 'short', day: 'numeric' })} – ${formatDate(sun, { month: 'short', day: 'numeric', year: 'numeric' })}`;
+          ws    = startDate;
+          weekLabel.textContent = `${formatDate(startDate, { month: 'short', day: 'numeric', year: 'numeric' })} – ${formatDate(endDate, { month: 'short', day: 'numeric', year: 'numeric' })}`;
         }
+        const dayEntries = getPerformanceWeekDayEntries(ws);
+        const holidayMap = await buildHolidayMap(dayEntries.map(entry => entry.dateStr));
         nextBtn.disabled = weekOffset === null;
-        grid.innerHTML = buildPerformanceKPIGrid(att, tasks, narr, ws, _internDashData.today);
+        grid.innerHTML = buildPerformanceKPIGrid(att, tasks, narr, ws, _internDashData.today, holidayMap);
       };
 
       // ← go back one week (or from All Time → this week)
@@ -97,6 +99,36 @@ let _internKPIData = [];
 
 /** Raw data for the intern performance panel — used by the week filter */
 let _internDashData = null;
+
+function getPerformanceWeekDayEntries(weekStartDate) {
+  const weekDays = [
+    { label: 'Fri', offset: 0 },
+    { label: 'Mon', offset: 3 },
+    { label: 'Tue', offset: 4 },
+    { label: 'Wed', offset: 5 },
+    { label: 'Thu', offset: 6 },
+  ];
+
+  return weekDays.map(({ label, offset }) => {
+    const d = new Date(weekStartDate);
+    d.setDate(d.getDate() + offset);
+    return { label, dateStr: d.toLocaleDateString('en-CA') };
+  });
+}
+
+async function buildHolidayMap(dateStrings) {
+  const entries = await Promise.all(dateStrings.map(async dateStr => [dateStr, await isHoliday(dateStr)]));
+  return new Map(entries);
+}
+
+function escapeHtmlAttr(text) {
+  return String(text)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
 
 const DASHBOARD_PUNCH_CUTOFFS = {
   time_in_1: 10 * 60 + 30,
@@ -214,35 +246,44 @@ async function buildInternDashboard(profile) {
   const pendingAttCount  = allAttendance.filter(r => r.status === 'pending').length;
   const rejectedAttCount = allAttendance.filter(r => r.status === 'rejected').length;
 
-  // This-week day status dots
-  const monday = getMonday(new Date());
-  const weekLabels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'];
-  const thisWeekDotsHtml = weekLabels.map((label, i) => {
-    const d = new Date(monday);
-    d.setDate(d.getDate() + i);
-    const dateStr = d.toLocaleDateString('en-CA');
+  // This-week day status dots (Fri, Mon-Thu)
+  const thisWeekStart = getTrackingWeekStart(new Date());
+  const thisWeekEntries = getPerformanceWeekDayEntries(thisWeekStart);
+  const thisWeekHolidayMap = await buildHolidayMap(thisWeekEntries.map(entry => entry.dateStr));
+  const thisWeekDotsHtml = thisWeekEntries.map(({ label, dateStr }) => {
     const isFuture = dateStr > today;
     const isToday  = dateStr === today;
     const rec = allAttendance.find(r => r.date === dateStr);
-    let dotStyle, symbol;
-    if (isFuture) {
+    const holidayInfo = thisWeekHolidayMap.get(dateStr);
+    let dotStyle, symbol, tooltipText;
+    if (holidayInfo?.isHoliday) {
+      dotStyle = 'background:var(--color-warning-100);color:var(--color-warning-700);';
+      symbol = icons.calendar;
+      tooltipText = `${label}: Holiday${holidayInfo.name ? ` - ${holidayInfo.name}` : ''}`;
+    } else if (isFuture) {
       dotStyle = 'background:var(--color-neutral-100);color:var(--color-neutral-300);';
       symbol = '·';
+      tooltipText = `${label}: Future date`;
     } else if (rec?.status === 'approved') {
       dotStyle = rec.is_late
         ? 'background:var(--color-warning-100);color:var(--color-warning-700);'
         : 'background:var(--color-success-100);color:var(--color-success-700);';
       symbol = rec.is_late ? '!' : '✓';
+      tooltipText = rec.is_late
+        ? `${label}: Approved - Late arrival`
+        : `${label}: Approved attendance`;
     } else if (rec?.status === 'pending') {
       dotStyle = 'background:var(--color-primary-50);color:var(--color-primary-600);';
       symbol = '~';
+      tooltipText = `${label}: Pending approval`;
     } else {
       dotStyle = 'background:var(--color-danger-50);color:var(--color-danger-400);';
       symbol = '✗';
+      tooltipText = `${label}: No attendance record`;
     }
     return `
       <div class="flex flex-col items-center gap-1">
-        <div class="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold ${isToday ? 'ring-2 ring-offset-1 ring-primary-400' : ''}" style="${dotStyle}">${symbol}</div>
+        <div class="performance-day-dot w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold ${isToday ? 'ring-2 ring-offset-1 ring-primary-400' : ''}" style="${dotStyle}" data-tooltip="${escapeHtmlAttr(tooltipText)}" aria-label="${escapeHtmlAttr(tooltipText)}">${symbol}</div>
         <span class="text-xs font-medium ${isToday ? 'text-primary-600' : 'text-neutral-400'}">${label}</span>
       </div>`;
   }).join('');
@@ -582,10 +623,11 @@ async function buildInternDashboard(profile) {
  * @param {Array}  att       Attendance records to include (filtered or full)
  * @param {Array}  tasks     Tasks to include (filtered or full)
  * @param {Array}  narr      Narratives to include (filtered or full)
- * @param {Date}   weekStart Monday of the week used for the attendance day-dots
+ * @param {Date}   weekStart Friday of the week used for the attendance day-dots
  * @param {string} today     YYYY-MM-DD string for "today"
+ * @param {Map}    holidayMap Map of date string to holiday info
  */
-function buildPerformanceKPIGrid(att, tasks, narr, weekStart, today) {
+function buildPerformanceKPIGrid(att, tasks, narr, weekStart, today, holidayMap = new Map()) {
   // ── Attendance KPIs ──────────────────────────────────────────────────────
   const approvedAtt      = att.filter(r => r.status === 'approved');
   const daysWorked       = approvedAtt.length;
@@ -628,34 +670,51 @@ function buildPerformanceKPIGrid(att, tasks, narr, weekStart, today) {
        <span class="text-xs font-bold ${valueClass}">${value}</span>
      </div>`;
 
-  // ── Week day-dots (Mon–Fri of the given weekStart) ────────────────────────
-  const weekLabels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'];
-  const thisWeekDotsHtml = weekLabels.map((label, i) => {
+  // ── Week day-dots (Fri, Mon–Thu of the given weekStart) ──────────────────
+  const weekDays = [
+    { label: 'Fri', offset: 0 },
+    { label: 'Mon', offset: 3 },
+    { label: 'Tue', offset: 4 },
+    { label: 'Wed', offset: 5 },
+    { label: 'Thu', offset: 6 },
+  ];
+  const thisWeekDotsHtml = weekDays.map(({ label, offset }) => {
     const d = new Date(weekStart);
-    d.setDate(d.getDate() + i);
+    d.setDate(d.getDate() + offset);
     const dateStr  = d.toLocaleDateString('en-CA');
     const isFuture = dateStr > today;
     const isToday  = dateStr === today;
     const rec = att.find(r => r.date === dateStr);
-    let dotStyle, symbol;
-    if (isFuture) {
+    const holidayInfo = holidayMap.get(dateStr);
+    let dotStyle, symbol, tooltipText;
+    if (holidayInfo?.isHoliday) {
+      dotStyle = 'background:var(--color-warning-100);color:var(--color-warning-700);';
+      symbol = icons.calendar;
+      tooltipText = `${label}: Holiday${holidayInfo.name ? ` - ${holidayInfo.name}` : ''}`;
+    } else if (isFuture) {
       dotStyle = 'background:var(--color-neutral-100);color:var(--color-neutral-300);';
       symbol = '·';
+      tooltipText = `${label}: Future date`;
     } else if (rec?.status === 'approved') {
       dotStyle = rec.is_late
         ? 'background:var(--color-warning-100);color:var(--color-warning-700);'
         : 'background:var(--color-success-100);color:var(--color-success-700);';
       symbol = rec.is_late ? '!' : '✓';
+      tooltipText = rec.is_late
+        ? `${label}: Approved - Late arrival`
+        : `${label}: Approved attendance`;
     } else if (rec?.status === 'pending') {
       dotStyle = 'background:var(--color-primary-50);color:var(--color-primary-600);';
       symbol = '~';
+      tooltipText = `${label}: Pending approval`;
     } else {
       dotStyle = 'background:var(--color-danger-50);color:var(--color-danger-400);';
       symbol = '✗';
+      tooltipText = `${label}: No attendance record`;
     }
     return `
       <div class="flex flex-col items-center gap-1">
-        <div class="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold ${isToday ? 'ring-2 ring-offset-1 ring-primary-400' : ''}" style="${dotStyle}">${symbol}</div>
+        <div class="performance-day-dot w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold ${isToday ? 'ring-2 ring-offset-1 ring-primary-400' : ''}" style="${dotStyle}" data-tooltip="${escapeHtmlAttr(tooltipText)}" aria-label="${escapeHtmlAttr(tooltipText)}">${symbol}</div>
         <span class="text-xs font-medium ${isToday ? 'text-primary-600' : 'text-neutral-400'}">${label}</span>
       </div>`;
   }).join('');
@@ -1465,25 +1524,21 @@ async function initDashboardCharts(role, container) {
     const totalHoursEl = container.querySelector('#weekly-hours-total');
     if (canvas) {
       const profile = getProfile();
-      const today = new Date();
-      const monday = new Date(today);
-      monday.setDate(today.getDate() - today.getDay() + 1);
-      const friday = new Date(monday);
-      friday.setDate(monday.getDate() + 4);
+      const weekStart = getTrackingWeekStart(new Date());
+      const weekEnd = getTrackingWeekEnd(weekStart);
+      const weekEntries = getPerformanceWeekDayEntries(weekStart);
 
       const { data: weeklyData } = await supabase
         .from('attendance_records')
         .select('date, total_hours')
         .eq('intern_id', profile.id)
-        .gte('date', monday.toLocaleDateString('en-CA'))
-        .lte('date', friday.toLocaleDateString('en-CA'))
+        .gte('date', formatDateKey(weekStart))
+        .lte('date', formatDateKey(weekEnd))
         .order('date');
 
-      const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'];
-      const hours = days.map((_, i) => {
-        const d = new Date(monday);
-        d.setDate(d.getDate() + i);
-        const dateStr = d.toLocaleDateString('en-CA');
+      const days = weekEntries.map(entry => entry.label);
+      const hours = weekEntries.map(entry => {
+        const dateStr = entry.dateStr;
         const record = weeklyData?.find(r => r.date === dateStr);
         return record?.total_hours || 0;
       });
