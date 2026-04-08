@@ -9,9 +9,11 @@ import { icons } from '../lib/icons.js';
 import { formatDate, formatHoursDisplay, getInternTrackingWeekNumber } from '../lib/utils.js';
 import { showToast } from '../lib/toast.js';
 import { fetchDarData, generateDarPdf } from './reports.js';
+import { markSidebarIndicatorSeen, sidebarIndicatorTypes } from '../lib/sidebar-indicators.js';
 
 export async function renderMyAllowancePage() {
   const profile = getProfile();
+  markSidebarIndicatorSeen(profile?.id, sidebarIndicatorTypes.allowance);
 
   const { data: periods } = await supabase
     .from('allowance_periods')

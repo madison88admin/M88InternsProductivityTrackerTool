@@ -9,6 +9,7 @@ import { icons } from '../lib/icons.js';
 import { formatDate, formatDateKey, formatHoursDisplay, getTodayDate, computeEstimatedEndDate, renderAvatar, getMonday, getTrackingWeekStart, getTrackingWeekEnd, PH_TIMEZONE } from '../lib/utils.js';
 import { isHoliday } from '../lib/holidays.js';
 import { openOjtCompletionModal } from '../lib/ojt-completion.js';
+import { openLoginBriefingModal, shouldShowBriefing } from '../lib/login-briefing.js';
 
 export async function renderDashboard() {
   const role = getUserRole();
@@ -32,6 +33,14 @@ export async function renderDashboard() {
 
   renderLayout(content, (el) => {
     initDashboardCharts(role, el);
+
+    // Show login briefing modal for interns (once per session)
+    if (role === 'intern' && profile && shouldShowBriefing(profile.id)) {
+      // Defer to next frame to ensure modal system is ready
+      requestAnimationFrame(() => {
+        openLoginBriefingModal(profile.id, profile.full_name || 'Intern');
+      });
+    }
 
     // OJT completion review buttons (admin dashboard)
     el.querySelectorAll('.ojt-review-btn').forEach(btn => {

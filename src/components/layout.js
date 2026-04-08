@@ -8,6 +8,7 @@ import { icons } from '../lib/icons.js';
 import { showToast } from '../lib/toast.js';
 import { renderAvatar, hydrateSignedAvatars } from '../lib/utils.js';
 import { supabase } from '../lib/supabase.js';
+import { fetchInternSidebarIndicators } from '../lib/sidebar-indicators.js';
 
 const PST_TIMEZONE = 'Asia/Manila';
 const pstTimeFormatter = new Intl.DateTimeFormat('en-PH', {
@@ -179,6 +180,9 @@ export function renderLayout(contentHtml, init, guardPath) {
               ${item.icon}
               <span>${item.label}</span>
               ${item.path === '/notifications' ? `<span id="notif-dot" class="hidden ml-auto w-2.5 h-2.5 bg-red-500 rounded-full shrink-0"></span>` : ''}
+              ${role === 'intern' && item.path === '/my-tasks' ? `<span id="my-tasks-dot" class="hidden ml-auto w-2.5 h-2.5 bg-red-500 rounded-full shrink-0"></span>` : ''}
+              ${role === 'intern' && item.path === '/narratives' ? `<span id="narratives-dot" class="hidden ml-auto w-2.5 h-2.5 bg-red-500 rounded-full shrink-0"></span>` : ''}
+              ${role === 'intern' && item.path === '/my-allowance' ? `<span id="my-allowance-dot" class="hidden ml-auto w-2.5 h-2.5 bg-red-500 rounded-full shrink-0"></span>` : ''}
             </a>
           `).join('')}
         `).join('')}
@@ -322,6 +326,17 @@ export function renderLayout(contentHtml, init, guardPath) {
           .eq('is_read', false);
         if (count && count > 0 && notifDot) {
           notifDot.classList.remove('hidden');
+        }
+
+        if (role === 'intern') {
+          const taskDot = document.getElementById('my-tasks-dot');
+          const narrativesDot = document.getElementById('narratives-dot');
+          const allowanceDot = document.getElementById('my-allowance-dot');
+
+          const indicators = await fetchInternSidebarIndicators(profile);
+          if (indicators.tasks && taskDot) taskDot.classList.remove('hidden');
+          if (indicators.narratives && narrativesDot) narrativesDot.classList.remove('hidden');
+          if (indicators.allowance && allowanceDot) allowanceDot.classList.remove('hidden');
         }
       } catch (err) {
         console.error('Failed to fetch notification count:', err);

@@ -14,6 +14,7 @@ import { createModal } from '../lib/component.js';
 import { isHoliday } from '../lib/holidays.js';
 import { sendEmailNotification, getDepartmentSupervisors } from '../lib/email-notifications.js';
 import { openNarrativeModal as openSharedNarrativeModal } from '../lib/narrative-modal.js';
+import { markSidebarIndicatorSeen, sidebarIndicatorTypes } from '../lib/sidebar-indicators.js';
 
 // Pre-load Quill to avoid dynamic import delays in modal
 let QuillModule = null;
@@ -32,6 +33,7 @@ function getQuill() {
 
 export async function renderNarrativesPage() {
   const profile = getProfile();
+  markSidebarIndicatorSeen(profile?.id, sidebarIndicatorTypes.narratives);
   const today = getTodayDate();
   const todayHolidayInfo = await isHoliday(today);
 

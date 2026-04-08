@@ -12,9 +12,11 @@ import { formatDate, getTodayDate } from '../lib/utils.js';
 import { createModal } from '../lib/component.js';
 import { isHoliday } from '../lib/holidays.js';
 import { sendEmailNotification, getDepartmentSupervisors } from '../lib/email-notifications.js';
+import { markSidebarIndicatorSeen, sidebarIndicatorTypes } from '../lib/sidebar-indicators.js';
 
 export async function renderMyTasksPage() {
   const profile = getProfile();
+  markSidebarIndicatorSeen(profile?.id, sidebarIndicatorTypes.tasks);
   const holidayInfo = await isHoliday(getTodayDate());
 
   const { data: tasks } = await supabase
