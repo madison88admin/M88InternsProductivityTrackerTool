@@ -79,8 +79,16 @@ export async function renderMyDarDraftPage() {
   const today = new Date();
   const weekStart = getTrackingWeekStart(today);
   const weekEnd = getTrackingWeekEnd(today);
+
+  const previousWeekDate = new Date(weekStart);
+  previousWeekDate.setDate(previousWeekDate.getDate() - 1);
+  const previousWeekStart = getTrackingWeekStart(previousWeekDate);
+  const previousWeekEnd = getTrackingWeekEnd(previousWeekDate);
+
   const weekStartKey = formatDateKey(weekStart);
   const weekEndKey = formatDateKey(weekEnd);
+  const previousWeekStartKey = formatDateKey(previousWeekStart);
+  const previousWeekEndKey = formatDateKey(previousWeekEnd);
 
   renderLayout(`
     <div class="page-header animate-fade-in-up">
@@ -90,14 +98,22 @@ export async function renderMyDarDraftPage() {
 
     <div class="card">
       <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-4">
-        <div>
-          <p class="text-sm font-semibold text-neutral-800">Current tracking week</p>
-          <p class="text-xs text-neutral-500">${formatDate(weekStart)} to ${formatDate(weekEnd)} (Friday to Thursday)</p>
+        <div class="space-y-2">
+          <div>
+            <p class="text-sm font-semibold text-neutral-800">Current tracking week</p>
+            <p class="text-xs text-neutral-500">${formatDate(weekStart)} to ${formatDate(weekEnd)} (Friday to Thursday)</p>
+          </div>
+
+          <div>
+            <label for="dar-week-select" class="block text-xs font-semibold text-neutral-700 mb-1">View week</label>
+            <select id="dar-week-select" class="form-input text-sm min-w-60"></select>
+          </div>
         </div>
-        <div class="flex items-center gap-2">
+
+        <div class="flex items-center gap-2 self-start md:self-center">
           <div class="text-xs text-neutral-500 bg-neutral-100 px-3 py-1 rounded-full inline-flex items-center gap-2">
             ${icons.info}
-            <span id="dar-week-label">Week —</span>
+            <span id="dar-week-label">Week -</span>
           </div>
 
           <div class="flex items-center gap-1" aria-label="Preview zoom controls">
@@ -107,6 +123,8 @@ export async function renderMyDarDraftPage() {
           </div>
         </div>
       </div>
+
+      <p id="dar-week-help" class="text-xs text-neutral-500 mb-4 hidden"></p>
 
       <div id="dar-draft-disabled" class="hidden p-4 rounded-lg border border-neutral-200 bg-neutral-50 text-sm text-neutral-600">
         This feature is currently disabled by administrators.
@@ -132,6 +150,8 @@ export async function renderMyDarDraftPage() {
     const previewHost = el.querySelector('#dar-draft-preview');
     const previewFrame = el.querySelector('#dar-draft-frame');
     const weekLabel = el.querySelector('#dar-week-label');
+    const weekSelect = el.querySelector('#dar-week-select');
+    const weekHelp = el.querySelector('#dar-week-help');
 
     const zoomOutBtn = el.querySelector('#dar-zoom-out');
     const zoomInBtn = el.querySelector('#dar-zoom-in');
@@ -143,8 +163,8 @@ export async function renderMyDarDraftPage() {
     const zoomMax = 1.8;
     const zoomStep = 0.1;
 
-    let cachedPdfArrayBuffer = null;
     let cachedPdfBytes = null;
+    let activeLoadId = 0;
 
     function updateZoomUi() {
       if (!zoomLabel) return;
@@ -166,6 +186,46 @@ export async function renderMyDarDraftPage() {
         await renderPdfPreview(previewHost, previewFrame, cachedPdfBytes, zoomMultiplier);
       } catch (err) {
         console.error('DAR preview render error:', err);
+      }
+    }
+
+    async function loadDarForSelectedWeek(weekOptionsByValue) {
+      const selectedWeek = weekOptionsByValue.get(weekSelect.value);
+      if (!selectedWeek) return;
+
+      const loadId = ++activeLoadId;
+      loadingRow.classList.remove('hidden');
+
+      try {
+        const darData = await fetchDarData(profile.id, selectedWeek.start, selectedWeek.end);
+        if (loadId !== activeLoadId) return;
+
+        const weekNum = calculateInternWeekNumber(darData?.intern?.ojt_start_date, selectedWeek.start);
+        weekLabel.textContent = `${selectedWeek.badgeLabel}: Week ${weekNum}`;
+
+        const doc = await generateDarPdf(darData, weekNum, selectedWeek.start, null, {
+          maskAllowanceUnlessApproved: true,
+          watermarkText: 'DRAFT — PREVIEW ONLY',
+        });
+
+        if (loadId !== activeLoadId) return;
+
+        const pdfArrayBuffer = doc.output('arraybuffer');
+        cachedPdfBytes = new Uint8Array(pdfArrayBuffer);
+        updateZoomUi();
+        await renderPdfPreview(previewHost, previewFrame, cachedPdfBytes, zoomMultiplier);
+      } catch (err) {
+        if (loadId !== activeLoadId) return;
+        console.error('My DAR Draft load error:', err);
+        previewHost.innerHTML = `
+          <div class="p-4 rounded-lg border border-danger-200 bg-danger-50 text-sm text-danger-700">
+            Failed to load your DAR draft. Please try again later.
+          </div>
+        `;
+      } finally {
+        if (loadId === activeLoadId) {
+          loadingRow.classList.add('hidden');
+        }
       }
     }
 
@@ -207,19 +267,56 @@ export async function renderMyDarDraftPage() {
         return;
       }
 
-      const darData = await fetchDarData(profile.id, weekStartKey, weekEndKey);
-      const weekNum = calculateInternWeekNumber(darData?.intern?.ojt_start_date, weekStartKey);
-      weekLabel.textContent = `Week ${weekNum}`;
+      const { data: previousAllowance, error: previousAllowanceErr } = await supabase
+        .from('allowance_periods')
+        .select('status')
+        .eq('intern_id', profile.id)
+        .eq('week_start', previousWeekStartKey)
+        .maybeSingle();
 
-      // Generate the same DAR PDF, but mask allowance amount unless already approved.
-      const doc = await generateDarPdf(darData, weekNum, weekStartKey, null, {
-        maskAllowanceUnlessApproved: true,
-        watermarkText: 'DRAFT — PREVIEW ONLY',
+      if (previousAllowanceErr) throw previousAllowanceErr;
+
+      const previousWeekDeadline = new Date(`${previousWeekEndKey}T23:59:59`);
+      previousWeekDeadline.setDate(previousWeekDeadline.getDate() + 3);
+      const withinPreviousWeekGrace = Date.now() <= previousWeekDeadline.getTime();
+      const previousWeekApproved = previousAllowance?.status === 'approved';
+      const canShowPreviousWeek = !previousWeekApproved || withinPreviousWeekGrace;
+
+      const weekOptions = [
+        {
+          value: 'current',
+          start: weekStartKey,
+          end: weekEndKey,
+          label: `Current week (${formatDate(weekStart)} to ${formatDate(weekEnd)})`,
+          badgeLabel: 'Current week',
+        },
+      ];
+
+      if (canShowPreviousWeek) {
+        weekOptions.push({
+          value: 'previous',
+          start: previousWeekStartKey,
+          end: previousWeekEndKey,
+          label: `Last week (${formatDate(previousWeekStart)} to ${formatDate(previousWeekEnd)})`,
+          badgeLabel: 'Last week',
+        });
+      }
+
+      weekSelect.innerHTML = weekOptions
+        .map(option => `<option value="${option.value}">${option.label}</option>`)
+        .join('');
+
+      const weekOptionsByValue = new Map(weekOptions.map(option => [option.value, option]));
+      weekSelect.addEventListener('change', () => {
+        loadDarForSelectedWeek(weekOptionsByValue);
       });
-      cachedPdfArrayBuffer = doc.output('arraybuffer');
-      cachedPdfBytes = new Uint8Array(cachedPdfArrayBuffer);
-      updateZoomUi();
-      await renderPdfPreview(previewHost, previewFrame, cachedPdfBytes, zoomMultiplier);
+
+      if (canShowPreviousWeek) {
+        weekHelp.classList.remove('hidden');
+        weekHelp.textContent = 'Last week is available while pending approval or during the 3-day transition window.';
+      }
+
+      await loadDarForSelectedWeek(weekOptionsByValue);
     } catch (err) {
       console.error('My DAR Draft load error:', err);
       previewHost.innerHTML = `
@@ -227,7 +324,6 @@ export async function renderMyDarDraftPage() {
           Failed to load your DAR draft. Please try again later.
         </div>
       `;
-    } finally {
       loadingRow.classList.add('hidden');
     }
   }, '/my-dar-draft');
