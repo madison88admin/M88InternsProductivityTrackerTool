@@ -1,211 +1,190 @@
-# M88 Interns Productivity Tracker Tool
+# Madison 88 Interns Productivity Tracker
 
-Centralized web-based system for tracking OJT intern productivity at Madison 88 Business Solutions Asia Inc.
+A web-based platform for managing OJT intern productivity at Madison 88 Business Solutions Asia Inc. The system centralizes attendance, task tracking, daily accomplishment reporting, approvals, allowance workflow, notifications, and auditability in one role-based application.
+
+## Key Features of the Madison 88 Interns Productivity Tracker
+
+### Core Platform Features
+
+- Role-based access control for Admin, HR, Supervisor, and Intern users
+- Secure authentication with password reset, first-admin bootstrap, and protected routes
+- Row Level Security (RLS) policies in Supabase for data isolation and access control
+- Audit logging for key actions and status changes
+- Notification center for approval and workflow events
+- Configurable organization data such as locations, departments, and system settings
+
+### Intern Productivity Features
+
+- Daily attendance with status tracking and approval flow
+- Task assignment visibility, progress updates, and overdue monitoring
+- Daily narrative (DAR) submissions with draft handling and approval workflow
+- Personal allowance tracking view
+- Morning login briefing modal highlighting pending items and priorities
+- OJT completion support with e-signature and submission checks
+
+### Supervisor and HR Features
+
+- Supervisor approvals for attendance, narratives, and task-related records
+- Team attendance and team narrative monitoring views
+- HR attendance overview and allowance management workflows
+- Intern directory and reporting views for operational monitoring
+
+### Reporting and Export Features
+
+- Dashboard analytics with charts
+- PDF and Excel export for reports
+- Historical records for compliance and internal review
 
 ## Tech Stack
 
-- **Vite 7** — Build tool
-- **Tailwind CSS 4** — Styling
-- **Supabase** — Database (PostgreSQL), Authentication, Storage, RLS
-- **Chart.js** — Dashboard charts
-- **SheetJS (xlsx)** — Excel export
-- **jsPDF + AutoTable** — PDF export
-- **Quill.js 2** — Rich text editor for daily narratives
-- **Netlify** — Deployment
+- Vite 7 (frontend build tool)
+- Tailwind CSS 4 (styling)
+- Supabase (PostgreSQL, authentication, storage, RLS)
+- Chart.js (data visualization)
+- Quill 2 (rich text narratives)
+- jsPDF + AutoTable and xlsx (report export)
+- Netlify (deployment)
 
-## Quick Start
+## Requirements
 
-### 1. Clone & Install
+- Node.js 20 or newer
+- npm 9 or newer
+- A Supabase project (for auth, database, and storage)
+
+## Local Setup
+
+### 1. Install dependencies
 
 ```bash
-git clone <repo-url>
-cd M88InternsProductivityTrackerTool
 npm install
 ```
 
-### 2. Supabase Setup
+### 2. Configure environment variables
 
-1. Create a new project at [Supabase](https://supabase.com)
-2. Go to **SQL Editor** and run the schema files in order:
-   - `supabase/001_schema.sql` — Tables, enums, functions, triggers
-   - `supabase/002_rls_policies.sql` — Row-level security policies & storage bucket
-  - `supabase/003...029_*.sql` — Incremental migrations (includes private avatar/signature storage hardening)
-3. Copy your project URL and anon key from **Settings → API**
-
-### 3. Environment Variables
+Create a local env file from the template:
 
 ```bash
 cp .env.example .env
 ```
 
-Edit `.env`:
+Set the values in .env:
+
 ```env
 VITE_SUPABASE_URL=https://your-project.supabase.co
 VITE_SUPABASE_ANON_KEY=your-anon-key-here
-VITE_ADMIN_SECRET_KEY=your-secret-key-for-admin-registration
+VITE_ADMIN_SECRET_KEY=change-this-to-a-strong-secret
 ```
 
-### 4. Run Locally
+### 3. Initialize Supabase schema and migrations
+
+Run SQL files in the supabase folder in order, starting with:
+
+- supabase/001_schema.sql
+- supabase/002_rls_policies.sql
+- then every migration up to the latest file
+
+### 4. Start development server
 
 ```bash
 npm run dev
 ```
 
-Visit `http://localhost:5173`
+Default local URL:
 
-### 5. First-Time Setup
+```text
+http://localhost:5173
+```
 
-1. Navigate to `#/admin-setup`
-2. Enter the admin secret key (from `VITE_ADMIN_SECRET_KEY`)
-3. Register the first admin account
-4. Login and start configuring:
-   - **Locations** — Add office locations with allowed IPs
-   - **Departments** — Create departments
-   - **System Settings** — Configure work hours, late threshold, escalation
-   - **User Management** — Invite supervisors, HR, and interns via email
+## First-Time System Bootstrap
+
+1. Open the app and go to #/admin-setup
+2. Enter the value of VITE_ADMIN_SECRET_KEY
+3. Create the first Admin account
+4. Log in and configure:
+   - locations
+   - departments
+   - system settings
+   - users (supervisor, HR, intern)
+
+## Available Scripts
+
+- npm run dev: start local development server
+- npm run build: produce production build in dist
+- npm run preview: preview the production build locally
 
 ## Deployment (Netlify)
 
-### Option A: Git Deploy
-1. Push repo to GitHub
-2. Connect to Netlify → Import from Git
-3. Build command: `npm run build`
-4. Publish directory: `dist`
-5. Set environment variables in Netlify dashboard:
-   - `VITE_SUPABASE_URL`
-   - `VITE_SUPABASE_ANON_KEY`
-   - `VITE_ADMIN_SECRET_KEY`
+### Option A: Git-based deployment
 
-### Option B: Manual Deploy
+1. Connect the repository in Netlify
+2. Use build command: npm run build
+3. Use publish directory: dist
+4. Add environment variables:
+   - VITE_SUPABASE_URL
+   - VITE_SUPABASE_ANON_KEY
+   - VITE_ADMIN_SECRET_KEY
+
+### Option B: Manual deployment
+
 ```bash
 npm run build
 npx netlify deploy --prod --dir=dist
 ```
 
-## Email Notifications (Brevo)
+## Security Notes
 
-To enable email notifications:
-
-1. Create a [Brevo](https://www.brevo.com) account and get an API key
-2. Create a Supabase Edge Function:
-
-```bash
-supabase functions new send-notification
-```
-
-3. In `supabase/functions/send-notification/index.ts`:
-
-```typescript
-import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
-
-serve(async (req) => {
-  const { to, subject, html } = await req.json();
-
-  const res = await fetch('https://api.brevo.com/v3/smtp/email', {
-    method: 'POST',
-    headers: {
-      'api-key': Deno.env.get('BREVO_API_KEY')!,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      sender: { name: 'M88 Tracker', email: 'noreply@m88.com' },
-      to: [{ email: to }],
-      subject,
-      htmlContent: html,
-    }),
-  });
-
-  return new Response(JSON.stringify({ ok: res.ok }), {
-    headers: { 'Content-Type': 'application/json' },
-  });
-});
-```
-
-4. Set the secret:
-```bash
-supabase secrets set BREVO_API_KEY=your-brevo-api-key
-```
-
-5. Deploy:
-```bash
-supabase functions deploy send-notification
-```
-
-## Secure Asset Download (Authenticated Endpoint)
-
-The system uses a Supabase Edge Function to serve avatars and signatures through an authenticated endpoint, preventing unauthorized access and direct URL sharing.
-
-### Setup
-
-1. Deploy the `download-asset` function:
-```bash
-supabase functions deploy download-asset
-```
-
-2. The function checks authentication on every request and serves assets only to authenticated users
-3. Assets served through: `/functions/v1/download-asset?bucket=avatars&path=filename.jpg`
-
-**Key security features:**
-- ✅ Authenticated requests only (checks JWT token)
-- ✅ No direct URLs exposed to browser
-- ✅ Prevents direct file downloads and sharing
-- ✅ E-signatures protected from malicious actors
-
-## Roles & Permissions
-
-| Role | Access |
-|------|--------|
-| **Admin** | Full system access — user management, locations, departments, all approvals, audit logs, settings |
-| **HR** | Attendance overview, allowance management, reports, intern directory, departments |
-| **Supervisor** | Approvals (attendance, narratives, tasks), task management, team views |
-| **Intern** | Personal attendance, tasks, narratives, allowance history |
+- Supabase RLS policies restrict records by user role and ownership
+- Storage access is protected through authenticated flows
+- Sensitive actions are logged to support operational traceability
 
 ## Project Structure
 
-```
+```text
 src/
-├── main.js                  # App entry point — routes & auth guard
-├── styles/main.css          # Tailwind CSS + custom components
-├── lib/
-│   ├── supabase.js          # Supabase client
-│   ├── router.js            # Hash-based SPA router
-│   ├── auth.js              # Authentication service
-│   ├── toast.js             # Toast notifications
-│   ├── audit.js             # Audit logging
-│   ├── utils.js             # Date/time/formatting helpers
-│   ├── component.js         # Render, modal, dialog helpers
-│   └── icons.js             # SVG icon library
-├── components/
-│   └── layout.js            # App shell with role-based sidebar
-├── pages/
-│   ├── login.js             # Login
-│   ├── admin-setup.js       # First admin registration
-│   ├── forgot-password.js   # Password reset
-│   ├── dashboard.js         # Role-specific dashboards
-│   ├── attendance.js        # Intern attendance (4 punches)
-│   ├── my-tasks.js          # Intern task view
-│   ├── narratives.js        # Daily narratives (Quill editor)
-│   ├── my-allowance.js      # Intern allowance history
-│   ├── task-management.js   # Supervisor task CRUD
-│   ├── approvals.js         # Supervisor approval workflow
-│   ├── team-attendance.js   # Supervisor team attendance view
-│   ├── team-narratives.js   # Supervisor team narratives view
-│   ├── user-management.js   # Admin user management
-│   ├── allowance-management.js # HR allowance config & approval
-│   ├── reports.js           # Reports with Chart.js + XLSX/PDF export
-│   ├── intern-directory.js  # HR intern listing
-│   ├── attendance-overview.js # HR/Admin attendance overview
-│   ├── departments.js       # Admin department CRUD
-│   ├── locations.js         # Admin location CRUD
-│   ├── audit-logs.js        # Admin audit trail viewer
-│   ├── system-settings.js   # Admin system configuration
-│   ├── notifications.js     # In-app notification center
-│   └── profile.js           # User profile & password change
+  main.js
+  components/
+    layout.js
+  lib/
+    auth.js
+    audit.js
+    login-briefing.js
+    ojt-completion.js
+    router.js
+    storage.js
+    supabase.js
+    ...
+  pages/
+    admin-setup.js
+    approvals.js
+    attendance.js
+    dashboard.js
+    my-tasks.js
+    narratives.js
+    reports.js
+    system-settings.js
+    task-management.js
+    team-attendance.js
+    team-narratives.js
+    user-management.js
+    ...
 supabase/
-├── 001_schema.sql           # Database schema
-└── 002_rls_policies.sql     # RLS policies & storage
+  001_schema.sql
+  002_rls_policies.sql
+  ... latest migration files
+docs/manuals/
+  admin-user-manual.md
+  intern-user-manual.md
+  supervisor-user-manual.md
 ```
+
+## Documentation
+
+- docs/manuals/admin-user-manual.md
+- docs/manuals/intern-user-manual.md
+- docs/manuals/supervisor-user-manual.md
+- TESTING_GUIDE.md
+- LOGIN_BRIEFING_GUIDE.md
 
 ## License
 
-Proprietary — Madison 88 Business Solutions Asia Inc.
+UNLICENSED. Proprietary software owned by Madison 88 Business Solutions Asia Inc.
