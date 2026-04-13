@@ -995,11 +995,20 @@ async function fetchReportData(type, dateFrom, dateTo, locationId, departmentId)
     }
 
     case 'tasks': {
-      const { data } = await supabase
+      // Use explicit UTC bounds to avoid ambiguous timestamp parsing in PostgREST.
+      const startIso = `${dateFrom}T00:00:00.000Z`;
+      const endExclusiveDate = new Date(`${dateTo}T00:00:00.000Z`);
+      endExclusiveDate.setUTCDate(endExclusiveDate.getUTCDate() + 1);
+      const endExclusiveIso = endExclusiveDate.toISOString();
+
+      const { data, error } = await supabase
         .from('tasks')
-        .select('id, title, status, priority, due_date, created_at, assignee:profiles!tasks_assigned_to_fkey(full_name, department_id, departments(name))')
-        .gte('created_at', dateFrom)
-        .lte('created_at', dateTo + 'T23:59:59');
+        .select('id, title, status, due_date, created_at, assignee:profiles!tasks_assigned_to_fkey(full_name, department_id, departments(name))')
+        .gte('created_at', startIso)
+        .lt('created_at', endExclusiveIso);
+
+      if (error) throw error;
+
       let tasks = data || [];
       if (departmentId) tasks = tasks.filter(t => t.assignee?.department_id === departmentId);
       return tasks;
