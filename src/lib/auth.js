@@ -30,12 +30,11 @@ function wait(ms) {
 async function logAuthAudit(action, userId, details = null) {
   const timeout = createTimeoutController(AUTH_AUDIT_TIMEOUT_MS);
   try {
-    const { error } = await supabase.from('audit_logs').insert({
-      user_id: userId || null,
-      action,
-      entity_type: 'auth',
-      entity_id: userId || null,
-      details: details || null,
+    const { error } = await supabase.rpc('record_audit_log', {
+      p_action: action,
+      p_entity_type: 'auth',
+      p_entity_id: userId || null,
+      p_details: details || null,
     }).abortSignal(timeout.signal);
 
     if (error) {
@@ -56,49 +55,7 @@ async function logAuthAudit(action, userId, details = null) {
 }
 
 async function logAuthAuditFallback(action, userId, details = null) {
-  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-  const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-
-  if (!supabaseUrl || !supabaseAnonKey) {
-    return false;
-  }
-
-  const timeout = createTimeoutController(AUTH_AUDIT_TIMEOUT_MS);
-  try {
-    const res = await fetch(`${supabaseUrl}/rest/v1/audit_logs`, {
-      method: 'POST',
-      headers: {
-        apikey: supabaseAnonKey,
-        Authorization: `Bearer ${supabaseAnonKey}`,
-        'Content-Type': 'application/json',
-        Prefer: 'return=minimal',
-      },
-      body: JSON.stringify({
-        user_id: userId || null,
-        action,
-        entity_type: 'auth',
-        entity_id: userId || null,
-        details: details || null,
-      }),
-      keepalive: true,
-      signal: timeout.signal,
-    });
-
-    if (!res.ok) {
-      throw new Error(`REST audit insert failed (${res.status})`);
-    }
-
-    return true;
-  } catch (err) {
-    if (isAbortError(err)) {
-      console.warn('Auth audit REST fallback timed out.');
-    } else {
-      console.error('Auth audit REST fallback failed:', err);
-    }
-    return false;
-  } finally {
-    timeout.clear();
-  }
+  return logAuthAudit(action, userId, details);
 }
 
 /**
@@ -229,7 +186,7 @@ export async function logout() {
   // Clear app auth state first so route guards immediately treat user as logged out.
   currentSession = { user: null, profile: null };
 
-  // Fire-and-forget audit via REST fallback (session-independent) so logout UI never blocks.
+  // Fire-and-forget audit so logout UI never blocks.
   if (userId) {
     void logAuthAuditFallback('auth.logout', userId, details).then((logged) => {
       if (!logged) {

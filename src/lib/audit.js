@@ -3,7 +3,6 @@
  * Logs all user actions to the audit_logs table for compliance.
  */
 import { supabase } from './supabase.js';
-import { getCurrentUser } from './auth.js';
 
 // Cache the client IP for the session — fetched once, reused on every log call
 let cachedIp = null;
@@ -40,18 +39,16 @@ getClientIp().catch(() => {});
  * @param {object} [details] - Additional context (old values, new values, etc.)
  */
 export async function logAudit(action, entityType, entityId = null, details = null) {
-  const user = getCurrentUser();
   const ip = cachedIp || null;
 
   try {
     const result = await withTimeout(
-      supabase.from('audit_logs').insert({
-        user_id: user?.id || null,
-        action,
-        entity_type: entityType,
-        entity_id: entityId,
-        details: details || null,
-        ip_address: ip,
+      supabase.rpc('record_audit_log', {
+        p_action: action,
+        p_entity_type: entityType,
+        p_entity_id: entityId,
+        p_details: details || null,
+        p_ip_address: ip,
       }),
       AUDIT_INSERT_TIMEOUT_MS,
     );

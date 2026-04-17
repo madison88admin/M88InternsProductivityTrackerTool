@@ -8,7 +8,7 @@ import { supabase } from '../lib/supabase.js';
 import { showToast } from '../lib/toast.js';
 import { logAudit } from '../lib/audit.js';
 import { icons } from '../lib/icons.js';
-import { formatDate, formatTime, formatHoursDisplay, getPublicIP, isLateArrival, isOutsideAllowedHours } from '../lib/utils.js';
+import { formatDate, formatTime, formatHoursDisplay, getPublicIP, isLateArrival, isOutsideAllowedHours, getTrackingWeekStart, getTrackingWeekEnd } from '../lib/utils.js';
 import { createModal } from '../lib/component.js';
 import { isHoliday } from '../lib/holidays.js';
 import { sendEmailNotification, getDepartmentSupervisors } from '../lib/email-notifications.js';
@@ -63,20 +63,12 @@ function getTodayDateInPH() {
 
 function getWeekRangeInPH() {
   const nowPH = getNowInPH();
-  const day = nowPH.getDay();
-  const mondayOffset = day === 0 ? -6 : 1 - day;
-
-  const monday = new Date(nowPH);
-  monday.setDate(nowPH.getDate() + mondayOffset);
-  monday.setHours(0, 0, 0, 0);
-
-  const friday = new Date(monday);
-  friday.setDate(monday.getDate() + 4);
-  friday.setHours(23, 59, 59, 999);
+  const weekStartDate = getTrackingWeekStart(nowPH);
+  const weekEndDate = getTrackingWeekEnd(nowPH);
 
   return {
-    weekStart: toDateKey(monday),
-    weekEnd: toDateKey(friday),
+    weekStart: toDateKey(weekStartDate),
+    weekEnd: toDateKey(weekEndDate),
   };
 }
 
@@ -432,45 +424,19 @@ export async function renderAttendancePage() {
         try {
           const ip = await getPublicIP();
           const ipForDb = sanitizeIpForInet(ip);
-          const now = new Date().toISOString();
+          const { data, error } = await supabase.rpc('log_attendance_punch', {
+            p_punch_type: punchType,
+            p_ip_address: ipForDb,
+          });
 
-          if (!todayRecord) {
-            // Create new attendance record
-            const { data, error } = await supabase
-              .from('attendance_records')
-              .insert({
-                intern_id: profile.id,
-                date: today,
-                [punchType]: now,
-                [`ip_address_${punchType.replace('time_', '')}`]: ipForDb,
-                supervisor_id: profile.supervisor_id,
-              })
-              .select()
-              .single();
+          if (error) throw error;
+          todayRecord = Array.isArray(data) ? data[0] : data;
 
-            if (error) throw error;
-            todayRecord = data;
-          } else {
-            // Validate IP consistency (use first available IP as reference)
-            const firstIP = todayRecord.ip_address_in_1 || todayRecord.ip_address_in_2;
-            if (firstIP && ipForDb && ipForDb !== firstIP) {
-              showToast('Your IP address has changed. All daily punches must come from the same network.', 'error');
-              punchBtn.disabled = false;
-              punchBtn.innerHTML = `${icons.clock}<span class="ml-2">${getPunchLabel(punchType)}</span>`;
-              return;
-            }
-
-            const { error } = await supabase
-              .from('attendance_records')
-              .update({
-                [punchType]: now,
-                [`ip_address_${punchType.replace('time_', '')}`]: ipForDb,
-              })
-              .eq('id', todayRecord.id);
-
-            if (error) throw error;
+          if (!todayRecord?.id) {
+            throw new Error('Attendance punch did not return a saved record');
           }
 
+          const now = todayRecord[punchType] || new Date().toISOString();
           const flags = [];
           if (punchType === 'time_in_1' && isLateArrival(now)) flags.push('late');
           if (isOutsideAllowedHours(now)) flags.push('outside_hours');
