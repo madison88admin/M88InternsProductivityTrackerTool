@@ -12,6 +12,8 @@ import { formatDate, formatTime, formatDateTime, formatHoursDisplay, getTodayDat
 import { createModal } from '../lib/component.js';
 import { sendEmailNotification, getApprovalResultTemplate } from '../lib/email-notifications.js';
 
+let approvalsPanelMode = 'list';
+
 export async function renderApprovalsPage() {
   const profile = getProfile();
   const role = getUserRole();
@@ -64,6 +66,12 @@ export async function renderApprovalsPage() {
   
   const actionablePendingCount = allPendingApprovals.filter(a => isAdmin || a.type !== 'attendance_correction').length;
   const actionableDeptPendingCount = deptPendingApprovals.filter(a => a.type !== 'attendance_correction').length;
+  const isDailyApprovalType = (type) => type === 'attendance' || type === 'narrative';
+  const pendingDailyApprovals = pendingApprovals.filter(a => isDailyApprovalType(a.type));
+  const pendingOtherApprovals = pendingApprovals.filter(a => !isDailyApprovalType(a.type));
+  const pendingSummaryBuckets = approvalsPanelMode === 'summary'
+    ? await buildPendingDaySummaries(pendingDailyApprovals)
+    : [];
 
   renderLayout(`
     <div class="page-header animate-fade-in-up">
@@ -100,15 +108,19 @@ export async function renderApprovalsPage() {
     <!-- Pending Approvals -->
     <div class="card mb-6 ${isAdmin && profile.department_id ? 'border-l-4 border-l-neutral-300' : ''}">
       <div class="flex items-center justify-between mb-4">
-        <h3 class="text-base font-bold text-neutral-900">${isAdmin && profile.department_id ? 'Other Pending' : 'Pending'} (${pendingApprovals.length})</h3>
+        <h3 class="text-base font-bold text-neutral-900">${approvalsPanelMode === 'summary' ? 'Day Summary' : (isAdmin && profile.department_id ? 'Other Pending' : 'Pending')} (${pendingApprovals.length})</h3>
         <div class="flex gap-3 items-center">
+          <div class="filter-tabs mb-0!">
+            <button type="button" class="filter-tab approvals-panel-toggle ${approvalsPanelMode === 'list' ? 'active' : ''}" data-mode="list">List View</button>
+            <button type="button" class="filter-tab approvals-panel-toggle ${approvalsPanelMode === 'summary' ? 'active' : ''}" data-mode="summary">Day Summary</button>
+          </div>
           <select id="pending-sort" class="form-input py-2 px-3 text-sm min-w-max">
             <option value="date-desc">Sort: Newest First</option>
             <option value="date-asc">Sort: Oldest First</option>
             <option value="intern-asc">Sort: Intern A-Z</option>
             <option value="type">Sort: By Type</option>
           </select>
-          ${pendingApprovals.length > 0 && (actionablePendingCount - actionableDeptPendingCount) > 0 ? `
+          ${approvalsPanelMode === 'list' && pendingApprovals.length > 0 && (actionablePendingCount - actionableDeptPendingCount) > 0 ? `
             <button id="bulk-approve-btn" class="btn-sm btn-success">
               ${icons.check} Approve All (${actionablePendingCount - actionableDeptPendingCount})
             </button>
@@ -117,19 +129,73 @@ export async function renderApprovalsPage() {
       </div>
 
       ${pendingApprovals.length > 0 ? `
-        <div class="space-y-3" id="pending-approvals-container">
-          ${pendingApprovals.map(a => renderApprovalCard(a, isAdmin)).join('')}
-        </div>
+        ${approvalsPanelMode === 'summary' ? `
+          <div class="space-y-4" id="pending-approvals-container">
+            ${pendingSummaryBuckets.length > 0 ? pendingSummaryBuckets.map(bucket => renderPendingSummaryCard(bucket)).join('') : `
+              <div class="text-center py-8 text-neutral-400 border border-dashed border-neutral-200 rounded-lg">
+                <p>No daily attendance or narrative approvals to summarize</p>
+              </div>
+            `}
+            ${pendingOtherApprovals.length > 0 ? `
+              <div class="pt-2 border-t border-neutral-200">
+                <h4 class="text-sm font-semibold text-neutral-700 mb-3">Other Pending Items</h4>
+                <div class="space-y-3">
+                  ${pendingOtherApprovals.map(a => renderApprovalCard(a, isAdmin)).join('')}
+                </div>
+              </div>
+            ` : ''}
+          </div>
+        ` : `
+          <div class="space-y-3" id="pending-approvals-container">
+            ${pendingApprovals.map(a => renderApprovalCard(a, isAdmin)).join('')}
+          </div>
+        `}
       ` : `
         <div class="text-center py-8 text-neutral-400">
-          <p>No other pending approvals</p>
+          <p>${isAdmin && profile.department_id ? 'No other pending approvals' : 'No pending approvals'}</p>
         </div>
       `}
     </div>
 
     <!-- Reviewed Approvals -->
     <div class="card">
-      <h3 class="text-base font-bold text-neutral-900 mb-4">Review History</h3>
+      <div class="flex items-center justify-between mb-4">
+        <h3 class="text-base font-bold text-neutral-900">Review History</h3>
+        <div class="text-sm text-neutral-500">Total: ${reviewedApprovals.length}</div>
+      </div>
+      
+      <div class="grid grid-cols-1 md:grid-cols-4 gap-3 mb-4">
+        <div>
+          <input type="text" id="history-search" class="form-input w-full" placeholder="Search by intern or type..." />
+        </div>
+        <div>
+          <select id="history-status-filter" class="form-input w-full">
+            <option value="">All Statuses</option>
+            <option value="approved">Approved</option>
+            <option value="rejected">Rejected</option>
+          </select>
+        </div>
+        <div>
+          <select id="history-type-filter" class="form-input w-full">
+            <option value="">All Types</option>
+            <option value="attendance">Attendance</option>
+            <option value="narrative">Narrative</option>
+            <option value="task_status">Task Status</option>
+            <option value="task_submission">Task Submission</option>
+            <option value="attendance_correction">Attendance Correction</option>
+          </select>
+        </div>
+        <div>
+          <select id="history-sort" class="form-input w-full">
+            <option value="date-desc">Sort: Newest First</option>
+            <option value="date-asc">Sort: Oldest First</option>
+            <option value="intern-asc">Sort: Intern A-Z</option>
+            <option value="status">Sort: By Status</option>
+            <option value="type">Sort: By Type</option>
+          </select>
+        </div>
+      </div>
+
       <div class="overflow-x-auto">
         <table class="data-table">
           <thead>
@@ -143,7 +209,7 @@ export async function renderApprovalsPage() {
               <th>Approved By</th>
             </tr>
           </thead>
-          <tbody>
+          <tbody id="history-table-body">
             ${reviewedApprovals.slice(0, 50).map(a => `
               <tr>
                 <td><span class="badge-info">${a.type.replace('_', ' ')}</span></td>
@@ -163,8 +229,11 @@ export async function renderApprovalsPage() {
           </tbody>
         </table>
       </div>
+      <div class="text-xs text-neutral-400 mt-2">Showing up to 50 most recent records</div>
     </div>
   `, (el) => {
+    const summaryBucketMap = new Map(pendingSummaryBuckets.map(bucket => [bucket.key, bucket]));
+
     // Sorting function
     function sortApprovals(approvalsToSort, sortBy) {
       const sorted = [...approvalsToSort];
@@ -196,7 +265,28 @@ export async function renderApprovalsPage() {
       container.querySelectorAll('.review-task-btn').forEach(btn => {
         btn.addEventListener('click', () => openTaskSubmissionReviewModal(btn.dataset.approvalId, approvals));
       });
+      container.querySelectorAll('.pending-day-details-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const summary = summaryBucketMap.get(btn.dataset.summaryKey);
+          if (summary) openDailySummaryModal(summary, approvals);
+        });
+      });
+      container.querySelectorAll('.pending-day-approve-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const summary = summaryBucketMap.get(btn.dataset.summaryKey);
+          if (summary) approveDailySummary(summary, approvals, el);
+        });
+      });
     }
+
+    el.querySelectorAll('.approvals-panel-toggle').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const nextMode = btn.dataset.mode || 'list';
+        if (nextMode === approvalsPanelMode) return;
+        approvalsPanelMode = nextMode;
+        await renderApprovalsPage();
+      });
+    });
 
     // Department pending sort handler
     el.querySelector('#dept-pending-sort')?.addEventListener('change', (e) => {
@@ -290,6 +380,81 @@ export async function renderApprovalsPage() {
       }
       renderApprovalsPage();
     });
+
+    // Review History filtering and sorting
+    function updateHistoryTable() {
+      let filteredApprovals = [...reviewedApprovals.slice(0, 50)];
+      const searchTerm = el.querySelector('#history-search')?.value.toLowerCase() || '';
+      const statusFilter = el.querySelector('#history-status-filter')?.value || '';
+      const typeFilter = el.querySelector('#history-type-filter')?.value || '';
+      const sortBy = el.querySelector('#history-sort')?.value || 'date-desc';
+
+      // Apply filters
+      if (searchTerm) {
+        filteredApprovals = filteredApprovals.filter(a =>
+          (a.intern?.full_name || '').toLowerCase().includes(searchTerm) ||
+          a.type.toLowerCase().includes(searchTerm)
+        );
+      }
+
+      if (statusFilter) {
+        filteredApprovals = filteredApprovals.filter(a => a.status === statusFilter);
+      }
+
+      if (typeFilter) {
+        filteredApprovals = filteredApprovals.filter(a => a.type === typeFilter);
+      }
+
+      // Apply sorting
+      const sorted = [...filteredApprovals];
+      switch(sortBy) {
+        case 'date-asc':
+          sorted.sort((a, b) => new Date(a.submitted_at) - new Date(b.submitted_at));
+          break;
+        case 'intern-asc':
+          sorted.sort((a, b) => (a.intern?.full_name || '').localeCompare(b.intern?.full_name || ''));
+          break;
+        case 'status':
+          sorted.sort((a, b) => a.status.localeCompare(b.status));
+          break;
+        case 'type':
+          sorted.sort((a, b) => a.type.localeCompare(b.type));
+          break;
+        case 'date-desc':
+        default:
+          sorted.sort((a, b) => new Date(b.submitted_at) - new Date(a.submitted_at));
+      }
+
+      // Update table
+      const tableBody = el.querySelector('#history-table-body');
+      if (tableBody) {
+        if (sorted.length === 0) {
+          tableBody.innerHTML = '<tr><td colspan="7" class="text-center text-neutral-400 py-8">No records match your filters</td></tr>';
+        } else {
+          tableBody.innerHTML = sorted.map(a => `
+            <tr>
+              <td><span class="badge-info">${a.type.replace('_', ' ')}</span></td>
+              <td>${a.intern?.full_name || '—'}</td>
+              <td>
+                <span class="badge-${a.status === 'approved' ? 'approved' : 'rejected'}">
+                  ${a.status}
+                </span>
+              </td>
+              <td class="max-w-xs truncate">${a.comments || '—'}</td>
+              <td>${formatDate(a.submitted_at)}</td>
+              <td>${a.reviewed_at ? formatDateTime(a.reviewed_at) : '—'}</td>
+              <td>${a.status === 'approved' ? (a.reviewer?.full_name || '—') : '—'}</td>
+            </tr>
+          `).join('');
+        }
+      }
+    }
+
+    // Attach history filter event listeners
+    el.querySelector('#history-search')?.addEventListener('input', updateHistoryTable);
+    el.querySelector('#history-status-filter')?.addEventListener('change', updateHistoryTable);
+    el.querySelector('#history-type-filter')?.addEventListener('change', updateHistoryTable);
+    el.querySelector('#history-sort')?.addEventListener('change', updateHistoryTable);
   }, '/approvals');
 }
 
@@ -330,6 +495,288 @@ function renderApprovalCard(approval, isAdmin = false) {
       </div>
     </div>
   `;
+}
+
+async function buildPendingDaySummaries(approvals) {
+  const dailyApprovals = approvals.filter(a => a.type === 'attendance' || a.type === 'narrative');
+  if (dailyApprovals.length === 0) return [];
+
+  const attendanceIds = dailyApprovals
+    .filter(a => a.type === 'attendance')
+    .map(a => a.entity_id);
+  const narrativeIds = dailyApprovals
+    .filter(a => a.type === 'narrative')
+    .map(a => a.entity_id);
+
+  const [attendanceRes, narrativeRes] = await Promise.all([
+    attendanceIds.length > 0
+      ? supabase.from('attendance_records').select('id, intern_id, date').in('id', attendanceIds)
+      : Promise.resolve({ data: [] }),
+    narrativeIds.length > 0
+      ? supabase.from('narratives').select('id, intern_id, date, session').in('id', narrativeIds)
+      : Promise.resolve({ data: [] }),
+  ]);
+
+  const attendanceById = new Map((attendanceRes.data || []).map(record => [record.id, record]));
+  const narrativeById = new Map((narrativeRes.data || []).map(record => [record.id, record]));
+  const summaryMap = new Map();
+
+  for (const approval of dailyApprovals) {
+    const relatedRecord = approval.type === 'attendance'
+      ? attendanceById.get(approval.entity_id)
+      : narrativeById.get(approval.entity_id);
+
+    if (!relatedRecord?.date) continue;
+
+    const key = `${approval.intern_id}::${relatedRecord.date}`;
+    if (!summaryMap.has(key)) {
+      summaryMap.set(key, {
+        key,
+        internId: approval.intern_id,
+        internName: approval.intern?.full_name || 'Unknown',
+        internEmail: approval.intern?.email || '',
+        departmentName: approval.intern?.departments?.name || '',
+        date: relatedRecord.date,
+        pendingApprovalIds: [],
+        attendanceApprovalId: null,
+        morningNarrativeApprovalId: null,
+        afternoonNarrativeApprovalId: null,
+        totalPendingCount: 0,
+      });
+    }
+
+    const summary = summaryMap.get(key);
+    summary.pendingApprovalIds.push(approval.id);
+    summary.totalPendingCount += 1;
+
+    if (approval.type === 'attendance') {
+      summary.attendanceApprovalId = approval.id;
+    } else if (relatedRecord.session === 'morning') {
+      summary.morningNarrativeApprovalId = approval.id;
+    } else if (relatedRecord.session === 'afternoon') {
+      summary.afternoonNarrativeApprovalId = approval.id;
+    }
+  }
+
+  return [...summaryMap.values()].sort((a, b) => {
+    const dateCompare = b.date.localeCompare(a.date);
+    if (dateCompare !== 0) return dateCompare;
+    return (a.internName || '').localeCompare(b.internName || '');
+  });
+}
+
+function renderPendingSummaryCard(summary) {
+  const hasAttendance = Boolean(summary.attendanceApprovalId);
+  const hasMorning = Boolean(summary.morningNarrativeApprovalId);
+  const hasAfternoon = Boolean(summary.afternoonNarrativeApprovalId);
+
+  const chipClass = 'px-3 py-2 rounded-lg border border-neutral-200 bg-neutral-50 text-left';
+
+  return `
+    <div class="border border-neutral-200 rounded-lg p-4 hover:bg-neutral-50 transition-colors">
+      <div class="flex items-center justify-between gap-4 mb-3">
+        <div>
+          <div class="flex items-center gap-2 mb-1 flex-wrap">
+            <span class="badge-info">Day Summary</span>
+            <span class="font-medium text-neutral-900">${summary.internName}</span>
+            ${summary.departmentName ? `<span class="text-xs text-neutral-400">${summary.departmentName}</span>` : ''}
+          </div>
+          <p class="text-sm text-neutral-500">${formatDate(summary.date)} · ${summary.totalPendingCount} pending item(s)</p>
+        </div>
+        <div class="flex gap-2">
+          <button class="btn-sm btn-secondary pending-day-details-btn" data-summary-key="${summary.key}" title="View Day Summary">
+            ${icons.eye}
+          </button>
+          ${summary.totalPendingCount > 0 ? `
+            <button class="btn-sm btn-success pending-day-approve-btn" data-summary-key="${summary.key}" title="Approve All Pending for This Day">
+              ${icons.check}
+            </button>
+          ` : ''}
+        </div>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <div class="${chipClass}">
+          <p class="text-xs text-neutral-500 mb-1">Attendance</p>
+          <p class="text-sm font-semibold ${hasAttendance ? 'text-warning-700' : 'text-neutral-400'}">${hasAttendance ? 'Pending review' : 'No pending attendance'}</p>
+        </div>
+        <div class="${chipClass}">
+          <p class="text-xs text-neutral-500 mb-1">Morning Narrative</p>
+          <p class="text-sm font-semibold ${hasMorning ? 'text-warning-700' : 'text-neutral-400'}">${hasMorning ? 'Pending review' : 'No pending narrative'}</p>
+        </div>
+        <div class="${chipClass}">
+          <p class="text-xs text-neutral-500 mb-1">Afternoon Narrative</p>
+          <p class="text-sm font-semibold ${hasAfternoon ? 'text-warning-700' : 'text-neutral-400'}">${hasAfternoon ? 'Pending review' : 'No pending narrative'}</p>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+async function openDailySummaryModal(summary, approvals) {
+  const approvalMap = new Map(approvals.map(approval => [approval.id, approval]));
+
+  createModal(`${summary.internName} - ${formatDate(summary.date)}`, `
+    <div class="flex items-center justify-center py-12">
+      <div class="text-center">
+        <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600 mb-3"></div>
+        <p class="text-sm text-neutral-500">Loading day summary...</p>
+      </div>
+    </div>
+  `, async (el, close) => {
+    const [attendanceRes, narrativesRes] = await Promise.all([
+      supabase
+        .from('attendance_records')
+        .select('*')
+        .eq('intern_id', summary.internId)
+        .eq('date', summary.date)
+        .maybeSingle(),
+      supabase
+        .from('narratives')
+        .select('*, task:tasks(title)')
+        .eq('intern_id', summary.internId)
+        .eq('date', summary.date)
+        .order('session', { ascending: true }),
+    ]);
+
+    const attendance = attendanceRes.data || null;
+    const narratives = narrativesRes.data || [];
+    const morningNarrative = narratives.find(narrative => narrative.session === 'morning') || null;
+    const afternoonNarrative = narratives.find(narrative => narrative.session === 'afternoon') || null;
+
+    const attendancePending = summary.attendanceApprovalId ? approvalMap.get(summary.attendanceApprovalId) : null;
+    const morningPending = summary.morningNarrativeApprovalId ? approvalMap.get(summary.morningNarrativeApprovalId) : null;
+    const afternoonPending = summary.afternoonNarrativeApprovalId ? approvalMap.get(summary.afternoonNarrativeApprovalId) : null;
+
+    const renderSection = (title, record, pendingApproval, bodyHtml) => `
+      <div class="border border-neutral-200 rounded-xl p-4 ${pendingApproval ? 'bg-warning-50/30' : 'bg-neutral-50'}">
+        <div class="flex items-center justify-between gap-3 mb-3">
+          <div>
+            <p class="text-sm font-semibold text-neutral-900">${title}</p>
+            ${pendingApproval ? `<p class="text-xs text-warning-700">Pending approval</p>` : `<p class="text-xs text-neutral-400">No pending approval</p>`}
+          </div>
+          <span class="badge-${record ? (record.status === 'approved' ? 'approved' : record.status === 'rejected' ? 'rejected' : 'pending') : 'pending'}">
+            ${record ? record.status : 'missing'}
+          </span>
+        </div>
+        ${bodyHtml}
+      </div>
+    `;
+
+    const attendanceBody = attendance ? `
+      <div class="grid grid-cols-2 gap-3 text-sm">
+        <div class="p-3 bg-white rounded-lg border border-neutral-200">
+          <p class="text-xs text-neutral-500">Morning In</p>
+          <p class="font-medium">${attendance.time_in_1 ? formatTime(attendance.time_in_1) : '—'}</p>
+        </div>
+        <div class="p-3 bg-white rounded-lg border border-neutral-200">
+          <p class="text-xs text-neutral-500">Lunch Out</p>
+          <p class="font-medium">${attendance.time_out_1 ? formatTime(attendance.time_out_1) : '—'}</p>
+        </div>
+        <div class="p-3 bg-white rounded-lg border border-neutral-200">
+          <p class="text-xs text-neutral-500">Afternoon In</p>
+          <p class="font-medium">${attendance.time_in_2 ? formatTime(attendance.time_in_2) : '—'}</p>
+        </div>
+        <div class="p-3 bg-white rounded-lg border border-neutral-200">
+          <p class="text-xs text-neutral-500">End of Day</p>
+          <p class="font-medium">${attendance.time_out_2 ? formatTime(attendance.time_out_2) : '—'}</p>
+        </div>
+      </div>
+      <div class="mt-3 grid grid-cols-2 gap-3 text-sm">
+        <div class="p-3 bg-white rounded-lg border border-neutral-200">
+          <p class="text-xs text-neutral-500">Total Hours</p>
+          <p class="font-medium">${formatHoursDisplay(attendance.total_hours || 0)}</p>
+        </div>
+        <div class="p-3 bg-white rounded-lg border border-neutral-200">
+          <p class="text-xs text-neutral-500">Status</p>
+          <p class="font-medium capitalize">${attendance.status}</p>
+        </div>
+      </div>
+      ${attendance.is_late ? '<p class="text-xs text-warning-600 mt-3">Late arrival flagged</p>' : ''}
+      ${attendance.is_outside_hours ? '<p class="text-xs text-danger-600 mt-1">Outside hours flagged</p>' : ''}
+    ` : '<p class="text-sm text-neutral-400">No attendance record found for this day.</p>';
+
+    const narrativeBody = (narrative) => narrative ? `
+      <div class="space-y-3">
+        ${narrative.task ? `<p class="text-xs text-primary-600 font-medium">Task: ${narrative.task.title}</p>` : ''}
+        <div class="prose prose-sm text-neutral-700 text-sm border border-neutral-200 rounded-lg p-3 bg-white">${narrative.content}</div>
+        ${narrative.hours ? `<p class="text-xs text-neutral-400">Hours: ${formatHoursDisplay(narrative.hours)}</p>` : ''}
+        ${narrative.edited_at ? `<p class="text-xs text-info-600">Edited: ${formatDateTime(narrative.edited_at)}</p>` : ''}
+        ${narrative.is_late_submission ? '<p class="text-xs text-warning-600">Late submission</p>' : ''}
+      </div>
+    ` : '<p class="text-sm text-neutral-400">No narrative found for this session.</p>';
+
+    const contentHtml = `
+      <div class="space-y-4">
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <div class="p-3 bg-neutral-50 rounded-lg">
+            <p class="text-xs text-neutral-500">Intern</p>
+            <p class="font-medium">${summary.internName}</p>
+          </div>
+          <div class="p-3 bg-neutral-50 rounded-lg">
+            <p class="text-xs text-neutral-500">Date</p>
+            <p class="font-medium">${formatDate(summary.date)}</p>
+          </div>
+          <div class="p-3 bg-neutral-50 rounded-lg">
+            <p class="text-xs text-neutral-500">Pending Items</p>
+            <p class="font-medium">${summary.totalPendingCount}</p>
+          </div>
+        </div>
+
+        ${renderSection('Attendance', attendance, attendancePending, attendanceBody)}
+        ${renderSection('Morning Narrative', morningNarrative, morningPending, narrativeBody(morningNarrative))}
+        ${renderSection('Afternoon Narrative', afternoonNarrative, afternoonPending, narrativeBody(afternoonNarrative))}
+
+        <div class="flex justify-end gap-3 pt-4 border-t border-neutral-200">
+          <button id="day-summary-close-btn" class="btn-secondary">Close</button>
+          ${summary.totalPendingCount > 0 ? `<button id="day-summary-approve-btn" class="btn-success">${icons.check} Approve All Pending</button>` : ''}
+        </div>
+      </div>
+    `;
+
+    el.querySelector('.modal-body').innerHTML = contentHtml;
+    el.querySelector('#day-summary-close-btn')?.addEventListener('click', close);
+    el.querySelector('#day-summary-approve-btn')?.addEventListener('click', async () => {
+      await approveDailySummary(summary, approvals, el, close);
+    });
+  });
+}
+
+async function approveDailySummary(summary, approvals, container, close) {
+  const pendingApprovals = summary.pendingApprovalIds
+    .map(approvalId => approvals.find(approval => approval.id === approvalId))
+    .filter(Boolean);
+
+  if (pendingApprovals.length === 0) {
+    showToast('No pending approvals to process', 'info');
+    return;
+  }
+
+  if (!confirm(`Approve all ${pendingApprovals.length} pending item(s) for ${summary.internName} on ${formatDate(summary.date)}?`)) {
+    return;
+  }
+
+  const approveButton = container.querySelector('#day-summary-approve-btn');
+  if (approveButton) {
+    approveButton.disabled = true;
+    approveButton.innerHTML = `${icons.check} Approving...`;
+  }
+
+  const results = await Promise.allSettled(
+    pendingApprovals.map(approval => processApproval(approval.id, 'approved', 'Approved from day summary', approval))
+  );
+
+  const successCount = results.filter(result => result.status === 'fulfilled').length;
+  const failedCount = results.length - successCount;
+
+  if (failedCount === 0) {
+    showToast(`${successCount} item(s) approved`, 'success');
+  } else {
+    showToast(`${successCount} approved, ${failedCount} failed`, successCount > 0 ? 'info' : 'error');
+  }
+
+  close?.();
+  renderApprovalsPage();
 }
 
 async function handleApproval(approvalId, status, approvals) {
@@ -737,6 +1184,11 @@ async function viewApprovalDetails(approvalId, approvals) {
   const approval = approvals.find(a => a.id === approvalId);
   if (!approval) return;
 
+  const role = getUserRole();
+  const isAdmin = role === 'admin';
+  const canActOnCorrection = isAdmin || approval.type !== 'attendance_correction';
+  const isActionable = approval.status === 'pending' && canActOnCorrection;
+
   // Open modal immediately with loading state
   const modalTitle = `${approval.type.replace('_', ' ')} Details`;
   createModal(modalTitle, `
@@ -954,6 +1406,45 @@ async function viewApprovalDetails(approvalId, approvals) {
   }
 
     // Replace loading state with actual details
-    el.querySelector('.modal-body').innerHTML = detailHtml || '<p class="text-neutral-400 text-center py-8">No details available</p>';
+    const detailsContent = detailHtml || '<p class="text-neutral-400 text-center py-8">No details available</p>';
+    
+    // Add action buttons if approval is actionable
+    const actionsHTML = isActionable ? `
+      <div class="mt-6 pt-6 border-t border-neutral-200 flex justify-end gap-3">
+        <button id="detail-reject-btn" class="btn-danger" title="Reject">
+          ${icons.x} Reject
+        </button>
+        <button id="detail-approve-btn" class="btn-success" title="Approve">
+          ${icons.check} Approve
+        </button>
+      </div>
+    ` : '';
+
+    el.querySelector('.modal-body').innerHTML = detailsContent + actionsHTML;
+
+    // Attach event listeners for action buttons
+    if (isActionable) {
+      el.querySelector('#detail-approve-btn')?.addEventListener('click', async () => {
+        const approveBtn = el.querySelector('#detail-approve-btn');
+        approveBtn.disabled = true;
+        approveBtn.innerHTML = `${icons.check} Approving...`;
+        
+        try {
+          await processApproval(approvalId, 'approved', null, approval);
+          showToast('Item approved', 'success');
+          close();
+          renderApprovalsPage();
+        } catch (err) {
+          showToast(err.message || 'Failed to approve', 'error');
+          approveBtn.disabled = false;
+          approveBtn.innerHTML = `${icons.check} Approve`;
+        }
+      });
+
+      el.querySelector('#detail-reject-btn')?.addEventListener('click', () => {
+        close();
+        openRejectModal(approvalId, approvals);
+      });
+    }
   });
 }
