@@ -251,6 +251,45 @@ export async function renderApprovalsPage() {
       }
     }
 
+    function sortSummaryBuckets(summariesToSort, sortBy) {
+      const sorted = [...summariesToSort];
+
+      switch (sortBy) {
+        case 'date-asc':
+          return sorted.sort((a, b) => a.date.localeCompare(b.date));
+        case 'intern-asc':
+          return sorted.sort((a, b) => (a.internName || '').localeCompare(b.internName || ''));
+        case 'type':
+          return sorted.sort((a, b) => b.totalPendingCount - a.totalPendingCount);
+        case 'date-desc':
+        default:
+          return sorted.sort((a, b) => b.date.localeCompare(a.date));
+      }
+    }
+
+    function renderSummaryContainer(sortedSummaries) {
+      const summaryHtml = sortedSummaries.length > 0
+        ? sortedSummaries.map(bucket => renderPendingSummaryCard(bucket)).join('')
+        : `
+          <div class="text-center py-8 text-neutral-400 border border-dashed border-neutral-200 rounded-lg">
+            <p>No daily attendance or narrative approvals to summarize</p>
+          </div>
+        `;
+
+      const otherPendingHtml = pendingOtherApprovals.length > 0
+        ? `
+          <div class="pt-2 border-t border-neutral-200">
+            <h4 class="text-sm font-semibold text-neutral-700 mb-3">Other Pending Items</h4>
+            <div class="space-y-3">
+              ${pendingOtherApprovals.map(a => renderApprovalCard(a, isAdmin)).join('')}
+            </div>
+          </div>
+        `
+        : '';
+
+      return summaryHtml + otherPendingHtml;
+    }
+
     // Attach event listeners to approval buttons
     function attachApprovalListeners(container) {
       container.querySelectorAll('.approve-btn').forEach(btn => {
@@ -298,10 +337,15 @@ export async function renderApprovalsPage() {
 
     // Other pending sort handler
     el.querySelector('#pending-sort')?.addEventListener('change', (e) => {
-      const sorted = sortApprovals(pendingApprovals, e.target.value);
       const container = el.querySelector('#pending-approvals-container');
       if (container) {
-        container.innerHTML = sorted.map(a => renderApprovalCard(a, isAdmin)).join('');
+        if (approvalsPanelMode === 'summary') {
+          const sortedSummaries = sortSummaryBuckets(pendingSummaryBuckets, e.target.value);
+          container.innerHTML = renderSummaryContainer(sortedSummaries);
+        } else {
+          const sorted = sortApprovals(pendingApprovals, e.target.value);
+          container.innerHTML = sorted.map(a => renderApprovalCard(a, isAdmin)).join('');
+        }
         attachApprovalListeners(container);
       }
     });
