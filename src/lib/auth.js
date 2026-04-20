@@ -55,7 +55,34 @@ async function logAuthAudit(action, userId, details = null) {
 }
 
 async function logAuthAuditFallback(action, userId, details = null) {
-  return logAuthAudit(action, userId, details);
+  // Try RPC first
+  const rpcResult = await logAuthAudit(action, userId, details);
+  if (rpcResult) {
+    return true;
+  }
+
+  // Fallback: direct REST insert (no RPC, just raw table insert)
+  try {
+    const { error } = await supabase
+      .from('audit_logs')
+      .insert([{
+        action,
+        entity_type: 'auth',
+        entity_id: userId || null,
+        user_id: userId || null,
+        details: details || null,
+      }]);
+
+    if (error) {
+      console.warn('Audit fallback insert failed:', error.message);
+      return false;
+    }
+
+    return true;
+  } catch (err) {
+    console.warn('Audit fallback failed:', err);
+    return false;
+  }
 }
 
 /**
@@ -183,17 +210,21 @@ export async function logout() {
     role: currentSession.profile?.role || null,
   };
 
-  // Clear app auth state first so route guards immediately treat user as logged out.
-  currentSession = { user: null, profile: null };
-
-  // Fire-and-forget audit so logout UI never blocks.
+  // Log audit BEFORE clearing session so RPC has auth context
+  // Wait with timeout so audit completes before session clears
   if (userId) {
-    void logAuthAuditFallback('auth.logout', userId, details).then((logged) => {
-      if (!logged) {
-        console.warn('Logout audit log failed on fallback path.');
-      }
-    });
+    try {
+      await Promise.race([
+        logAuthAuditFallback('auth.logout', userId, details),
+        wait(1000), // 1s timeout for audit
+      ]);
+    } catch (err) {
+      console.warn('Logout audit timed out, continuing with logout.');
+    }
   }
+
+  // Clear app auth state so route guards immediately treat user as logged out.
+  currentSession = { user: null, profile: null };
 
   // Bound signOut wait time to avoid hanging logout UI on stale internal auth state.
   try {
