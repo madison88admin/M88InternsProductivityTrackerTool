@@ -19,6 +19,7 @@ import { markSidebarIndicatorSeen, sidebarIndicatorTypes } from '../lib/sidebar-
 // Pre-load Quill to avoid dynamic import delays in modal
 let QuillModule = null;
 let quillLoadPromise = null;
+const HISTORY_PAGE_SIZE = 10;
 
 function getQuill() {
   if (QuillModule) return Promise.resolve(QuillModule);
@@ -98,7 +99,7 @@ export async function renderNarrativesPage() {
     .neq('date', today)
     .neq('status', 'draft')
     .order('date', { ascending: false })
-    .limit(30);
+    .limit(200);
 
   // Group recent narratives by date
   const groupedRecent = {};
@@ -137,6 +138,7 @@ export async function renderNarrativesPage() {
   const todayTask = todayTaskId ? (tasks || []).find(t => t.id === todayTaskId) : null;
 
   let viewMode = 'today'; // 'today' or 'history'
+  let historyPage = 1;
 
   function renderTodayLogView() {
     const morningHours = todayAttendance && todayAttendance.time_in_1 && todayAttendance.time_out_1
@@ -248,6 +250,12 @@ export async function renderNarrativesPage() {
 
   function renderHistoryView() {
     const dates = Object.keys(groupedRecent).sort((a, b) => b.localeCompare(a));
+    const totalPages = Math.max(1, Math.ceil(dates.length / HISTORY_PAGE_SIZE));
+    historyPage = Math.min(historyPage, totalPages);
+    const startIndex = (historyPage - 1) * HISTORY_PAGE_SIZE;
+    const pageDates = dates.slice(startIndex, startIndex + HISTORY_PAGE_SIZE);
+    const startNumber = dates.length === 0 ? 0 : startIndex + 1;
+    const endNumber = Math.min(startIndex + HISTORY_PAGE_SIZE, dates.length);
 
     if (dates.length === 0) {
       return `
@@ -259,7 +267,18 @@ export async function renderNarrativesPage() {
       `;
     }
 
-    return dates.map(date => {
+    return `
+      <div class="flex items-center justify-between gap-3 mb-4">
+        <p class="text-sm text-neutral-500">
+          Showing <strong class="text-neutral-700">${startNumber}–${endNumber}</strong> of <strong class="text-neutral-700">${dates.length}</strong> days
+        </p>
+        <div class="flex items-center gap-2">
+          <button id="history-prev-page" class="btn-secondary" ${historyPage === 1 ? 'disabled' : ''}>← Previous</button>
+          <span class="text-sm text-neutral-600">Page <strong>${historyPage}</strong> of <strong>${totalPages}</strong></span>
+          <button id="history-next-page" class="btn-secondary" ${historyPage === totalPages ? 'disabled' : ''}>Next →</button>
+        </div>
+      </div>
+      ${pageDates.map(date => {
       const dayNarratives = groupedRecent[date];
       const morning = dayNarratives.find(n => n.session === 'morning');
       const afternoon = dayNarratives.find(n => n.session === 'afternoon');
@@ -278,7 +297,8 @@ export async function renderNarrativesPage() {
           </div>
         </div>
       `;
-    }).join('');
+    }).join('')}
+    `;
   }
 
   function renderSessionCard(narrative, label, date) {
@@ -411,6 +431,7 @@ export async function renderNarrativesPage() {
         } else {
           container.innerHTML = renderHistoryView();
           bindEditButtons(container);
+          bindHistoryPagination(container);
         }
       });
     });
@@ -430,6 +451,10 @@ export async function renderNarrativesPage() {
     // Bind edit buttons for initial view
     bindEditButtons(el);
 
+    if (viewMode === 'history') {
+      bindHistoryPagination(el);
+    }
+
     function bindEditButtons(container) {
       container.querySelectorAll('.edit-narrative-btn').forEach(btn => {
         btn.addEventListener('click', () => {
@@ -440,6 +465,37 @@ export async function renderNarrativesPage() {
             openEditNarrativeModal(narrative, tasks, profile, attendanceByDate);
           }
         });
+      });
+    }
+
+    function bindHistoryPagination(container) {
+      const viewContainer = container.id === 'view-container'
+        ? container
+        : container.querySelector('#view-container');
+
+      if (!viewContainer) return;
+
+      const prevBtn = viewContainer.querySelector('#history-prev-page');
+      const nextBtn = viewContainer.querySelector('#history-next-page');
+
+      prevBtn?.addEventListener('click', async () => {
+        if (historyPage > 1) {
+          historyPage--;
+          viewContainer.innerHTML = renderHistoryView();
+          bindEditButtons(viewContainer);
+          bindHistoryPagination(viewContainer);
+        }
+      });
+
+      nextBtn?.addEventListener('click', async () => {
+        const dates = Object.keys(groupedRecent).sort((a, b) => b.localeCompare(a));
+        const totalPages = Math.max(1, Math.ceil(dates.length / HISTORY_PAGE_SIZE));
+        if (historyPage < totalPages) {
+          historyPage++;
+          viewContainer.innerHTML = renderHistoryView();
+          bindEditButtons(viewContainer);
+          bindHistoryPagination(viewContainer);
+        }
       });
     }
   });

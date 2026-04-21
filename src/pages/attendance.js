@@ -15,7 +15,9 @@ import { sendEmailNotification, getDepartmentSupervisors } from '../lib/email-no
 import { showNarrativePromptModal } from '../lib/narrative-modal.js';
 
 const PH_TIMEZONE = 'Asia/Manila';
+const RECENT_ATTENDANCE_PAGE_SIZE = 10;
 let phMidnightRefreshTimer = null;
+let recentAttendancePage = 1;
 
 function ipConsistencyBadge(ip_consistent, size = 'normal') {
   if (ip_consistent == null) return '';
@@ -162,7 +164,7 @@ export async function renderAttendancePage() {
     .select('*')
     .eq('intern_id', profile.id)
     .order('date', { ascending: false })
-    .limit(30);
+    .limit(200);
 
   const { data: weekRecords } = await supabase
     .from('attendance_records')
@@ -174,6 +176,13 @@ export async function renderAttendancePage() {
   const totalHoursThisWeek = (weekRecords || []).reduce((sum, record) => sum + (record.total_hours || 0), 0);
 
   const nextPunch = getNextPunch(todayRecord);
+  const recentAttendanceRecords = recentRecords || [];
+  const totalRecentAttendancePages = Math.max(1, Math.ceil(recentAttendanceRecords.length / RECENT_ATTENDANCE_PAGE_SIZE));
+  recentAttendancePage = Math.min(recentAttendancePage, totalRecentAttendancePages);
+  const recentAttendanceStartIndex = (recentAttendancePage - 1) * RECENT_ATTENDANCE_PAGE_SIZE;
+  const recentAttendancePageRecords = recentAttendanceRecords.slice(recentAttendanceStartIndex, recentAttendanceStartIndex + RECENT_ATTENDANCE_PAGE_SIZE);
+  const recentAttendanceStartNumber = recentAttendanceRecords.length === 0 ? 0 : recentAttendanceStartIndex + 1;
+  const recentAttendanceEndNumber = Math.min(recentAttendanceStartIndex + RECENT_ATTENDANCE_PAGE_SIZE, recentAttendanceRecords.length);
 
   // Auto-submit incomplete attendance at 7:30 PM
   let wasAutoSubmitted = false;
@@ -357,6 +366,9 @@ export async function renderAttendancePage() {
     <div class="card">
       <div class="flex items-center justify-between mb-4">
         <h3 class="text-base font-bold text-neutral-900">Recent Attendance</h3>
+        <p class="text-xs text-neutral-500">
+          ${recentAttendanceRecords.length ? `Showing ${recentAttendanceStartNumber}–${recentAttendanceEndNumber} of ${recentAttendanceRecords.length}` : 'No records yet'}
+        </p>
       </div>
 
       <div class="overflow-x-auto">
@@ -374,7 +386,7 @@ export async function renderAttendancePage() {
             </tr>
           </thead>
           <tbody>
-            ${(recentRecords || []).map(record => `
+            ${recentAttendancePageRecords.map(record => `
               <tr>
                 <td class="font-medium">${formatDate(record.date)}</td>
                 <td>${record.time_in_1 ? formatTime(record.time_in_1) : '—'}</td>
@@ -395,10 +407,22 @@ export async function renderAttendancePage() {
                 </td>
               </tr>
             `).join('')}
-            ${(!recentRecords || recentRecords.length === 0) ? '<tr><td colspan="8" class="text-center text-neutral-400 py-8">No attendance records yet</td></tr>' : ''}
+            ${(!recentAttendanceRecords.length) ? '<tr><td colspan="8" class="text-center text-neutral-400 py-8">No attendance records yet</td></tr>' : ''}
           </tbody>
         </table>
       </div>
+
+      ${recentAttendanceRecords.length > RECENT_ATTENDANCE_PAGE_SIZE ? `
+        <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mt-4 pt-4 border-t border-neutral-100">
+          <p class="text-sm text-neutral-500">
+            Page <strong class="text-neutral-700">${recentAttendancePage}</strong> of <strong class="text-neutral-700">${totalRecentAttendancePages}</strong>
+          </p>
+          <div class="flex items-center gap-2">
+            <button id="recent-prev-page" class="btn-secondary" ${recentAttendancePage === 1 ? 'disabled' : ''}>← Previous</button>
+            <button id="recent-next-page" class="btn-secondary" ${recentAttendancePage === totalRecentAttendancePages ? 'disabled' : ''}>Next →</button>
+          </div>
+        </div>
+      ` : ''}
     </div>
   `, (el) => {
     // Punch button handler
@@ -572,6 +596,23 @@ export async function renderAttendancePage() {
     if (correctionBtn) {
       correctionBtn.addEventListener('click', () => openCorrectionModal(todayRecord, profile));
     }
+
+    const recentPrevBtn = el.querySelector('#recent-prev-page');
+    const recentNextBtn = el.querySelector('#recent-next-page');
+
+    recentPrevBtn?.addEventListener('click', async () => {
+      if (recentAttendancePage > 1) {
+        recentAttendancePage--;
+        await renderAttendancePage();
+      }
+    });
+
+    recentNextBtn?.addEventListener('click', async () => {
+      if (recentAttendancePage < totalRecentAttendancePages) {
+        recentAttendancePage++;
+        await renderAttendancePage();
+      }
+    });
   }, '/attendance');
 }
 
