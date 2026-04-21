@@ -573,6 +573,8 @@ function openCreateTaskModal(interns, profile) {
 }
 
 function openEditTaskModal(task, interns, profile) {
+  const isAdmin = getUserRole() === 'admin';
+
   createModal('Edit Task', `
     <form id="edit-task-form" class="space-y-4">
       <div>
@@ -602,6 +604,11 @@ function openEditTaskModal(task, interns, profile) {
       </div>
 
       <div class="flex justify-end gap-3 pt-2">
+        ${isAdmin ? `
+        <button type="button" id="close-task-btn" class="btn-warning" ${task.status === 'completed' && !task.pending_status ? 'disabled' : ''}>
+          ${task.status === 'completed' && !task.pending_status ? 'Already Closed' : 'Close Task'}
+        </button>
+        ` : ''}
         <button type="button" id="edit-cancel" class="btn-secondary">Cancel</button>
         <button type="submit" id="edit-submit" class="btn-primary">Save Changes</button>
       </div>
@@ -609,6 +616,70 @@ function openEditTaskModal(task, interns, profile) {
   `, (el, close) => {
     el.querySelector('#edit-cancel').addEventListener('click', close);
     initInternPicker(el, interns);
+
+    el.querySelector('#close-task-btn')?.addEventListener('click', async () => {
+      if (!isAdmin) {
+        showToast('Only admins can close tasks.', 'error');
+        return;
+      }
+
+      const shouldClose = confirm(`Close task "${task.title}" now? This bypasses normal status flow and marks it as completed.`);
+      if (!shouldClose) return;
+
+      const closeBtn = el.querySelector('#close-task-btn');
+      const submitBtn = el.querySelector('#edit-submit');
+      const originalCloseText = closeBtn.textContent;
+
+      closeBtn.disabled = true;
+      closeBtn.textContent = 'Closing...';
+      submitBtn.disabled = true;
+
+      try {
+        const taskUpdates = {
+          status: 'completed',
+          pending_status: null,
+        };
+
+        if (task.is_self_submitted) {
+          taskUpdates.submission_status = 'approved';
+        }
+
+        const { error: taskCloseError } = await supabase
+          .from('tasks')
+          .update(taskUpdates)
+          .eq('id', task.id);
+
+        if (taskCloseError) throw taskCloseError;
+
+        const { error: approvalCloseError } = await supabase
+          .from('approvals')
+          .update({
+            status: 'approved',
+            reviewed_by: profile.id,
+            reviewed_at: new Date().toISOString(),
+            comments: 'Task closed by admin via Edit Task modal.',
+          })
+          .eq('entity_id', task.id)
+          .eq('status', 'pending')
+          .in('type', ['task_status', 'task_submission']);
+
+        if (approvalCloseError) throw approvalCloseError;
+
+        await logAudit('task.closed_by_admin', 'task', task.id, {
+          previous_status: task.status,
+          previous_pending_status: task.pending_status,
+        });
+
+        showToast('Task closed successfully', 'success');
+        close();
+        renderTaskManagementPage();
+      } catch (err) {
+        showToast(err.message || 'Failed to close task', 'error');
+        closeBtn.disabled = false;
+        closeBtn.textContent = originalCloseText;
+        submitBtn.disabled = false;
+      }
+    });
 
     el.querySelector('#edit-task-form').addEventListener('submit', async (e) => {
       e.preventDefault();
