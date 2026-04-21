@@ -6,7 +6,7 @@
 import { supabase } from './supabase.js';
 import { showToast } from './toast.js';
 import { logAudit } from './audit.js';
-import { formatDate, formatHoursDisplay, getTodayDate } from './utils.js';
+import { formatDate, formatHoursDisplay, getTodayDate, calculateSessionHours } from './utils.js';
 import { createModal } from './component.js';
 import { isHoliday } from './holidays.js';
 import { sendEmailNotification, getDepartmentSupervisors } from './email-notifications.js';
@@ -28,15 +28,6 @@ function getQuill() {
 
 // Pre-load Quill when module is imported
 getQuill().catch(() => {});
-
-/**
- * Calculate hours between two timestamps
- */
-function calculateSessionHours(timeIn, timeOut) {
-  if (!timeIn || !timeOut) return 0;
-  const ms = new Date(timeOut) - new Date(timeIn);
-  return Math.max(0, ms / (1000 * 60 * 60));
-}
 
 /**
  * Fetch attendance record for a specific date

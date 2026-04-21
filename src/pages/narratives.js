@@ -9,7 +9,7 @@ import { supabase } from '../lib/supabase.js';
 import { showToast } from '../lib/toast.js';
 import { logAudit } from '../lib/audit.js';
 import { icons } from '../lib/icons.js';
-import { formatDate, formatDateTime, formatHoursDisplay, getTodayDate } from '../lib/utils.js';
+import { formatDate, formatDateTime, formatHoursDisplay, getTodayDate, calculateSessionHours } from '../lib/utils.js';
 import { createModal } from '../lib/component.js';
 import { isHoliday } from '../lib/holidays.js';
 import { sendEmailNotification, getDepartmentSupervisors } from '../lib/email-notifications.js';
@@ -106,6 +106,27 @@ export async function renderNarrativesPage() {
     if (!groupedRecent[n.date]) groupedRecent[n.date] = [];
     groupedRecent[n.date].push(n);
   });
+
+  // Fetch attendance records for all narrative dates to support hours fallback
+  const narrativeDates = Object.keys(groupedRecent);
+  let attendanceByDate = {};
+  if (narrativeDates.length > 0) {
+    try {
+      const { data: attendanceRecords } = await supabase
+        .from('attendance_records')
+        .select('date, time_in_1, time_out_1, time_in_2, time_out_2')
+        .eq('intern_id', profile.id)
+        .in('date', narrativeDates);
+
+      if (attendanceRecords) {
+        attendanceRecords.forEach(record => {
+          attendanceByDate[record.date] = record;
+        });
+      }
+    } catch (err) {
+      console.error('Failed to fetch attendance for narrative hours fallback:', err);
+    }
+  }
 
   // Find today's morning/afternoon narratives
   const morningNarrative = (todayNarratives || []).find(n => n.session === 'morning');
@@ -252,15 +273,15 @@ export async function renderNarrativesPage() {
             </div>
           </div>
           <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-            ${renderSessionCard(morning, 'Morning')}
-            ${renderSessionCard(afternoon, 'Afternoon')}
+            ${renderSessionCard(morning, 'Morning', date)}
+            ${renderSessionCard(afternoon, 'Afternoon', date)}
           </div>
         </div>
       `;
     }).join('');
   }
 
-  function renderSessionCard(narrative, label) {
+  function renderSessionCard(narrative, label, date) {
     if (!narrative) {
       return `
         <div class="border border-neutral-200 rounded-lg p-3 bg-neutral-50">
@@ -272,12 +293,38 @@ export async function renderNarrativesPage() {
 
     const canEdit = narrative.status === 'rejected' || narrative.status === 'pending';
 
+    // Calculate fallback hours from attendance data
+    let attendanceHours = null;
+    const attendanceRecord = attendanceByDate[date];
+    
+    if (attendanceRecord) {
+      if (narrative.session === 'morning' && attendanceRecord.time_in_1 && attendanceRecord.time_out_1) {
+        attendanceHours = calculateSessionHours(attendanceRecord.time_in_1, attendanceRecord.time_out_1);
+      } else if (narrative.session === 'afternoon' && attendanceRecord.time_in_2 && attendanceRecord.time_out_2) {
+        attendanceHours = calculateSessionHours(attendanceRecord.time_in_2, attendanceRecord.time_out_2);
+      }
+    }
+
+    // Use fallback logic: prefer stored positive hours, otherwise use attendance-derived hours
+    const storedHours = narrative.hours !== null && narrative.hours !== undefined ? Number(narrative.hours) : null;
+    let displayHours = null;
+    
+    if (Number.isFinite(storedHours) && storedHours > 0) {
+      displayHours = storedHours;
+    } else if (Number.isFinite(attendanceHours) && attendanceHours > 0) {
+      displayHours = attendanceHours;
+    } else if (Number.isFinite(storedHours)) {
+      displayHours = storedHours;
+    } else if (Number.isFinite(attendanceHours)) {
+      displayHours = attendanceHours;
+    }
+
     return `
       <div class="border border-neutral-200 rounded-lg p-3">
         <div class="flex items-center justify-between mb-1">
           <p class="text-xs font-semibold text-neutral-500">${label} Session</p>
           <div class="flex items-center gap-2">
-            ${narrative.hours !== null && narrative.hours !== undefined ? `<span class="text-xs text-neutral-400">${formatHoursDisplay(narrative.hours)}</span>` : ''}
+            ${displayHours !== null ? `<span class="text-xs text-neutral-400">${formatHoursDisplay(displayHours)}</span>` : ''}
             <span class="badge-${narrative.status === 'approved' ? 'approved' : narrative.status === 'rejected' ? 'rejected' : 'pending'}">${narrative.status}</span>
             ${narrative.edited_at ? '<span class="badge bg-info-100 text-info-700 text-xs">Edited</span>' : ''}
             ${canEdit ? `
@@ -398,22 +445,6 @@ export async function renderNarrativesPage() {
   });
 }
 
-function calculateSessionHours(timeIn, timeOut) {
-  if (!timeIn || !timeOut) return 0;
-  const ms = new Date(timeOut) - new Date(timeIn);
-  return Math.max(0, ms / (1000 * 60 * 60));
-}
-
-async function fetchAttendanceForDate(internId, date) {
-  const { data } = await supabase
-    .from('attendance_records')
-    .select('*')
-    .eq('intern_id', internId)
-    .eq('date', date)
-    .maybeSingle();
-  return data;
-}
-
 async function fetchExistingNarrativesForDate(internId, date) {
   const { data } = await supabase
     .from('narratives')
@@ -421,619 +452,6 @@ async function fetchExistingNarrativesForDate(internId, date) {
     .eq('intern_id', internId)
     .eq('date', date);
   return data || [];
-}
-
-function openNarrativeModal(tasks, profile, today) {
-  const now = new Date();
-  const taskOptions = (tasks || []).map(t => {
-    let label = t.title;
-
-    if (t.status === 'completed' && t.approved_at) {
-      // Calculate hours remaining for completed tasks
-      const approvedDate = new Date(t.approved_at);
-      const expiresAt = new Date(approvedDate.getTime() + (48 * 60 * 60 * 1000));
-      const hoursRemaining = Math.max(0, Math.round((expiresAt - now) / (60 * 60 * 1000)));
-
-      label = `${t.title} (completed)`;
-    } else {
-      label = `${t.title} (${t.status.replace('_', ' ')})`;
-    }
-
-    return `<option value="${t.id}">${label}</option>`;
-  }).join('');
-
-  createModal('New Daily Narrative', `
-    <form id="narrative-form" class="space-y-4">
-      <div>
-        <label class="form-label">Date</label>
-        <input type="date" id="narrative-date" class="form-input" value="${today}" max="${today}" required>
-        <p id="late-warning" class="text-xs text-warning-500 mt-1 hidden">This narrative will be marked as a late submission.</p>
-      </div>
-
-      <!-- Session availability info -->
-      <div id="session-info" class="hidden">
-        <div class="p-3 bg-primary-50 rounded-lg">
-          <p id="session-info-text" class="text-sm text-primary-700"></p>
-        </div>
-      </div>
-
-      <!-- Morning Session -->
-      <div id="morning-section" class="border border-neutral-200 rounded-lg p-4">
-        <h4 class="text-sm font-semibold text-neutral-700 mb-3">Morning Session (Time In 1 → Time Out 1)
-          <span id="morning-hours-badge" class="ml-2 text-xs font-normal text-neutral-400"></span>
-        </h4>
-        <div class="space-y-3">
-          <div>
-            <label class="form-label">Task</label>
-            <select id="morning-task" class="form-input">
-              <option value="">Choose a task...</option>
-              ${taskOptions}
-            </select>
-          </div>
-          <div>
-            <label class="form-label">Narrative</label>
-            <div id="morning-editor"></div>
-            <p id="morning-char-count" class="text-xs text-neutral-400 mt-1 text-right">0 / 175</p>
-          </div>
-        </div>
-        <p id="morning-existing" class="text-xs text-neutral-400 mt-2 hidden"></p>
-        <p id="morning-availability-note" class="text-xs text-warning-600 mt-2 hidden"></p>
-      </div>
-
-      <!-- Afternoon Session -->
-      <div id="afternoon-section" class="border border-neutral-200 rounded-lg p-4">
-        <h4 class="text-sm font-semibold text-neutral-700 mb-3">Afternoon Session (Time In 2 → Time Out 2)
-          <span id="afternoon-hours-badge" class="ml-2 text-xs font-normal text-neutral-400"></span>
-        </h4>
-        <div class="space-y-3">
-          <div>
-            <label class="form-label">Task</label>
-            <select id="afternoon-task" class="form-input">
-              <option value="">Choose a task...</option>
-              ${taskOptions}
-            </select>
-          </div>
-          <div>
-            <label class="form-label">Narrative</label>
-            <div id="afternoon-editor"></div>
-            <p id="afternoon-char-count" class="text-xs text-neutral-400 mt-1 text-right">0 / 175</p>
-          </div>
-        </div>
-        <p id="afternoon-existing" class="text-xs text-neutral-400 mt-2 hidden"></p>
-      </div>
-
-      <div class="flex justify-end gap-3 pt-2">
-        <button type="button" id="narrative-cancel" class="btn-secondary">Cancel</button>
-        <button type="submit" id="narrative-submit" class="btn-primary">Submit Narratives</button>
-      </div>
-    </form>
-  `, async (el, close) => {
-    // Use pre-loaded Quill module
-    const Quill = await getQuill();
-
-    const quillConfig = {
-      theme: 'snow',
-      modules: {
-        toolbar: [
-          ['bold', 'italic', 'underline'],
-          [{ list: 'ordered' }, { list: 'bullet' }],
-          ['clean'],
-        ],
-      },
-    };
-
-    const morningQuill = new Quill('#morning-editor', {
-      ...quillConfig,
-      placeholder: 'Describe your morning activities...',
-    });
-
-    const afternoonQuill = new Quill('#afternoon-editor', {
-      ...quillConfig,
-      placeholder: 'Describe your afternoon activities...',
-    });
-
-    const blockPaste = (e) => {
-      e.preventDefault();
-      e.stopImmediatePropagation();
-      showToast('Pasting is not allowed. Please type your narrative.', 'error');
-    };
-    morningQuill.root.addEventListener('paste', blockPaste, true);
-    afternoonQuill.root.addEventListener('paste', blockPaste, true);
-    morningQuill.root.addEventListener('drop', blockPaste, true);
-    afternoonQuill.root.addEventListener('drop', blockPaste, true);
-
-    const CHAR_LIMIT = 175;
-
-    function updateCharCount(quillInstance, counterId) {
-      const len = quillInstance.getText().trim().length;
-      const counter = el.querySelector(`#${counterId}`);
-      if (!counter) return;
-      counter.textContent = `${len} / ${CHAR_LIMIT}`;
-      counter.classList.toggle('text-danger-500', len > CHAR_LIMIT);
-      counter.classList.toggle('text-neutral-400', len <= CHAR_LIMIT);
-    }
-
-    morningQuill.on('text-change', () => {
-      const text = morningQuill.getText();
-      if (text.length - 1 > CHAR_LIMIT) {
-        morningQuill.deleteText(CHAR_LIMIT, text.length);
-      }
-      updateCharCount(morningQuill, 'morning-char-count');
-      scheduleDraftSave();
-    });
-
-    afternoonQuill.on('text-change', () => {
-      const text = afternoonQuill.getText();
-      if (text.length - 1 > CHAR_LIMIT) {
-        afternoonQuill.deleteText(CHAR_LIMIT, text.length);
-      }
-      updateCharCount(afternoonQuill, 'afternoon-char-count');
-      scheduleDraftSave();
-    });
-
-    let currentAttendance = null;
-    let morningHours = 0;
-    let afternoonHours = 0;
-    let existingNarratives = [];
-    const draftStorageKey = `narrative_draft_${profile.id}`;
-    const draftVersion = 1;
-    let draftSaveTimer = null;
-
-    function hasSelectOption(selectEl, value) {
-      return !!selectEl.querySelector(`option[value="${value}"]`);
-    }
-
-    function getDraftPayload() {
-      return {
-        version: draftVersion,
-        date: el.querySelector('#narrative-date').value,
-        morningTaskId: el.querySelector('#morning-task').value || null,
-        afternoonTaskId: el.querySelector('#afternoon-task').value || null,
-        morningContent: morningQuill.root.innerHTML,
-        afternoonContent: afternoonQuill.root.innerHTML,
-      };
-    }
-
-    function saveDraft() {
-      try {
-        localStorage.setItem(draftStorageKey, JSON.stringify(getDraftPayload()));
-      } catch {
-        // Ignore storage errors (e.g. browser storage blocked/full)
-      }
-    }
-
-    function scheduleDraftSave() {
-      if (draftSaveTimer) clearTimeout(draftSaveTimer);
-      draftSaveTimer = setTimeout(saveDraft, 250);
-    }
-
-    function readDraft() {
-      try {
-        const raw = localStorage.getItem(draftStorageKey);
-        if (!raw) return null;
-        const parsed = JSON.parse(raw);
-        if (!parsed || parsed.version !== draftVersion) return null;
-        return parsed;
-      } catch {
-        return null;
-      }
-    }
-
-    function clearDraft() {
-      if (draftSaveTimer) clearTimeout(draftSaveTimer);
-      localStorage.removeItem(draftStorageKey);
-    }
-
-    function restoreDraft() {
-      const draft = readDraft();
-      if (!draft) return false;
-
-      const dateInput = el.querySelector('#narrative-date');
-      const morningTaskSelect = el.querySelector('#morning-task');
-      const afternoonTaskSelect = el.querySelector('#afternoon-task');
-      const restoredDate = draft.date && draft.date <= today ? draft.date : today;
-
-      dateInput.value = restoredDate;
-
-      if (draft.morningTaskId && hasSelectOption(morningTaskSelect, draft.morningTaskId)) {
-        morningTaskSelect.value = draft.morningTaskId;
-      }
-
-      if (draft.afternoonTaskId && hasSelectOption(afternoonTaskSelect, draft.afternoonTaskId)) {
-        afternoonTaskSelect.value = draft.afternoonTaskId;
-      }
-
-      if (typeof draft.morningContent === 'string') {
-        morningQuill.root.innerHTML = draft.morningContent;
-      }
-
-      if (typeof draft.afternoonContent === 'string') {
-        afternoonQuill.root.innerHTML = draft.afternoonContent;
-      }
-
-      updateCharCount(morningQuill, 'morning-char-count');
-      updateCharCount(afternoonQuill, 'afternoon-char-count');
-
-      return true;
-    }
-
-    // Update session info and hours when date changes
-    async function updateSessionInfo() {
-      const selectedDate = el.querySelector('#narrative-date').value;
-      const isLate = selectedDate < today;
-
-      // Show/hide late warning
-      el.querySelector('#late-warning').classList.toggle('hidden', !isLate);
-
-      // Check if the selected date is a holiday
-      const selectedHolidayInfo = await isHoliday(selectedDate);
-      if (selectedHolidayInfo.isHoliday) {
-        const sessionInfo = el.querySelector('#session-info');
-        el.querySelector('#session-info-text').textContent = `${formatDate(selectedDate)} is a holiday (${selectedHolidayInfo.name}). You cannot submit narratives for this date.`;
-        sessionInfo.classList.remove('hidden');
-        el.querySelector('#narrative-submit').disabled = true;
-
-        // Disable both session editors
-        morningQuill.enable(false);
-        afternoonQuill.enable(false);
-        el.querySelector('#morning-task').disabled = true;
-        el.querySelector('#afternoon-task').disabled = true;
-        el.querySelector('#morning-section').classList.add('opacity-50');
-        el.querySelector('#afternoon-section').classList.add('opacity-50');
-        return;
-      }
-
-      // Fetch attendance for selected date
-      currentAttendance = await fetchAttendanceForDate(profile.id, selectedDate);
-
-      // Fetch existing narratives for selected date
-      existingNarratives = await fetchExistingNarrativesForDate(profile.id, selectedDate);
-
-      // Calculate session hours
-      const hasMorningAttendance = !!(currentAttendance && currentAttendance.time_in_1 && currentAttendance.time_out_1);
-      const hasAfternoonAttendance = !!(currentAttendance && currentAttendance.time_in_2 && currentAttendance.time_out_2);
-      morningHours = 0;
-      afternoonHours = 0;
-
-      if (currentAttendance) {
-        if (hasMorningAttendance) {
-          morningHours = calculateSessionHours(currentAttendance.time_in_1, currentAttendance.time_out_1);
-        }
-        if (hasAfternoonAttendance) {
-          afternoonHours = calculateSessionHours(currentAttendance.time_in_2, currentAttendance.time_out_2);
-        }
-      }
-
-      // Update hours badges
-      el.querySelector('#morning-hours-badge').textContent = morningHours > 0
-        ? `(${formatHoursDisplay(morningHours)})`
-        : hasMorningAttendance ? '(0 hours recorded)' : '(Morning attendance missing)';
-
-      el.querySelector('#afternoon-hours-badge').textContent = afternoonHours > 0
-        ? `(${formatHoursDisplay(afternoonHours)})`
-        : hasAfternoonAttendance ? '(0 hours recorded)' : '(Afternoon attendance missing)';
-
-      // Check existing narratives and disable already-submitted sessions
-      const hasMorning = existingNarratives.some(n => n.session === 'morning');
-      const hasAfternoon = existingNarratives.some(n => n.session === 'afternoon');
-
-      const morningSection = el.querySelector('#morning-section');
-      const afternoonSection = el.querySelector('#afternoon-section');
-      const morningExisting = el.querySelector('#morning-existing');
-      const morningAvailabilityNote = el.querySelector('#morning-availability-note');
-      const afternoonExisting = el.querySelector('#afternoon-existing');
-
-      const morningTaskSelect = el.querySelector('#morning-task');
-      const afternoonTaskSelect = el.querySelector('#afternoon-task');
-
-      if (hasMorning) {
-        morningQuill.enable(false);
-        morningTaskSelect.disabled = true;
-        morningExisting.textContent = 'Morning narrative already submitted for this date.';
-        morningExisting.classList.remove('hidden');
-        morningAvailabilityNote.classList.add('hidden');
-        morningSection.classList.add('opacity-50');
-      } else if (!hasMorningAttendance) {
-        morningQuill.enable(false);
-        morningTaskSelect.disabled = true;
-        morningExisting.classList.add('hidden');
-        morningAvailabilityNote.textContent = 'Morning narrative is blocked until Time In 1 and Time Out 1 are recorded for this date.';
-        morningAvailabilityNote.classList.remove('hidden');
-        morningSection.classList.add('opacity-50');
-      } else {
-        morningQuill.enable(true);
-        morningTaskSelect.disabled = false;
-        morningExisting.classList.add('hidden');
-        morningAvailabilityNote.classList.add('hidden');
-        morningSection.classList.remove('opacity-50');
-      }
-
-      if (hasAfternoon) {
-        afternoonQuill.enable(false);
-        afternoonTaskSelect.disabled = true;
-        afternoonExisting.textContent = 'Afternoon narrative already submitted for this date.';
-        afternoonExisting.classList.remove('hidden');
-        afternoonSection.classList.add('opacity-50');
-      } else {
-        afternoonQuill.enable(true);
-        afternoonTaskSelect.disabled = false;
-        afternoonExisting.classList.add('hidden');
-        afternoonSection.classList.remove('opacity-50');
-      }
-
-      // Show info if both sessions are already submitted
-      const sessionInfo = el.querySelector('#session-info');
-      if (hasMorning && hasAfternoon) {
-        el.querySelector('#session-info-text').textContent = 'Both sessions already have narratives for this date. Choose a different date.';
-        sessionInfo.classList.remove('hidden');
-        el.querySelector('#narrative-submit').disabled = true;
-      } else if (!hasMorningAttendance && !hasMorning) {
-        el.querySelector('#session-info-text').textContent = 'Morning narrative is unavailable until Time In 1 and Time Out 1 are recorded for this date.';
-        sessionInfo.classList.remove('hidden');
-        el.querySelector('#narrative-submit').disabled = false;
-      } else {
-        sessionInfo.classList.add('hidden');
-        el.querySelector('#narrative-submit').disabled = false;
-      }
-    }
-
-    // Restore any saved draft first, then update session availability state
-    const draftRestored = restoreDraft();
-
-    // Initialize session info
-    await updateSessionInfo();
-    if (draftRestored) {
-      showToast('Draft restored. You can continue editing your narrative.', 'info');
-    }
-
-    // Listen for date changes
-    el.querySelector('#narrative-date').addEventListener('change', async () => {
-      await updateSessionInfo();
-      scheduleDraftSave();
-    });
-    el.querySelector('#morning-task').addEventListener('change', scheduleDraftSave);
-    el.querySelector('#afternoon-task').addEventListener('change', scheduleDraftSave);
-
-    el.querySelector('#narrative-cancel').addEventListener('click', close);
-
-    el.querySelector('#narrative-form').addEventListener('submit', async (e) => {
-      e.preventDefault();
-
-      const morningTaskId = el.querySelector('#morning-task').value;
-      const afternoonTaskId = el.querySelector('#afternoon-task').value;
-      const selectedDate = el.querySelector('#narrative-date').value;
-      const isLate = selectedDate < today;
-      const hasMorningAttendance = !!(currentAttendance && currentAttendance.time_in_1 && currentAttendance.time_out_1);
-
-      // Holiday guard (defense in depth)
-      const submitHolidayCheck = await isHoliday(selectedDate);
-      if (submitHolidayCheck.isHoliday) {
-        showToast(`Cannot submit narrative for ${formatDate(selectedDate)} — it is a holiday (${submitHolidayCheck.name})`, 'error');
-        return;
-      }
-
-      const hasMorning = existingNarratives.some(n => n.session === 'morning');
-      const hasAfternoon = existingNarratives.some(n => n.session === 'afternoon');
-
-      const morningContent = !hasMorning && hasMorningAttendance ? morningQuill.root.innerHTML : null;
-      const afternoonContent = !hasAfternoon ? afternoonQuill.root.innerHTML : null;
-
-      const morningText = !hasMorning && hasMorningAttendance ? morningQuill.getText().trim() : '';
-      const afternoonText = !hasAfternoon ? afternoonQuill.getText().trim() : '';
-
-      // Validate at least one session has content
-      if (morningText.length === 0 && afternoonText.length === 0) {
-        showToast('Please fill in at least one session narrative', 'error');
-        return;
-      }
-
-      // Validate task selection for sessions that have content
-      if (morningText.length > 0 && !morningTaskId) {
-        showToast('Please select a task for the morning session', 'error');
-        return;
-      }
-      if (afternoonText.length > 0 && !afternoonTaskId) {
-        showToast('Please select a task for the afternoon session', 'error');
-        return;
-      }
-
-      // Validate minimum length
-      if (morningText.length > 0 && morningText.length < 10) {
-        showToast('Morning narrative must be at least 10 characters', 'error');
-        return;
-      }
-      if (afternoonText.length > 0 && afternoonText.length < 10) {
-        showToast('Afternoon narrative must be at least 10 characters', 'error');
-        return;
-      }
-
-      const submitBtn = el.querySelector('#narrative-submit');
-      submitBtn.disabled = true;
-      submitBtn.textContent = 'Submitting...';
-
-      try {
-        const narrativesToInsert = [];
-
-        if (morningText.length >= 10) {
-          narrativesToInsert.push({
-            intern_id: profile.id,
-            task_id: morningTaskId,
-            date: selectedDate,
-            session: 'morning',
-            content: morningContent,
-            hours: morningHours,
-            is_late_submission: isLate,
-            supervisor_id: profile.supervisor_id,
-          });
-        }
-
-        if (afternoonText.length >= 10) {
-          narrativesToInsert.push({
-            intern_id: profile.id,
-            task_id: afternoonTaskId,
-            date: selectedDate,
-            session: 'afternoon',
-            content: afternoonContent,
-            hours: afternoonHours,
-            is_late_submission: isLate,
-            supervisor_id: profile.supervisor_id,
-          });
-        }
-
-        const { data, error } = await supabase
-          .from('narratives')
-          .insert(narrativesToInsert)
-          .select();
-
-        if (error) throw error;
-
-        // Narrative insert succeeded - now clear the draft
-        clearDraft();
-
-        // Show success immediately - don't block on notifications/emails
-        showToast(`${data.length} narrative${data.length > 1 ? 's' : ''} submitted successfully`, 'success');
-        close();
-        renderNarrativesPage();
-
-        // --- Background operations (non-blocking) ---
-        // Fire these in background so user doesn't wait
-        (async () => {
-          try {
-            // Batch: Get admins and supervisors once
-            const [adminsResult, deptSupervisors] = await Promise.all([
-              supabase.from('profiles').select('id, email').eq('role', 'admin').eq('is_active', true),
-              getDepartmentSupervisors(profile.id),
-            ]);
-            const adminsForNotif = adminsResult.data || [];
-            const deptSupervisorIds = deptSupervisors.map(s => s.id);
-
-            // Batch: Collect all approvals to insert at once
-            const approvalsToInsert = [];
-            const allNotifications = [];
-
-            for (const narrative of data) {
-              if (profile.supervisor_id) {
-                approvalsToInsert.push({
-                  type: 'narrative',
-                  entity_id: narrative.id,
-                  intern_id: profile.id,
-                  supervisor_id: profile.supervisor_id,
-                });
-
-                // Supervisor notifications
-                if (deptSupervisors.length > 0) {
-                  deptSupervisors.forEach(s => {
-                    allNotifications.push({
-                      user_id: s.id,
-                      type: 'pending_approval',
-                      title: 'Narrative Pending Review',
-                      message: `${profile.full_name} submitted a ${narrative.session} narrative for ${formatDate(selectedDate)}${isLate ? ' (late submission)' : ''}`,
-                      entity_type: 'narrative',
-                      entity_id: narrative.id,
-                    });
-                  });
-                }
-
-                // Admin notifications (exclude supervisors already notified)
-                adminsForNotif
-                  .filter(a => !deptSupervisorIds.includes(a.id))
-                  .forEach(a => {
-                    allNotifications.push({
-                      user_id: a.id,
-                      type: 'pending_approval',
-                      title: 'Narrative Pending Review',
-                      message: `${profile.full_name} submitted a ${narrative.session} narrative for ${formatDate(selectedDate)}${isLate ? ' (late submission)' : ''}`,
-                      entity_type: 'narrative',
-                      entity_id: narrative.id,
-                    });
-                  });
-              }
-            }
-
-            // Batch insert approvals and notifications in parallel
-            const dbOps = [];
-            if (approvalsToInsert.length > 0) {
-              dbOps.push(supabase.from('approvals').insert(approvalsToInsert));
-            }
-            if (allNotifications.length > 0) {
-              dbOps.push(supabase.from('notifications').insert(allNotifications));
-            }
-            await Promise.all(dbOps);
-
-            // Send emails (fire-and-forget) and audit logs
-            for (const narrative of data) {
-              const emailHtml = `
-                <!DOCTYPE html>
-                <html>
-                  <head>
-                    <style>
-                      body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
-                      .container { max-width: 600px; margin: 0 auto; padding: 20px; }
-                      .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px; border-radius: 5px 5px 0 0; }
-                      .content { background: #f9f9f9; padding: 20px; border: 1px solid #ddd; border-radius: 0 0 5px 5px; }
-                      .badge { display: inline-block; background: #f59e0b; color: white; padding: 6px 12px; border-radius: 4px; font-weight: bold; font-size: 12px; margin-left: 8px; }
-                      .late-badge { background: #ef4444; }
-                      .footer { margin-top: 20px; padding-top: 20px; border-top: 1px solid #ddd; font-size: 12px; color: #666; }
-                    </style>
-                  </head>
-                  <body>
-                    <div class="container">
-                      <div class="header">
-                        <h1>Narrative Pending Review</h1>
-                      </div>
-                      <div class="content">
-                        <p><strong>${profile.full_name}</strong> submitted a <strong>${narrative.session === 'morning' ? 'Morning' : 'Afternoon'}</strong> narrative for <strong>${formatDate(selectedDate)}</strong>${isLate ? ' <span class="badge late-badge">LATE SUBMISSION</span>' : ''}</p>
-                        <p>The narrative is awaiting your review and approval.</p>
-                        <p><a href="${window.location.origin}/#/approvals" style="background: #667eea; color: white; padding: 10px 20px; text-decoration: none; border-radius: 4px; display: inline-block; margin-top: 10px;">View in System</a></p>
-                      </div>
-                      <div class="footer">
-                        <p>This is an automated notification. Please do not reply to this email.</p>
-                      </div>
-                    </div>
-                  </body>
-                </html>
-              `;
-
-              // Email to supervisors
-              deptSupervisors.forEach(supervisor => {
-                if (supervisor?.email) {
-                  sendEmailNotification(
-                    supervisor.email,
-                    `Narrative Pending Review - ${profile.full_name} (${narrative.session === 'morning' ? 'Morning' : 'Afternoon'})`,
-                    emailHtml
-                  ).catch(err => console.error('Failed to send narrative email:', err));
-                }
-              });
-
-              // Email to admins (exclude supervisors)
-              adminsForNotif
-                .filter(a => !deptSupervisorIds.includes(a.id) && a.email)
-                .forEach(admin => {
-                  sendEmailNotification(
-                    admin.email,
-                    `Narrative Pending Review - ${profile.full_name} (${narrative.session === 'morning' ? 'Morning' : 'Afternoon'})`,
-                    emailHtml
-                  ).catch(err => console.error('Failed to send admin email:', err));
-                });
-
-              // Audit log (fire-and-forget)
-              logAudit('narrative.submitted', 'narrative', narrative.id, {
-                task_id: narrative.task_id,
-                session: narrative.session,
-                is_late: isLate,
-              }).catch(err => console.error('Failed to log audit:', err));
-            }
-          } catch (bgErr) {
-            console.error('Background notification error:', bgErr);
-          }
-        })();
-      } catch (err) {
-        showToast(err.message || 'Failed to submit narrative', 'error');
-        submitBtn.disabled = false;
-        submitBtn.textContent = 'Submit Narratives';
-      }
-    });
-  }, '/narratives');
 }
 
 function openEditNarrativeModal(narrative, tasks, profile) {
@@ -1053,12 +471,10 @@ function openEditNarrativeModal(narrative, tasks, profile) {
           <label class="form-label">Session</label>
           <p class="text-sm text-neutral-600 capitalize">${narrative.session}</p>
         </div>
-        ${narrative.hours !== null && narrative.hours !== undefined ? `
-          <div>
-            <label class="form-label">Hours</label>
-            <p class="text-sm text-neutral-600">${formatHoursDisplay(narrative.hours)}</p>
-          </div>
-        ` : ''}
+        <div>
+          <label class="form-label">Hours</label>
+          <p id="narrative-hours-display" class="text-sm text-neutral-600">Loading...</p>
+        </div>
       </div>
 
       ${narrative.rejection_reason ? `
@@ -1080,6 +496,47 @@ function openEditNarrativeModal(narrative, tasks, profile) {
       </div>
     </form>
   `, async (el, close) => {
+    // Fetch attendance for this narrative's date to calculate fallback hours
+    let attendanceHours = null;
+    try {
+      const { data: attendanceRecord } = await supabase
+        .from('attendance_records')
+        .select('time_in_1, time_out_1, time_in_2, time_out_2')
+        .eq('intern_id', profile.id)
+        .eq('date', narrative.date)
+        .maybeSingle();
+
+      if (attendanceRecord) {
+        if (narrative.session === 'morning' && attendanceRecord.time_in_1 && attendanceRecord.time_out_1) {
+          attendanceHours = calculateSessionHours(attendanceRecord.time_in_1, attendanceRecord.time_out_1);
+        } else if (narrative.session === 'afternoon' && attendanceRecord.time_in_2 && attendanceRecord.time_out_2) {
+          attendanceHours = calculateSessionHours(attendanceRecord.time_in_2, attendanceRecord.time_out_2);
+        }
+      }
+    } catch (err) {
+      console.error('Failed to fetch attendance for narrative hours:', err);
+    }
+
+    // Use fallback logic: prefer stored positive hours, otherwise use attendance-derived hours
+    const storedHours = narrative.hours !== null && narrative.hours !== undefined ? Number(narrative.hours) : null;
+    let displayHours = null;
+    
+    if (Number.isFinite(storedHours) && storedHours > 0) {
+      displayHours = storedHours;
+    } else if (Number.isFinite(attendanceHours) && attendanceHours > 0) {
+      displayHours = attendanceHours;
+    } else if (Number.isFinite(storedHours)) {
+      displayHours = storedHours;
+    } else if (Number.isFinite(attendanceHours)) {
+      displayHours = attendanceHours;
+    }
+
+    // Update the hours display
+    const hoursDisplay = el.querySelector('#narrative-hours-display');
+    if (hoursDisplay) {
+      hoursDisplay.textContent = displayHours !== null ? formatHoursDisplay(displayHours) : '—';
+    }
+
     const Quill = await getQuill();
     const quill = new Quill('#edit-narrative-editor', {
       theme: 'snow',
