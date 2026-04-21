@@ -6,7 +6,7 @@ import { getProfile } from '../lib/auth.js';
 import { renderLayout } from '../components/layout.js';
 import { supabase } from '../lib/supabase.js';
 import { icons } from '../lib/icons.js';
-import { formatDate, formatDateTime, formatHoursDisplay, truncate, formatDateKey } from '../lib/utils.js';
+import { formatDate, formatDateTime, formatHoursDisplay, truncate, formatDateKey, calculateSessionHours } from '../lib/utils.js';
 import { createModal } from '../lib/component.js';
 import { showToast } from '../lib/toast.js';
 
@@ -72,10 +72,41 @@ export async function renderTeamNarrativesPage() {
   let selectedDateRange = '30'; // Default to last 30 days
   let showLateOnly = false;
   let narratives = [];
+  let attendanceByInternDate = {};
+
+  function getAttendanceMapKey(internId, date) {
+    return `${internId}::${date}`;
+  }
+
+  function resolveNarrativeHours(narrative) {
+    if (!narrative) return null;
+
+    const narrativeHours = narrative.hours !== null && narrative.hours !== undefined
+      ? Number(narrative.hours)
+      : null;
+
+    let attendanceHours = null;
+    const attendanceRecord = attendanceByInternDate[getAttendanceMapKey(narrative.intern_id, narrative.date)] || null;
+
+    if (attendanceRecord) {
+      if (narrative.session === 'morning' && attendanceRecord.time_in_1 && attendanceRecord.time_out_1) {
+        attendanceHours = calculateSessionHours(attendanceRecord.time_in_1, attendanceRecord.time_out_1);
+      } else if (narrative.session === 'afternoon' && attendanceRecord.time_in_2 && attendanceRecord.time_out_2) {
+        attendanceHours = calculateSessionHours(attendanceRecord.time_in_2, attendanceRecord.time_out_2);
+      }
+    }
+
+    if (Number.isFinite(narrativeHours) && narrativeHours > 0) return narrativeHours;
+    if (Number.isFinite(attendanceHours) && attendanceHours > 0) return attendanceHours;
+    if (Number.isFinite(narrativeHours)) return narrativeHours;
+    if (Number.isFinite(attendanceHours)) return attendanceHours;
+    return null;
+  }
 
   async function loadNarratives() {
     if (internIds.length === 0) {
       narratives = [];
+      attendanceByInternDate = {};
       return;
     }
 
@@ -96,6 +127,25 @@ export async function renderTeamNarrativesPage() {
 
     const { data } = await query.limit(500);
     narratives = data || [];
+
+    // Fetch attendance records for the loaded narrative dates to support hours fallback.
+    attendanceByInternDate = {};
+    if (narratives.length > 0) {
+      const narrativeDates = [...new Set(narratives.map(n => n.date).filter(Boolean))];
+      const narrativeInternIds = [...new Set(narratives.map(n => n.intern_id).filter(Boolean))];
+
+      if (narrativeDates.length > 0 && narrativeInternIds.length > 0) {
+        const { data: attendanceRecords } = await supabase
+          .from('attendance_records')
+          .select('intern_id, date, time_in_1, time_out_1, time_in_2, time_out_2')
+          .in('intern_id', narrativeInternIds)
+          .in('date', narrativeDates);
+
+        (attendanceRecords || []).forEach(record => {
+          attendanceByInternDate[getAttendanceMapKey(record.intern_id, record.date)] = record;
+        });
+      }
+    }
   }
 
   // Load initial narratives
@@ -111,7 +161,10 @@ export async function renderTeamNarrativesPage() {
   }
 
   function getStats(records) {
-    const totalHours = records.reduce((sum, n) => sum + (n.hours || 0), 0);
+    const totalHours = records.reduce((sum, n) => {
+      const resolvedHours = resolveNarrativeHours(n);
+      return sum + (Number.isFinite(resolvedHours) ? resolvedHours : 0);
+    }, 0);
     return {
       total: records.length,
       pending: records.filter(n => n.status === 'pending').length,
@@ -150,6 +203,7 @@ export async function renderTeamNarrativesPage() {
               'afternoon': 'bg-purple-100 text-purple-700',
             };
             const sessionColor = sessionColors[n.session] || 'bg-neutral-100 text-neutral-600';
+            const displayHours = resolveNarrativeHours(n);
 
             return `
               <div class="card hover:shadow-md transition-all cursor-pointer narrative-card group" data-id="${n.id}">
@@ -169,12 +223,12 @@ export async function renderTeamNarrativesPage() {
                         <span class="text-sm font-medium">${formatDate(n.date)}</span>
                       </div>
                       ${n.session ? `<span class="badge ${sessionColor} text-xs font-medium uppercase tracking-wide">${n.session}</span>` : ''}
-                      ${n.hours ? `
+                      ${displayHours !== null && displayHours !== undefined ? `
                         <div class="flex items-center gap-1 text-xs text-neutral-500">
                           <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
                           </svg>
-                          <span class="font-medium">${formatHoursDisplay(n.hours)}</span>
+                          <span class="font-medium">${formatHoursDisplay(displayHours)}</span>
                         </div>
                       ` : ''}
                     </div>
@@ -207,6 +261,7 @@ export async function renderTeamNarrativesPage() {
         card.addEventListener('click', () => {
           const n = filtered.find(x => x.id === card.dataset.id);
           if (!n) return;
+          const displayHours = resolveNarrativeHours(n);
 
           const sessionColors = {
             'morning': 'bg-blue-100 text-blue-700',
@@ -238,10 +293,10 @@ export async function renderTeamNarrativesPage() {
                     <span class="badge ${sessionColor} text-sm uppercase">${n.session}</span>
                   </div>
                 ` : ''}
-                ${n.hours ? `
+                ${displayHours !== null && displayHours !== undefined ? `
                   <div>
                     <p class="text-xs text-neutral-500 uppercase tracking-wide mb-1">Hours</p>
-                    <p class="text-sm font-semibold text-neutral-900">${formatHoursDisplay(n.hours)}</p>
+                    <p class="text-sm font-semibold text-neutral-900">${formatHoursDisplay(displayHours)}</p>
                   </div>
                 ` : ''}
                 ${n.is_late_submission ? `
