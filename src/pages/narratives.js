@@ -437,7 +437,7 @@ export async function renderNarrativesPage() {
           const allNarratives = [...(todayNarratives || []), ...(recentNarratives || [])];
           const narrative = allNarratives.find(n => n.id === narrativeId);
           if (narrative) {
-            openEditNarrativeModal(narrative, tasks, profile);
+            openEditNarrativeModal(narrative, tasks, profile, attendanceByDate);
           }
         });
       });
@@ -454,7 +454,7 @@ async function fetchExistingNarrativesForDate(internId, date) {
   return data || [];
 }
 
-function openEditNarrativeModal(narrative, tasks, profile) {
+function openEditNarrativeModal(narrative, tasks, profile, attendanceByDate = {}) {
   createModal(`Edit ${narrative.session === 'morning' ? 'Morning' : 'Afternoon'} Narrative`, `
     <form id="edit-narrative-form" class="space-y-4">
       <div>
@@ -496,25 +496,16 @@ function openEditNarrativeModal(narrative, tasks, profile) {
       </div>
     </form>
   `, async (el, close) => {
-    // Fetch attendance for this narrative's date to calculate fallback hours
+    // Reuse already-fetched attendance data to keep modal hours consistent with history cards.
     let attendanceHours = null;
-    try {
-      const { data: attendanceRecord } = await supabase
-        .from('attendance_records')
-        .select('time_in_1, time_out_1, time_in_2, time_out_2')
-        .eq('intern_id', profile.id)
-        .eq('date', narrative.date)
-        .maybeSingle();
+    const attendanceRecord = attendanceByDate?.[narrative.date] || null;
 
-      if (attendanceRecord) {
-        if (narrative.session === 'morning' && attendanceRecord.time_in_1 && attendanceRecord.time_out_1) {
-          attendanceHours = calculateSessionHours(attendanceRecord.time_in_1, attendanceRecord.time_out_1);
-        } else if (narrative.session === 'afternoon' && attendanceRecord.time_in_2 && attendanceRecord.time_out_2) {
-          attendanceHours = calculateSessionHours(attendanceRecord.time_in_2, attendanceRecord.time_out_2);
-        }
+    if (attendanceRecord) {
+      if (narrative.session === 'morning' && attendanceRecord.time_in_1 && attendanceRecord.time_out_1) {
+        attendanceHours = calculateSessionHours(attendanceRecord.time_in_1, attendanceRecord.time_out_1);
+      } else if (narrative.session === 'afternoon' && attendanceRecord.time_in_2 && attendanceRecord.time_out_2) {
+        attendanceHours = calculateSessionHours(attendanceRecord.time_in_2, attendanceRecord.time_out_2);
       }
-    } catch (err) {
-      console.error('Failed to fetch attendance for narrative hours:', err);
     }
 
     // Use fallback logic: prefer stored positive hours, otherwise use attendance-derived hours
