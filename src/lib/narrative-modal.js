@@ -269,6 +269,7 @@ export async function openNarrativeModal(options) {
           </div>
         </div>
         <p id="morning-existing" class="text-xs text-neutral-400 mt-2 hidden"></p>
+        <p id="morning-availability-note" class="text-xs text-warning-600 mt-2 hidden"></p>
         <div id="morning-draft-saving" class="text-xs text-neutral-400 mt-1 hidden">
           <span class="inline-flex items-center gap-1">
             <svg class="w-3 h-3 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -480,14 +481,16 @@ export async function openNarrativeModal(options) {
       existingNarratives = await fetchExistingNarrativesForDate(profile.id, currentDate, false);
 
       // Calculate session hours
+      const hasMorningAttendance = !!(currentAttendance && currentAttendance.time_in_1 && currentAttendance.time_out_1);
+      const hasAfternoonAttendance = !!(currentAttendance && currentAttendance.time_in_2 && currentAttendance.time_out_2);
       morningHours = 0;
       afternoonHours = 0;
 
       if (currentAttendance) {
-        if (currentAttendance.time_in_1 && currentAttendance.time_out_1) {
+        if (hasMorningAttendance) {
           morningHours = calculateSessionHours(currentAttendance.time_in_1, currentAttendance.time_out_1);
         }
-        if (currentAttendance.time_in_2 && currentAttendance.time_out_2) {
+        if (hasAfternoonAttendance) {
           afternoonHours = calculateSessionHours(currentAttendance.time_in_2, currentAttendance.time_out_2);
         }
       }
@@ -495,11 +498,11 @@ export async function openNarrativeModal(options) {
       // Update hours badges
       el.querySelector('#morning-hours-badge').textContent = morningHours > 0
         ? `(${formatHoursDisplay(morningHours)})`
-        : '(No attendance recorded)';
+        : hasMorningAttendance ? '(0 hours recorded)' : '(Morning attendance missing)';
 
       el.querySelector('#afternoon-hours-badge').textContent = afternoonHours > 0
         ? `(${formatHoursDisplay(afternoonHours)})`
-        : '(No attendance recorded)';
+        : hasAfternoonAttendance ? '(0 hours recorded)' : '(Afternoon attendance missing)';
 
       // Check existing narratives and disable already-submitted sessions
       const hasMorning = existingNarratives.some(n => n.session === 'morning');
@@ -508,6 +511,7 @@ export async function openNarrativeModal(options) {
       const morningSection = el.querySelector('#morning-section');
       const afternoonSection = el.querySelector('#afternoon-section');
       const morningExisting = el.querySelector('#morning-existing');
+      const morningAvailabilityNote = el.querySelector('#morning-availability-note');
       const afternoonExisting = el.querySelector('#afternoon-existing');
 
       const morningTaskSelect = el.querySelector('#morning-task');
@@ -518,11 +522,20 @@ export async function openNarrativeModal(options) {
         morningTaskSelect.disabled = true;
         morningExisting.textContent = 'Morning narrative already submitted for this date.';
         morningExisting.classList.remove('hidden');
+        morningAvailabilityNote.classList.add('hidden');
+        morningSection.classList.add('opacity-50');
+      } else if (!hasMorningAttendance) {
+        morningQuill.enable(false);
+        morningTaskSelect.disabled = true;
+        morningExisting.classList.add('hidden');
+        morningAvailabilityNote.textContent = 'Morning narrative is blocked until Time In 1 and Time Out 1 are recorded for this date.';
+        morningAvailabilityNote.classList.remove('hidden');
         morningSection.classList.add('opacity-50');
       } else {
         morningQuill.enable(true);
         morningTaskSelect.disabled = false;
         morningExisting.classList.add('hidden');
+        morningAvailabilityNote.classList.add('hidden');
         morningSection.classList.remove('opacity-50');
       }
 
@@ -545,6 +558,10 @@ export async function openNarrativeModal(options) {
         el.querySelector('#session-info-text').textContent = 'Both sessions already have narratives for this date. Choose a different date.';
         sessionInfo.classList.remove('hidden');
         el.querySelector('#narrative-submit').disabled = true;
+      } else if (!hasMorningAttendance && !hasMorning) {
+        el.querySelector('#session-info-text').textContent = 'Morning narrative is unavailable until Time In 1 and Time Out 1 are recorded for this date.';
+        sessionInfo.classList.remove('hidden');
+        el.querySelector('#narrative-submit').disabled = false;
       } else {
         sessionInfo.classList.add('hidden');
         el.querySelector('#narrative-submit').disabled = false;
@@ -613,6 +630,7 @@ export async function openNarrativeModal(options) {
       const afternoonTaskId = el.querySelector('#afternoon-task').value;
       const currentDate = el.querySelector('#narrative-date').value;
       const isLate = currentDate < today;
+      const hasMorningAttendance = !!(currentAttendance && currentAttendance.time_in_1 && currentAttendance.time_out_1);
 
       // Holiday guard (defense in depth)
       const submitHolidayCheck = await isHoliday(currentDate);
@@ -624,10 +642,10 @@ export async function openNarrativeModal(options) {
       const hasMorning = existingNarratives.some(n => n.session === 'morning');
       const hasAfternoon = existingNarratives.some(n => n.session === 'afternoon');
 
-      const morningContent = !hasMorning ? morningQuill.root.innerHTML : null;
+      const morningContent = !hasMorning && hasMorningAttendance ? morningQuill.root.innerHTML : null;
       const afternoonContent = !hasAfternoon ? afternoonQuill.root.innerHTML : null;
 
-      const morningText = !hasMorning ? morningQuill.getText().trim() : '';
+      const morningText = !hasMorning && hasMorningAttendance ? morningQuill.getText().trim() : '';
       const afternoonText = !hasAfternoon ? afternoonQuill.getText().trim() : '';
 
       // Validate at least one session has content

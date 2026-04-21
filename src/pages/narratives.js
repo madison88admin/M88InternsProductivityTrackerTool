@@ -123,6 +123,24 @@ export async function renderNarrativesPage() {
     const afternoonHours = todayAttendance && todayAttendance.time_in_2 && todayAttendance.time_out_2
       ? calculateSessionHours(todayAttendance.time_in_2, todayAttendance.time_out_2) : null;
 
+    const selectDisplayHours = (storedHours, attendanceHours) => {
+      const parsedStored = storedHours !== null && storedHours !== undefined ? Number(storedHours) : null;
+      const parsedAttendance = attendanceHours !== null && attendanceHours !== undefined ? Number(attendanceHours) : null;
+
+      if (Number.isFinite(parsedStored) && parsedStored > 0) return parsedStored;
+      if (Number.isFinite(parsedAttendance) && parsedAttendance > 0) return parsedAttendance;
+      if (Number.isFinite(parsedStored)) return parsedStored;
+      if (Number.isFinite(parsedAttendance)) return parsedAttendance;
+      return null;
+    };
+
+    const morningNarrativeHours = morningNarrative
+      ? selectDisplayHours(morningNarrative.hours, morningHours)
+      : null;
+    const afternoonNarrativeHours = afternoonNarrative
+      ? selectDisplayHours(afternoonNarrative.hours, afternoonHours)
+      : null;
+
     return `
       <div class="card mb-6">
         <div class="flex items-center justify-between mb-4">
@@ -157,7 +175,7 @@ export async function renderNarrativesPage() {
             <p class="text-xs text-neutral-400 mb-2">Time In 1 → Time Out 1 ${morningHours !== null ? `• ${formatHoursDisplay(morningHours)}` : ''}</p>
             ${morningNarrative ? `
               <div class="prose prose-sm text-neutral-700 text-sm">${morningNarrative.content}</div>
-              ${morningNarrative.hours ? `<p class="text-xs text-neutral-400 mt-2">Hours: ${formatHoursDisplay(morningNarrative.hours)}</p>` : ''}
+              ${morningNarrativeHours !== null && morningNarrativeHours !== undefined ? `<p class="text-xs text-neutral-400 mt-2">Hours: ${formatHoursDisplay(morningNarrativeHours)}</p>` : ''}
               ${morningNarrative.rejection_reason ? `
                 <div class="mt-2 p-2 bg-danger-50 rounded">
                   <p class="text-xs text-danger-600"><strong>Rejected:</strong> ${morningNarrative.rejection_reason}</p>
@@ -192,7 +210,7 @@ export async function renderNarrativesPage() {
             <p class="text-xs text-neutral-400 mb-2">Time In 2 → Time Out 2 ${afternoonHours !== null ? `• ${formatHoursDisplay(afternoonHours)}` : ''}</p>
             ${afternoonNarrative ? `
               <div class="prose prose-sm text-neutral-700 text-sm">${afternoonNarrative.content}</div>
-              ${afternoonNarrative.hours ? `<p class="text-xs text-neutral-400 mt-2">Hours: ${formatHoursDisplay(afternoonNarrative.hours)}</p>` : ''}
+              ${afternoonNarrativeHours !== null && afternoonNarrativeHours !== undefined ? `<p class="text-xs text-neutral-400 mt-2">Hours: ${formatHoursDisplay(afternoonNarrativeHours)}</p>` : ''}
               ${afternoonNarrative.rejection_reason ? `
                 <div class="mt-2 p-2 bg-danger-50 rounded">
                   <p class="text-xs text-danger-600"><strong>Rejected:</strong> ${afternoonNarrative.rejection_reason}</p>
@@ -259,7 +277,7 @@ export async function renderNarrativesPage() {
         <div class="flex items-center justify-between mb-1">
           <p class="text-xs font-semibold text-neutral-500">${label} Session</p>
           <div class="flex items-center gap-2">
-            ${narrative.hours ? `<span class="text-xs text-neutral-400">${formatHoursDisplay(narrative.hours)}</span>` : ''}
+            ${narrative.hours !== null && narrative.hours !== undefined ? `<span class="text-xs text-neutral-400">${formatHoursDisplay(narrative.hours)}</span>` : ''}
             <span class="badge-${narrative.status === 'approved' ? 'approved' : narrative.status === 'rejected' ? 'rejected' : 'pending'}">${narrative.status}</span>
             ${narrative.edited_at ? '<span class="badge bg-info-100 text-info-700 text-xs">Edited</span>' : ''}
             ${canEdit ? `
@@ -459,6 +477,7 @@ function openNarrativeModal(tasks, profile, today) {
           </div>
         </div>
         <p id="morning-existing" class="text-xs text-neutral-400 mt-2 hidden"></p>
+        <p id="morning-availability-note" class="text-xs text-warning-600 mt-2 hidden"></p>
       </div>
 
       <!-- Afternoon Session -->
@@ -671,14 +690,16 @@ function openNarrativeModal(tasks, profile, today) {
       existingNarratives = await fetchExistingNarrativesForDate(profile.id, selectedDate);
 
       // Calculate session hours
+      const hasMorningAttendance = !!(currentAttendance && currentAttendance.time_in_1 && currentAttendance.time_out_1);
+      const hasAfternoonAttendance = !!(currentAttendance && currentAttendance.time_in_2 && currentAttendance.time_out_2);
       morningHours = 0;
       afternoonHours = 0;
 
       if (currentAttendance) {
-        if (currentAttendance.time_in_1 && currentAttendance.time_out_1) {
+        if (hasMorningAttendance) {
           morningHours = calculateSessionHours(currentAttendance.time_in_1, currentAttendance.time_out_1);
         }
-        if (currentAttendance.time_in_2 && currentAttendance.time_out_2) {
+        if (hasAfternoonAttendance) {
           afternoonHours = calculateSessionHours(currentAttendance.time_in_2, currentAttendance.time_out_2);
         }
       }
@@ -686,11 +707,11 @@ function openNarrativeModal(tasks, profile, today) {
       // Update hours badges
       el.querySelector('#morning-hours-badge').textContent = morningHours > 0
         ? `(${formatHoursDisplay(morningHours)})`
-        : '(No attendance recorded)';
+        : hasMorningAttendance ? '(0 hours recorded)' : '(Morning attendance missing)';
 
       el.querySelector('#afternoon-hours-badge').textContent = afternoonHours > 0
         ? `(${formatHoursDisplay(afternoonHours)})`
-        : '(No attendance recorded)';
+        : hasAfternoonAttendance ? '(0 hours recorded)' : '(Afternoon attendance missing)';
 
       // Check existing narratives and disable already-submitted sessions
       const hasMorning = existingNarratives.some(n => n.session === 'morning');
@@ -699,6 +720,7 @@ function openNarrativeModal(tasks, profile, today) {
       const morningSection = el.querySelector('#morning-section');
       const afternoonSection = el.querySelector('#afternoon-section');
       const morningExisting = el.querySelector('#morning-existing');
+      const morningAvailabilityNote = el.querySelector('#morning-availability-note');
       const afternoonExisting = el.querySelector('#afternoon-existing');
 
       const morningTaskSelect = el.querySelector('#morning-task');
@@ -709,11 +731,20 @@ function openNarrativeModal(tasks, profile, today) {
         morningTaskSelect.disabled = true;
         morningExisting.textContent = 'Morning narrative already submitted for this date.';
         morningExisting.classList.remove('hidden');
+        morningAvailabilityNote.classList.add('hidden');
+        morningSection.classList.add('opacity-50');
+      } else if (!hasMorningAttendance) {
+        morningQuill.enable(false);
+        morningTaskSelect.disabled = true;
+        morningExisting.classList.add('hidden');
+        morningAvailabilityNote.textContent = 'Morning narrative is blocked until Time In 1 and Time Out 1 are recorded for this date.';
+        morningAvailabilityNote.classList.remove('hidden');
         morningSection.classList.add('opacity-50');
       } else {
         morningQuill.enable(true);
         morningTaskSelect.disabled = false;
         morningExisting.classList.add('hidden');
+        morningAvailabilityNote.classList.add('hidden');
         morningSection.classList.remove('opacity-50');
       }
 
@@ -736,6 +767,10 @@ function openNarrativeModal(tasks, profile, today) {
         el.querySelector('#session-info-text').textContent = 'Both sessions already have narratives for this date. Choose a different date.';
         sessionInfo.classList.remove('hidden');
         el.querySelector('#narrative-submit').disabled = true;
+      } else if (!hasMorningAttendance && !hasMorning) {
+        el.querySelector('#session-info-text').textContent = 'Morning narrative is unavailable until Time In 1 and Time Out 1 are recorded for this date.';
+        sessionInfo.classList.remove('hidden');
+        el.querySelector('#narrative-submit').disabled = false;
       } else {
         sessionInfo.classList.add('hidden');
         el.querySelector('#narrative-submit').disabled = false;
@@ -768,6 +803,7 @@ function openNarrativeModal(tasks, profile, today) {
       const afternoonTaskId = el.querySelector('#afternoon-task').value;
       const selectedDate = el.querySelector('#narrative-date').value;
       const isLate = selectedDate < today;
+      const hasMorningAttendance = !!(currentAttendance && currentAttendance.time_in_1 && currentAttendance.time_out_1);
 
       // Holiday guard (defense in depth)
       const submitHolidayCheck = await isHoliday(selectedDate);
@@ -779,10 +815,10 @@ function openNarrativeModal(tasks, profile, today) {
       const hasMorning = existingNarratives.some(n => n.session === 'morning');
       const hasAfternoon = existingNarratives.some(n => n.session === 'afternoon');
 
-      const morningContent = !hasMorning ? morningQuill.root.innerHTML : null;
+      const morningContent = !hasMorning && hasMorningAttendance ? morningQuill.root.innerHTML : null;
       const afternoonContent = !hasAfternoon ? afternoonQuill.root.innerHTML : null;
 
-      const morningText = !hasMorning ? morningQuill.getText().trim() : '';
+      const morningText = !hasMorning && hasMorningAttendance ? morningQuill.getText().trim() : '';
       const afternoonText = !hasAfternoon ? afternoonQuill.getText().trim() : '';
 
       // Validate at least one session has content
@@ -1017,7 +1053,7 @@ function openEditNarrativeModal(narrative, tasks, profile) {
           <label class="form-label">Session</label>
           <p class="text-sm text-neutral-600 capitalize">${narrative.session}</p>
         </div>
-        ${narrative.hours ? `
+        ${narrative.hours !== null && narrative.hours !== undefined ? `
           <div>
             <label class="form-label">Hours</label>
             <p class="text-sm text-neutral-600">${formatHoursDisplay(narrative.hours)}</p>

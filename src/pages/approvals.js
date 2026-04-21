@@ -8,11 +8,12 @@ import { supabase } from '../lib/supabase.js';
 import { showToast } from '../lib/toast.js';
 import { logAudit } from '../lib/audit.js';
 import { icons } from '../lib/icons.js';
-import { formatDate, formatTime, formatDateTime, formatHoursDisplay, getTodayDate } from '../lib/utils.js';
+import { formatDate, formatTime, formatDateTime, formatHoursDisplay, getTodayDate, calculateSessionHours } from '../lib/utils.js';
 import { createModal } from '../lib/component.js';
 import { sendEmailNotification, getApprovalResultTemplate } from '../lib/email-notifications.js';
 
 let approvalsPanelMode = 'list';
+let deptApprovalsPanelMode = 'list';
 
 export async function renderApprovalsPage() {
   const profile = getProfile();
@@ -67,8 +68,13 @@ export async function renderApprovalsPage() {
   const actionablePendingCount = allPendingApprovals.filter(a => isAdmin || a.type !== 'attendance_correction').length;
   const actionableDeptPendingCount = deptPendingApprovals.filter(a => a.type !== 'attendance_correction').length;
   const isDailyApprovalType = (type) => type === 'attendance' || type === 'narrative';
+  const deptPendingDailyApprovals = deptPendingApprovals.filter(a => isDailyApprovalType(a.type));
+  const deptPendingOtherApprovals = deptPendingApprovals.filter(a => !isDailyApprovalType(a.type));
   const pendingDailyApprovals = pendingApprovals.filter(a => isDailyApprovalType(a.type));
   const pendingOtherApprovals = pendingApprovals.filter(a => !isDailyApprovalType(a.type));
+  const deptPendingSummaryBuckets = deptApprovalsPanelMode === 'summary'
+    ? await buildPendingDaySummaries(deptPendingDailyApprovals)
+    : [];
   const pendingSummaryBuckets = approvalsPanelMode === 'summary'
     ? await buildPendingDaySummaries(pendingDailyApprovals)
     : [];
@@ -85,13 +91,17 @@ export async function renderApprovalsPage() {
       <div class="flex items-center justify-between mb-4">
         <h3 class="text-base font-bold text-neutral-900">Pending - My Department (${deptPendingApprovals.length})</h3>
         <div class="flex gap-3 items-center">
+          <div class="filter-tabs mb-0!">
+            <button type="button" class="filter-tab approvals-panel-toggle ${deptApprovalsPanelMode === 'list' ? 'active' : ''}" data-panel="dept" data-mode="list">List View</button>
+            <button type="button" class="filter-tab approvals-panel-toggle ${deptApprovalsPanelMode === 'summary' ? 'active' : ''}" data-panel="dept" data-mode="summary">Day Summary</button>
+          </div>
           <select id="dept-pending-sort" class="form-input py-2 px-3 text-sm min-w-max">
             <option value="date-desc">Sort: Newest First</option>
             <option value="date-asc">Sort: Oldest First</option>
             <option value="intern-asc">Sort: Intern A-Z</option>
             <option value="type">Sort: By Type</option>
           </select>
-          ${actionableDeptPendingCount > 0 ? `
+          ${deptApprovalsPanelMode === 'list' && actionableDeptPendingCount > 0 ? `
             <button id="bulk-approve-dept-btn" class="btn-sm btn-success">
               ${icons.check} Approve All (${actionableDeptPendingCount})
             </button>
@@ -99,9 +109,27 @@ export async function renderApprovalsPage() {
         </div>
       </div>
 
-      <div class="space-y-3" id="dept-pending-approvals-container">
-        ${deptPendingApprovals.map(a => renderApprovalCard(a, isAdmin)).join('')}
-      </div>
+      ${deptApprovalsPanelMode === 'summary' ? `
+        <div class="space-y-4" id="dept-pending-approvals-container">
+          ${deptPendingSummaryBuckets.length > 0 ? deptPendingSummaryBuckets.map(bucket => renderPendingSummaryCard(bucket)).join('') : `
+            <div class="text-center py-8 text-neutral-400 border border-dashed border-neutral-200 rounded-lg">
+              <p>No daily attendance or narrative approvals to summarize</p>
+            </div>
+          `}
+          ${deptPendingOtherApprovals.length > 0 ? `
+            <div class="pt-2 border-t border-neutral-200">
+              <h4 class="text-sm font-semibold text-neutral-700 mb-3">Other Pending Items</h4>
+              <div class="space-y-3">
+                ${deptPendingOtherApprovals.map(a => renderApprovalCard(a, isAdmin)).join('')}
+              </div>
+            </div>
+          ` : ''}
+        </div>
+      ` : `
+        <div class="space-y-3" id="dept-pending-approvals-container">
+          ${deptPendingApprovals.map(a => renderApprovalCard(a, isAdmin)).join('')}
+        </div>
+      `}
     </div>
     ` : ''}
 
@@ -111,8 +139,8 @@ export async function renderApprovalsPage() {
         <h3 class="text-base font-bold text-neutral-900">${approvalsPanelMode === 'summary' ? 'Day Summary' : (isAdmin && profile.department_id ? 'Other Pending' : 'Pending')} (${pendingApprovals.length})</h3>
         <div class="flex gap-3 items-center">
           <div class="filter-tabs mb-0!">
-            <button type="button" class="filter-tab approvals-panel-toggle ${approvalsPanelMode === 'list' ? 'active' : ''}" data-mode="list">List View</button>
-            <button type="button" class="filter-tab approvals-panel-toggle ${approvalsPanelMode === 'summary' ? 'active' : ''}" data-mode="summary">Day Summary</button>
+            <button type="button" class="filter-tab approvals-panel-toggle ${approvalsPanelMode === 'list' ? 'active' : ''}" data-panel="main" data-mode="list">List View</button>
+            <button type="button" class="filter-tab approvals-panel-toggle ${approvalsPanelMode === 'summary' ? 'active' : ''}" data-panel="main" data-mode="summary">Day Summary</button>
           </div>
           <select id="pending-sort" class="form-input py-2 px-3 text-sm min-w-max">
             <option value="date-desc">Sort: Newest First</option>
@@ -232,7 +260,10 @@ export async function renderApprovalsPage() {
       <div class="text-xs text-neutral-400 mt-2">Showing up to 50 most recent records</div>
     </div>
   `, (el) => {
-    const summaryBucketMap = new Map(pendingSummaryBuckets.map(bucket => [bucket.key, bucket]));
+    const summaryBucketMap = new Map([
+      ...deptPendingSummaryBuckets.map(bucket => [bucket.key, bucket]),
+      ...pendingSummaryBuckets.map(bucket => [bucket.key, bucket]),
+    ]);
 
     // Sorting function
     function sortApprovals(approvalsToSort, sortBy) {
@@ -267,7 +298,7 @@ export async function renderApprovalsPage() {
       }
     }
 
-    function renderSummaryContainer(sortedSummaries) {
+    function renderSummaryContainer(sortedSummaries, otherApprovals = pendingOtherApprovals) {
       const summaryHtml = sortedSummaries.length > 0
         ? sortedSummaries.map(bucket => renderPendingSummaryCard(bucket)).join('')
         : `
@@ -276,12 +307,12 @@ export async function renderApprovalsPage() {
           </div>
         `;
 
-      const otherPendingHtml = pendingOtherApprovals.length > 0
+      const otherPendingHtml = otherApprovals.length > 0
         ? `
           <div class="pt-2 border-t border-neutral-200">
             <h4 class="text-sm font-semibold text-neutral-700 mb-3">Other Pending Items</h4>
             <div class="space-y-3">
-              ${pendingOtherApprovals.map(a => renderApprovalCard(a, isAdmin)).join('')}
+              ${otherApprovals.map(a => renderApprovalCard(a, isAdmin)).join('')}
             </div>
           </div>
         `
@@ -320,19 +351,32 @@ export async function renderApprovalsPage() {
 
     el.querySelectorAll('.approvals-panel-toggle').forEach(btn => {
       btn.addEventListener('click', async () => {
+        const panelScope = btn.dataset.panel || 'main';
         const nextMode = btn.dataset.mode || 'list';
-        if (nextMode === approvalsPanelMode) return;
-        approvalsPanelMode = nextMode;
+        if (panelScope === 'dept') {
+          if (nextMode === deptApprovalsPanelMode) return;
+          deptApprovalsPanelMode = nextMode;
+        } else {
+          if (nextMode === approvalsPanelMode) return;
+          approvalsPanelMode = nextMode;
+        }
         await renderApprovalsPage();
       });
     });
 
     // Department pending sort handler
     el.querySelector('#dept-pending-sort')?.addEventListener('change', (e) => {
-      const sorted = sortApprovals(deptPendingApprovals, e.target.value);
       const container = el.querySelector('#dept-pending-approvals-container');
-      container.innerHTML = sorted.map(a => renderApprovalCard(a, isAdmin)).join('');
-      attachApprovalListeners(container);
+      if (container) {
+        if (deptApprovalsPanelMode === 'summary') {
+          const sortedSummaries = sortSummaryBuckets(deptPendingSummaryBuckets, e.target.value);
+          container.innerHTML = renderSummaryContainer(sortedSummaries, deptPendingOtherApprovals);
+        } else {
+          const sorted = sortApprovals(deptPendingApprovals, e.target.value);
+          container.innerHTML = sorted.map(a => renderApprovalCard(a, isAdmin)).join('');
+        }
+        attachApprovalListeners(container);
+      }
     });
 
     // Other pending sort handler
@@ -657,6 +701,34 @@ function renderPendingSummaryCard(summary) {
   `;
 }
 
+function resolveNarrativeHours(narrative, attendanceRecord = null) {
+  if (!narrative) return null;
+  const narrativeHours = narrative.hours !== null && narrative.hours !== undefined
+    ? Number(narrative.hours)
+    : null;
+
+  let attendanceHours = null;
+
+  if (attendanceRecord) {
+    if (narrative.session === 'morning') {
+      if (attendanceRecord.time_in_1 && attendanceRecord.time_out_1) {
+        attendanceHours = calculateSessionHours(attendanceRecord.time_in_1, attendanceRecord.time_out_1);
+      }
+    } else if (narrative.session === 'afternoon') {
+      if (attendanceRecord.time_in_2 && attendanceRecord.time_out_2) {
+        attendanceHours = calculateSessionHours(attendanceRecord.time_in_2, attendanceRecord.time_out_2);
+      }
+    }
+  }
+
+  if (Number.isFinite(narrativeHours) && narrativeHours > 0) return narrativeHours;
+  if (Number.isFinite(attendanceHours) && attendanceHours > 0) return attendanceHours;
+  if (Number.isFinite(narrativeHours)) return narrativeHours;
+  if (Number.isFinite(attendanceHours)) return attendanceHours;
+
+  return null;
+}
+
 async function openDailySummaryModal(summary, approvals) {
   const approvalMap = new Map(approvals.map(approval => [approval.id, approval]));
 
@@ -740,15 +812,21 @@ async function openDailySummaryModal(summary, approvals) {
       ${attendance.is_outside_hours ? '<p class="text-xs text-danger-600 mt-1">Outside hours flagged</p>' : ''}
     ` : '<p class="text-sm text-neutral-400">No attendance record found for this day.</p>';
 
-    const narrativeBody = (narrative) => narrative ? `
+    const narrativeBody = (narrative) => {
+      if (!narrative) return '<p class="text-sm text-neutral-400">No narrative found for this session.</p>';
+
+      const displayHours = resolveNarrativeHours(narrative, attendance);
+
+      return `
       <div class="space-y-3">
         ${narrative.task ? `<p class="text-xs text-primary-600 font-medium">Task: ${narrative.task.title}</p>` : ''}
         <div class="prose prose-sm text-neutral-700 text-sm border border-neutral-200 rounded-lg p-3 bg-white">${narrative.content}</div>
-        ${narrative.hours ? `<p class="text-xs text-neutral-400">Hours: ${formatHoursDisplay(narrative.hours)}</p>` : ''}
+        ${displayHours !== null ? `<p class="text-xs text-neutral-400">Hours: ${formatHoursDisplay(displayHours)}</p>` : ''}
         ${narrative.edited_at ? `<p class="text-xs text-info-600">Edited: ${formatDateTime(narrative.edited_at)}</p>` : ''}
         ${narrative.is_late_submission ? '<p class="text-xs text-warning-600">Late submission</p>' : ''}
       </div>
-    ` : '<p class="text-sm text-neutral-400">No narrative found for this session.</p>';
+    `;
+    };
 
     const contentHtml = `
       <div class="space-y-4">
@@ -1296,6 +1374,15 @@ async function viewApprovalDetails(approvalId, approvals) {
       .single();
 
     if (narrative) {
+      const { data: attendance } = await supabase
+        .from('attendance_records')
+        .select('time_in_1, time_out_1, time_in_2, time_out_2')
+        .eq('intern_id', narrative.intern_id)
+        .eq('date', narrative.date)
+        .maybeSingle();
+
+      const displayHours = resolveNarrativeHours(narrative, attendance || null);
+
       detailHtml = `
         <div class="space-y-3">
           <div class="p-3 bg-neutral-50 rounded-lg">
@@ -1312,10 +1399,10 @@ async function viewApprovalDetails(approvalId, approvals) {
               <p class="font-medium capitalize">${narrative.session || '—'}</p>
             </div>
           </div>
-          ${narrative.hours ? `
+          ${displayHours !== null ? `
             <div class="p-3 bg-neutral-50 rounded-lg">
               <p class="text-xs text-neutral-500">Hours</p>
-              <p class="font-medium">${formatHoursDisplay(narrative.hours)}</p>
+              <p class="font-medium">${formatHoursDisplay(displayHours)}</p>
             </div>
           ` : ''}
           ${narrative.edited_at ? `
