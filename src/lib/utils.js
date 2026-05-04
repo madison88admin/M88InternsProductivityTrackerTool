@@ -178,8 +178,11 @@ export function isOutsideAllowedHours(timestamp) {
  * @returns {string}
  */
 export function formatHoursDisplay(hours) {
-  const h = Math.floor(hours);
-  const m = Math.round((hours - h) * 60);
+  const numericHours = Number(hours);
+  if (!Number.isFinite(numericHours) || numericHours <= 0) return '0h';
+  const totalMinutes = Math.round(numericHours * 60);
+  const h = Math.floor(totalMinutes / 60);
+  const m = totalMinutes % 60;
   if (m === 0) return `${h}h`;
   return `${h}h ${m}m`;
 }
@@ -191,8 +194,12 @@ export function formatHoursDisplay(hours) {
  * @returns {string}
  */
 export function formatHoursBothFormats(hours) {
-  const timeFormat = formatHoursDisplay(hours);
-  const decimalFormat = hours.toFixed(2);
+  const numericHours = Number(hours);
+  if (!Number.isFinite(numericHours) || numericHours <= 0) return '0h (0.00 hrs)';
+  const totalMinutes = Math.round(numericHours * 60);
+  const normalizedHours = totalMinutes / 60;
+  const timeFormat = formatHoursDisplay(normalizedHours);
+  const decimalFormat = normalizedHours.toFixed(2);
   return `${timeFormat} (${decimalFormat} hrs)`;
 }
 
@@ -202,9 +209,11 @@ export function formatHoursBothFormats(hours) {
  * @returns {string}
  */
 export function formatHoursAsHHMM(decimalHours) {
-  if (!decimalHours || decimalHours <= 0) return '00:00';
-  const hours = Math.floor(decimalHours);
-  const minutes = Math.round((decimalHours - hours) * 60);
+  const numericHours = Number(decimalHours);
+  if (!Number.isFinite(numericHours) || numericHours <= 0) return '00:00';
+  const totalMinutes = Math.round(numericHours * 60);
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
   return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
 }
 

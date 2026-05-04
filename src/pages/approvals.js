@@ -971,6 +971,7 @@ async function processApproval(approvalId, status, comments, approval) {
         status,
         rejection_reason: status === 'rejected' ? comments : null,
         approved_at: status === 'approved' ? new Date().toISOString() : null,
+        supervisor_id: status === 'approved' ? reviewerId : approval.supervisor_id,
       })
       .eq('id', approval.entity_id);
 

@@ -396,7 +396,7 @@ async function updateDarPreview(el) {
 export async function fetchDarData(internId, startDate, endDate) {
   const [
     { data: intern },
-    { data: attendance },
+    { data: attendanceRaw },
     { data: narratives },
     { data: holidays },
     { data: allowancePeriod },
@@ -442,7 +442,82 @@ export async function fetchDarData(internId, startDate, endDate) {
       .maybeSingle(),
   ]);
 
-  const supervisorIds = new Set((attendance || []).map(a => a.supervisor_id).filter(Boolean));
+  const attendance = attendanceRaw || [];
+  let attendanceApprovals = [];
+  if (attendance.length > 0) {
+    const attendanceEntityIds = attendance.map(record => record.id).filter(Boolean);
+    if (attendanceEntityIds.length > 0) {
+      const { data } = await supabase
+        .from('approvals')
+        .select('entity_id, reviewed_by, supervisor_id, reviewed_at')
+        .eq('type', 'attendance')
+        .eq('status', 'approved')
+        .in('entity_id', attendanceEntityIds)
+        .order('reviewed_at', { ascending: false });
+      attendanceApprovals = data || [];
+    }
+  }
+
+  const attendanceApprovalByEntity = new Map();
+  for (const approval of attendanceApprovals) {
+    if (!approval?.entity_id) continue;
+    if (!attendanceApprovalByEntity.has(approval.entity_id)) {
+      attendanceApprovalByEntity.set(approval.entity_id, approval);
+    }
+  }
+
+  const attendanceWithReviewer = attendance.map(record => {
+    const approval = attendanceApprovalByEntity.get(record.id);
+    const approvedById = approval?.reviewed_by || approval?.supervisor_id || record.supervisor_id || null;
+    return {
+      ...record,
+      approved_by_id: approvedById,
+    };
+  });
+
+  const narrativesList = narratives || [];
+  let narrativeApprovals = [];
+  if (narrativesList.length > 0) {
+    const narrativeEntityIds = narrativesList.map(record => record.id).filter(Boolean);
+    if (narrativeEntityIds.length > 0) {
+      const { data } = await supabase
+        .from('approvals')
+        .select('entity_id, reviewed_by, supervisor_id, reviewed_at')
+        .eq('type', 'narrative')
+        .eq('status', 'approved')
+        .in('entity_id', narrativeEntityIds)
+        .order('reviewed_at', { ascending: false });
+      narrativeApprovals = data || [];
+    }
+  }
+
+  const narrativeApprovalByEntity = new Map();
+  for (const approval of narrativeApprovals) {
+    if (!approval?.entity_id) continue;
+    if (!narrativeApprovalByEntity.has(approval.entity_id)) {
+      narrativeApprovalByEntity.set(approval.entity_id, approval);
+    }
+  }
+
+  const narrativesWithReviewer = narrativesList.map(record => {
+    const approval = narrativeApprovalByEntity.get(record.id);
+    const approvedById = approval?.reviewed_by || approval?.supervisor_id || record.supervisor_id || null;
+    return {
+      ...record,
+      approved_by_id: approvedById,
+    };
+  });
+
+  const supervisorIds = new Set(
+    attendanceWithReviewer
+      .flatMap(record => [record.supervisor_id, record.approved_by_id])
+      .filter(Boolean)
+  );
+  narrativesWithReviewer
+    .forEach(record => {
+      if (record?.approved_by_id) supervisorIds.add(record.approved_by_id);
+      if (record?.supervisor_id) supervisorIds.add(record.supervisor_id);
+    });
   if (intern?.supervisor_id) supervisorIds.add(intern.supervisor_id);
 
   let supervisors = [];
@@ -456,8 +531,8 @@ export async function fetchDarData(internId, startDate, endDate) {
 
   return {
     intern,
-    attendance: attendance || [],
-    narratives: narratives || [],
+    attendance: attendanceWithReviewer,
+    narratives: narrativesWithReviewer,
     holidays: holidays || [],
     supervisors,
     allowancePeriod,
@@ -668,6 +743,13 @@ export async function generateDarPdf(darData, weekNum, startDate, existingDoc, o
   const signatureCells = [];
   const holidayByDate = new Map((holidays || []).map(h => [h.date, h.name || 'Holiday']));
 
+  function getAttendanceHours(record) {
+    const derivedHours = calculateSessionHours(record?.time_in_1, record?.time_out_1)
+      + calculateSessionHours(record?.time_in_2, record?.time_out_2);
+    if (derivedHours > 0) return derivedHours;
+    return Number(record?.total_hours || 0);
+  }
+
   weekdays.forEach((dateStr, dayIdx) => {
     const att = attendance.find(a => a.date === dateStr);
     const morningNarr = narratives.find(n => n.date === dateStr && n.session === 'morning');
@@ -676,14 +758,34 @@ export async function generateDarPdf(darData, weekNum, startDate, existingDoc, o
     const isHolidayDate = !!holidayName;
     const isNoLog = !att && !isHolidayDate;  // No attendance AND not a holiday
     const isApproved = att?.status === 'approved';
-    const supervisorSigDataUrl = att?.supervisor_id
-      ? (supervisorSigById.get(att.supervisor_id) || defaultSupervisorSigDataUrl)
+    const effectiveApproverId = att?.approved_by_id || att?.supervisor_id || intern?.supervisor_id;
+    const supervisorSigDataUrl = effectiveApproverId
+      ? (supervisorSigById.get(effectiveApproverId) || defaultSupervisorSigDataUrl)
+      : defaultSupervisorSigDataUrl;
+    const isMorningApproved = isApproved || morningNarr?.status === 'approved';
+    const isAfternoonApproved = isApproved || afternoonNarr?.status === 'approved';
+    const morningApproverId = morningNarr?.approved_by_id || effectiveApproverId;
+    const afternoonApproverId = afternoonNarr?.approved_by_id || effectiveApproverId;
+    const morningSupervisorSigDataUrl = morningApproverId
+      ? (supervisorSigById.get(morningApproverId) || defaultSupervisorSigDataUrl)
+      : defaultSupervisorSigDataUrl;
+    const afternoonSupervisorSigDataUrl = afternoonApproverId
+      ? (supervisorSigById.get(afternoonApproverId) || defaultSupervisorSigDataUrl)
       : defaultSupervisorSigDataUrl;
     const holidayTask = `--- SUSPENSION OF WORK DUE TO ${formatHolidayName(holidayName)} HOLIDAY ---`;
     const noLogTask = '--- NO RECORDED LOG FOR THIS DAY ---';
 
     // Morning session (calculate for display purposes only)
-    const mHours = isHolidayDate ? 0 : (isNoLog ? 0 : calculateSessionHours(att?.time_in_1, att?.time_out_1));
+    const mNarrHoursRaw = Number(morningNarr?.hours);
+    const mNarrHours = Number.isFinite(mNarrHoursRaw) ? mNarrHoursRaw : null;
+    const mHoursFromAttendance = calculateSessionHours(att?.time_in_1, att?.time_out_1);
+    const mHours = isHolidayDate
+      ? 0
+      : (isNoLog
+        ? 0
+        : (mHoursFromAttendance > 0
+          ? mHoursFromAttendance
+          : ((isMorningApproved && mNarrHours !== null && mNarrHours >= 0) ? mNarrHours : 0)));
     const mTask = morningNarr?.task?.title || '';
     const mContent = stripHtml(morningNarr?.content);
     let mAccomplished = mTask ? `${mTask}${mContent ? ': ' + mContent : ''}` : mContent;
@@ -703,16 +805,25 @@ export async function generateDarPdf(darData, weekNum, startDate, existingDoc, o
 
     const mRowIdx = dayIdx * 2;
     // Add intern signature for approved, holiday, or no-log entries
-    if ((isApproved || isHolidayDate || isNoLog) && internSigDataUrl) {
+    if ((isMorningApproved || isHolidayDate || isNoLog) && internSigDataUrl) {
       signatureCells.push({ row: mRowIdx, col: 5, dataUrl: internSigDataUrl });
     }
     // Add supervisor signature only for approved or holiday (not for no-log)
-    if ((isApproved || isHolidayDate) && supervisorSigDataUrl) {
-      signatureCells.push({ row: mRowIdx, col: 6, dataUrl: supervisorSigDataUrl });
+    if ((isMorningApproved || isHolidayDate) && morningSupervisorSigDataUrl) {
+      signatureCells.push({ row: mRowIdx, col: 6, dataUrl: morningSupervisorSigDataUrl });
     }
 
     // Afternoon session (calculate for display purposes only)
-    const aHours = isHolidayDate ? 0 : (isNoLog ? 0 : calculateSessionHours(att?.time_in_2, att?.time_out_2));
+    const aNarrHoursRaw = Number(afternoonNarr?.hours);
+    const aNarrHours = Number.isFinite(aNarrHoursRaw) ? aNarrHoursRaw : null;
+    const aHoursFromAttendance = calculateSessionHours(att?.time_in_2, att?.time_out_2);
+    const aHours = isHolidayDate
+      ? 0
+      : (isNoLog
+        ? 0
+        : (aHoursFromAttendance > 0
+          ? aHoursFromAttendance
+          : ((isAfternoonApproved && aNarrHours !== null && aNarrHours >= 0) ? aNarrHours : 0)));
     const aTask = afternoonNarr?.task?.title || '';
     const aContent = stripHtml(afternoonNarr?.content);
     let aAccomplished = aTask ? `${aTask}${aContent ? ': ' + aContent : ''}` : aContent;
@@ -732,19 +843,16 @@ export async function generateDarPdf(darData, weekNum, startDate, existingDoc, o
 
     const aRowIdx = dayIdx * 2 + 1;
     // Add intern signature for approved, holiday, or no-log entries
-    if ((isApproved || isHolidayDate || isNoLog) && internSigDataUrl) {
+    if ((isAfternoonApproved || isHolidayDate || isNoLog) && internSigDataUrl) {
       signatureCells.push({ row: aRowIdx, col: 5, dataUrl: internSigDataUrl });
     }
     // Add supervisor signature only for approved or holiday (not for no-log)
-    if ((isApproved || isHolidayDate) && supervisorSigDataUrl) {
-      signatureCells.push({ row: aRowIdx, col: 6, dataUrl: supervisorSigDataUrl });
+    if ((isAfternoonApproved || isHolidayDate) && afternoonSupervisorSigDataUrl) {
+      signatureCells.push({ row: aRowIdx, col: 6, dataUrl: afternoonSupervisorSigDataUrl });
     }
 
-    // Use stored total_hours from database (source of truth) instead of recalculating
-    // This ensures consistency with attendance overview and allowance computations
-    if (att?.total_hours != null) {
-      totalHours += att.total_hours;
-    }
+    // Prefer the actual punch pairs so half-day records are still counted correctly.
+    totalHours += getAttendanceHours(att) || (mHours + aHours);
   });
 
   const pageHeight = doc.internal.pageSize.getHeight();
@@ -801,11 +909,11 @@ export async function generateDarPdf(darData, weekNum, startDate, existingDoc, o
     doc.setFontSize(10);
     doc.setFont(undefined, 'bold');
 
-    const appliedHourlyRate = allowancePeriod?.hourly_rate ?? hourlyRate ?? 0;
-    const computedAllowance = totalHours * appliedHourlyRate;
-    const allowanceTotal = Number.isFinite(allowancePeriod?.total_amount)
-      ? allowancePeriod.total_amount
-      : (Number.isFinite(computedAllowance) ? computedAllowance : 0);
+    const appliedHourlyRate = Number(allowancePeriod?.hourly_rate ?? hourlyRate ?? 0) || 0;
+    const roundedComputedHours = Math.round(Math.max(0, totalHours) * 10000) / 10000;
+    const computedAllowance = Math.round(roundedComputedHours * appliedHourlyRate * 100) / 100;
+    const totalHoursForDisplay = roundedComputedHours;
+    const allowanceTotal = computedAllowance;
 
     const shouldMaskAllowance = options?.maskAllowanceUnlessApproved === true
       && allowancePeriod?.status !== 'approved';
@@ -814,7 +922,7 @@ export async function generateDarPdf(darData, weekNum, startDate, existingDoc, o
     // Place totals on the same row, left and right
     // Show hours in both formats for transparency: "28h 45m (28.75 hrs)"
     // Show allowance with 2 decimal places: "PHP 719.16"
-    const totalHoursDisplay = formatHoursBothFormats(totalHours);
+    const totalHoursDisplay = formatHoursBothFormats(totalHoursForDisplay);
     const issuedToName = allowancePeriod?.status === 'approved' ? (intern?.full_name || '—').toUpperCase() : '';
     const issuedByName = allowancePeriod?.status === 'approved' ? 'MICHAEL CASTILLO' : '';
 

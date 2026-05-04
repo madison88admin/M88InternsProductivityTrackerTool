@@ -8,7 +8,7 @@ import { supabase } from '../lib/supabase.js';
 import { showToast } from '../lib/toast.js';
 import { logAudit } from '../lib/audit.js';
 import { icons } from '../lib/icons.js';
-import { formatDate, formatHoursDisplay, getTrackingWeekStart, getTrackingWeekEnd } from '../lib/utils.js';
+import { calculateSessionHours, formatDate, formatHoursDisplay, getTrackingWeekStart, getTrackingWeekEnd } from '../lib/utils.js';
 import { createModal, confirmDialog } from '../lib/component.js';
 
 export async function renderAllowanceManagementPage() {
@@ -23,11 +23,17 @@ export async function renderAllowanceManagementPage() {
     .maybeSingle();
 
   // Get allowance periods
-  const { data: periods } = await supabase
+  const { data: periods, error: periodsError } = await supabase
     .from('allowance_periods')
+    // specify the correct relationship to profiles (intern_id) to avoid ambiguity
     .select('*, intern:profiles!allowance_periods_intern_id_fkey(full_name, email)')
     .order('week_start', { ascending: false })
     .limit(100);
+  if (periodsError) {
+    console.error('Failed to load allowance periods', periodsError);
+    showToast('Failed to load allowance periods', 'error');
+    return;
+  }
 
   const pendingPeriods = (periods || []).filter(p => p.status === 'computed' || p.status === 'under_review');
   const approvedPeriods = (periods || []).filter(p => p.status === 'approved');
@@ -510,6 +516,13 @@ async function computeWeeklyAllowances(currentRate, internRates, allowanceRateMo
   const thisWeekStart = getTrackingWeekStart(now);
   const defaultWeekStart = thisWeekStart.toLocaleDateString('en-CA');
 
+  function getAttendanceHours(record) {
+    const derivedHours = calculateSessionHours(record.time_in_1, record.time_out_1)
+      + calculateSessionHours(record.time_in_2, record.time_out_2);
+    if (derivedHours > 0) return derivedHours;
+    return Number(record.total_hours || 0);
+  }
+
   createModal('Compute Weekly Allowances', `
     <div class="space-y-4">
       <div>
@@ -580,27 +593,25 @@ async function computeWeeklyAllowances(currentRate, internRates, allowanceRateMo
           // Get approved hours for the week
           const { data: attendance } = await supabase
             .from('attendance_records')
-            .select('total_hours')
+            .select('total_hours, time_in_1, time_out_1, time_in_2, time_out_2')
             .eq('intern_id', intern.id)
             .eq('status', 'approved')
             .gte('date', weekStart)
             .lte('date', weekEnd);
 
-          const totalHours = (attendance || []).reduce((sum, r) => sum + (r.total_hours || 0), 0);
+          const totalHoursRaw = (attendance || []).reduce((sum, record) => sum + getAttendanceHours(record), 0);
+          const totalHours = Math.round(totalHoursRaw * 10000) / 10000;
 
           if (totalHours > 0) {
-            const rate = allowanceRateMode === 'individual'
+            const rawRate = allowanceRateMode === 'individual'
               ? internRates[intern.id]
               : currentRate?.hourly_rate;
+            const rate = Number(rawRate);
 
-            if (rate == null) {
+            if (!Number.isFinite(rate)) {
               skippedNoRate++;
               continue;
             }
-
-            // Round total_hours to 2 decimals before calculating amount
-            // This ensures the calculation matches what users see in the display
-            const roundedHours = Math.round(totalHours * 100) / 100;
 
             const payload = {
               intern_id: intern.id,
@@ -608,7 +619,7 @@ async function computeWeeklyAllowances(currentRate, internRates, allowanceRateMo
               week_end: weekEnd,
               total_hours: totalHours,
               hourly_rate: rate,
-              total_amount: Math.round(roundedHours * rate * 100) / 100,
+              total_amount: Math.round(totalHours * rate * 100) / 100,
               status: 'computed',
               reviewed_by: null,
               reviewed_at: null,
