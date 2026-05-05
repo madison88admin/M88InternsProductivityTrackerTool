@@ -27,12 +27,25 @@ function ipConsistencyBadge(ip_consistent, size = 'normal') {
     : `<span class="badge-rejected ${cls}">IP Mismatch</span>`;
 }
 
-// Cutoff times in minutes from midnight — punch is locked at or after this time
-const PUNCH_CUTOFFS = {
-  time_in_1: 10 * 60 + 30,  // 10:30 AM
-  time_out_1: 13 * 60,       // 1:00 PM
-  time_in_2: 15 * 60,        // 3:00 PM
-  time_out_2: 19 * 60 + 30,  // 7:30 PM
+// Time periods for flexible punch availability
+const TIME_PERIODS = {
+  morning: {
+    start: 7 * 60,      // 7:00 AM
+    end: 12 * 60,       // 12:00 PM (noon)
+  },
+  afternoon: {
+    start: 12 * 60,     // 12:00 PM
+    end: 17.5 * 60,     // 5:30 PM
+  },
+  endOfDay: 19.5 * 60, // 7:30 PM (auto-submit cutoff)
+};
+
+// Punch type to time period mapping
+const PUNCH_PERIODS = {
+  time_in_1: 'morning',
+  time_out_1: 'morning',
+  time_in_2: 'afternoon',
+  time_out_2: 'afternoon',
 };
 
 function sanitizeIpForInet(value) {
@@ -92,8 +105,34 @@ function getCurrentMinutes() {
   return now.getHours() * 60 + now.getMinutes();
 }
 
+function getCurrentTimePeriod() {
+  const currentMinutes = getCurrentMinutes();
+  
+  if (currentMinutes >= TIME_PERIODS.morning.start && currentMinutes < TIME_PERIODS.morning.end) {
+    return 'morning';
+  } else if (currentMinutes >= TIME_PERIODS.afternoon.start && currentMinutes < TIME_PERIODS.afternoon.end) {
+    return 'afternoon';
+  }
+  return 'outside_hours';
+}
+
 function isPunchLocked(punchType) {
-  return getCurrentMinutes() >= PUNCH_CUTOFFS[punchType];
+  const currentMinutes = getCurrentMinutes();
+  const period = PUNCH_PERIODS[punchType];
+  
+  if (!period) return true;
+  
+  // Check if current time is past the period's end time
+  if (currentMinutes >= TIME_PERIODS[period].end) {
+    return true;
+  }
+  
+  // Special case: end of day punch has additional auto-submit cutoff
+  if (punchType === 'time_out_2' && currentMinutes >= TIME_PERIODS.endOfDay) {
+    return true;
+  }
+  
+  return false;
 }
 
 export async function renderAttendancePage() {
@@ -111,6 +150,160 @@ export async function renderAttendancePage() {
     .eq('intern_id', profile.id)
     .eq('date', today)
     .maybeSingle();
+
+  // Check for AM half-day attendance that needs approval (morning complete, afternoon window closed)
+  if (todayRecord && todayRecord.time_in_1 && todayRecord.time_out_1 && !todayRecord.time_in_2 && 
+      isPunchLocked('time_in_2') && profile.supervisor_id) {
+    const { data: existingApproval } = await supabase
+      .from('approvals')
+      .select('id')
+      .eq('entity_id', todayRecord.id)
+      .eq('type', 'attendance')
+      .maybeSingle();
+
+    if (!existingApproval) {
+      // Create approval for AM half-day attendance
+      await supabase.from('approvals').insert({
+        type: 'attendance',
+        entity_id: todayRecord.id,
+        intern_id: profile.id,
+        supervisor_id: profile.supervisor_id,
+      });
+
+      // Notify supervisors
+      const deptSupervisors = await getDepartmentSupervisors(profile.id);
+      if (deptSupervisors.length > 0) {
+        const notifPayload = deptSupervisors.map(sup => ({
+          user_id: sup.id,
+          type: 'pending_approval',
+          title: 'Attendance Pending Review',
+          message: `${profile.full_name} has submitted AM half-day attendance for ${formatDate(today)}`,
+          entity_type: 'attendance',
+          entity_id: todayRecord.id,
+        }));
+        await supabase.from('notifications').insert(notifPayload);
+
+        // Send email notification
+        const emailHtml = `
+          <!DOCTYPE html>
+          <html>
+            <head>
+              <style>
+                body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+                .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+                .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px; border-radius: 5px 5px 0 0; }
+                .content { background: #f9f9f9; padding: 20px; border: 1px solid #ddd; border-radius: 0 0 5px 5px; }
+                .badge-half { display: inline-block; background: #f59e0b; color: white; padding: 6px 12px; border-radius: 4px; font-weight: bold; font-size: 12px; }
+                .footer { margin-top: 20px; padding-top: 20px; border-top: 1px solid #ddd; font-size: 12px; color: #666; }
+              </style>
+            </head>
+            <body>
+              <div class="container">
+                <div class="header">
+                  <h1>Attendance Pending Review</h1>
+                </div>
+                <div class="content">
+                  <p><strong>${profile.full_name}</strong> has submitted AM half-day attendance for <strong>${formatDate(today)}</strong> <span class="badge-half">AM HALF-DAY</span></p>
+                  <p>Morning punches have been recorded and the afternoon window has closed. This attendance is awaiting your review and approval.</p>
+                  <p><a href="${window.location.origin}/#/approvals" style="background: #667eea; color: white; padding: 10px 20px; text-decoration: none; border-radius: 4px; display: inline-block; margin-top: 10px;">View in System</a></p>
+                </div>
+                <div class="footer">
+                  <p>This is an automated notification. Please do not reply to this email.</p>
+                </div>
+              </div>
+            </body>
+          </html>
+        `;
+
+        for (const sup of deptSupervisors) {
+          if (sup.email) {
+            sendEmailNotification(sup.email, 'AM Half-Day Attendance Pending Review', emailHtml).catch(err => console.error('Failed to send attendance email to', sup.email, err));
+          }
+        }
+      }
+
+      await logAudit('attendance.am_half_day_submitted', 'attendance', todayRecord.id, {
+        reason: 'Afternoon window closed with morning punches complete',
+      });
+    }
+  }
+
+  // Check for PM half-day attendance that needs approval (afternoon complete, morning missed)
+  if (todayRecord && !todayRecord.time_in_1 && !todayRecord.time_out_1 && todayRecord.time_in_2 && todayRecord.time_out_2 && 
+      profile.supervisor_id) {
+    const { data: existingApproval } = await supabase
+      .from('approvals')
+      .select('id')
+      .eq('entity_id', todayRecord.id)
+      .eq('type', 'attendance')
+      .maybeSingle();
+
+    if (!existingApproval) {
+      // Create approval for PM half-day attendance
+      await supabase.from('approvals').insert({
+        type: 'attendance',
+        entity_id: todayRecord.id,
+        intern_id: profile.id,
+        supervisor_id: profile.supervisor_id,
+      });
+
+      // Notify supervisors
+      const deptSupervisors = await getDepartmentSupervisors(profile.id);
+      if (deptSupervisors.length > 0) {
+        const notifPayload = deptSupervisors.map(sup => ({
+          user_id: sup.id,
+          type: 'pending_approval',
+          title: 'Attendance Pending Review',
+          message: `${profile.full_name} has submitted PM half-day attendance for ${formatDate(today)}`,
+          entity_type: 'attendance',
+          entity_id: todayRecord.id,
+        }));
+        await supabase.from('notifications').insert(notifPayload);
+
+        // Send email notification
+        const emailHtml = `
+          <!DOCTYPE html>
+          <html>
+            <head>
+              <style>
+                body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+                .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+                .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px; border-radius: 5px 5px 0 0; }
+                .content { background: #f9f9f9; padding: 20px; border: 1px solid #ddd; border-radius: 0 0 5px 5px; }
+                .badge-half { display: inline-block; background: #ef4444; color: white; padding: 6px 12px; border-radius: 4px; font-weight: bold; font-size: 12px; }
+                .footer { margin-top: 20px; padding-top: 20px; border-top: 1px solid #ddd; font-size: 12px; color: #666; }
+              </style>
+            </head>
+            <body>
+              <div class="container">
+                <div class="header">
+                  <h1>Attendance Pending Review</h1>
+                </div>
+                <div class="content">
+                  <p><strong>${profile.full_name}</strong> has submitted PM half-day attendance for <strong>${formatDate(today)}</strong> <span class="badge-half">PM HALF-DAY</span></p>
+                  <p>Afternoon punches have been recorded and the morning shift was missed. This attendance is awaiting your review and approval.</p>
+                  <p><a href="${window.location.origin}/#/approvals" style="background: #667eea; color: white; padding: 10px 20px; text-decoration: none; border-radius: 4px; display: inline-block; margin-top: 10px;">View in System</a></p>
+                </div>
+                <div class="footer">
+                  <p>This is an automated notification. Please do not reply to this email.</p>
+                </div>
+              </div>
+            </body>
+          </html>
+        `;
+
+        for (const sup of deptSupervisors) {
+          if (sup.email) {
+            sendEmailNotification(sup.email, 'PM Half-Day Attendance Pending Review', emailHtml).catch(err => console.error('Failed to send attendance email to', sup.email, err));
+          }
+        }
+      }
+
+      await logAudit('attendance.pm_half_day_submitted', 'attendance', todayRecord.id, {
+        reason: 'Afternoon punches completed with morning punches missed',
+      });
+    }
+  }
 
   // Check if end-of-day punch exists without narrative submission (prevent refresh bypass)
   if (todayRecord && todayRecord.time_out_2) {
@@ -186,7 +379,7 @@ export async function renderAttendancePage() {
 
   // Auto-submit incomplete attendance at 7:30 PM
   let wasAutoSubmitted = false;
-  const isPostEndOfDay = getCurrentMinutes() >= PUNCH_CUTOFFS.time_out_2;
+  const isPostEndOfDay = getCurrentMinutes() >= TIME_PERIODS.endOfDay;
 
   if (isPostEndOfDay && todayRecord && !isAllPunchesComplete(todayRecord)) {
     const hasSomePunches = todayRecord.time_in_1 || todayRecord.time_in_2;
@@ -358,7 +551,7 @@ export async function renderAttendancePage() {
       ` : ''}
 
       ${!holidayInfo.isHoliday ? `
-        <p class="text-xs text-neutral-400 mt-3">Punch cutoffs: Morning In by 10:30 AM · Lunch Out by 1:00 PM · Afternoon In by 3:00 PM · End of Day by 7:30 PM</p>
+        <p class="text-xs text-neutral-400 mt-3">Flexible timing: Morning punches available until noon · Afternoon punches available until 5:30 PM · Auto-submit at 7:30 PM</p>
       ` : ''}
     </div>
 
@@ -474,8 +667,13 @@ export async function renderAttendancePage() {
 
           showToast(`${punchLabel} recorded successfully`, 'success');
 
-          // Create approval entry when all 4 punches are done
-          if (punchType === 'time_out_2' && profile.supervisor_id) {
+          // Create approval entry for complete day or half-day attendance
+          const shouldCreateApproval = 
+            (punchType === 'time_out_2' && profile.supervisor_id) || // Complete day
+            (punchType === 'time_out_1' && profile.supervisor_id && isPunchLocked('time_in_2')) || // AM half-day (morning complete, afternoon window closed)
+            (punchType === 'time_out_2' && profile.supervisor_id && !todayRecord.time_in_1 && !todayRecord.time_out_1); // PM half-day (afternoon complete, morning missed)
+          
+          if (shouldCreateApproval) {
             await supabase.from('approvals').insert({
               type: 'attendance',
               entity_id: todayRecord.id,
@@ -486,11 +684,13 @@ export async function renderAttendancePage() {
             // Notify all supervisors in the same department
             const deptSupervisors = await getDepartmentSupervisors(profile.id);
             if (deptSupervisors.length > 0) {
+              const isHalfDay = punchType === 'time_out_1' || (punchType === 'time_out_2' && !todayRecord.time_in_1 && !todayRecord.time_out_1);
+            const isPMHalfDay = punchType === 'time_out_2' && !todayRecord.time_in_1 && !todayRecord.time_out_1;
               const notifPayload = deptSupervisors.map(sup => ({
                 user_id: sup.id,
                 type: 'pending_approval',
                 title: 'Attendance Pending Review',
-                message: `${profile.full_name} has completed attendance for ${formatDate(today)}`,
+                message: `${profile.full_name} has submitted ${isPMHalfDay ? 'PM half-day' : isHalfDay ? 'AM half-day' : 'full-day'} attendance for ${formatDate(today)}`,
                 entity_type: 'attendance',
                 entity_id: todayRecord.id,
               }));
@@ -507,6 +707,7 @@ export async function renderAttendancePage() {
                       .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px; border-radius: 5px 5px 0 0; }
                       .content { background: #f9f9f9; padding: 20px; border: 1px solid #ddd; border-radius: 0 0 5px 5px; }
                       .badge { display: inline-block; background: #10b981; color: white; padding: 6px 12px; border-radius: 4px; font-weight: bold; font-size: 12px; }
+                      .badge-half { display: inline-block; background: #f59e0b; color: white; padding: 6px 12px; border-radius: 4px; font-weight: bold; font-size: 12px; }
                       .footer { margin-top: 20px; padding-top: 20px; border-top: 1px solid #ddd; font-size: 12px; color: #666; }
                     </style>
                   </head>
@@ -516,8 +717,8 @@ export async function renderAttendancePage() {
                         <h1>Attendance Pending Review</h1>
                       </div>
                       <div class="content">
-                        <p><strong>${profile.full_name}</strong> has completed attendance for <strong>${formatDate(today)}</strong> <span class="badge">PENDING</span></p>
-                        <p>All punches have been recorded and are awaiting your review and approval.</p>
+                        <p><strong>${profile.full_name}</strong> has submitted ${isPMHalfDay ? 'PM half-day' : isHalfDay ? 'AM half-day' : 'full-day'} attendance for <strong>${formatDate(today)}</strong> <span class="${isPMHalfDay || isHalfDay ? 'badge-half' : 'badge'}">${isPMHalfDay ? 'PM HALF-DAY' : isHalfDay ? 'AM HALF-DAY' : 'PENDING'}</span></p>
+                        <p>${isPMHalfDay ? 'Afternoon punches have been recorded and the intern missed the morning shift.' : isHalfDay ? 'Morning punches have been recorded and the intern did not return for the afternoon shift.' : 'All punches have been recorded'} and are awaiting your review and approval.</p>
                         <p><a href="${window.location.origin}/#/approvals" style="background: #667eea; color: white; padding: 10px 20px; text-decoration: none; border-radius: 4px; display: inline-block; margin-top: 10px;">View in System</a></p>
                       </div>
                       <div class="footer">
@@ -629,17 +830,32 @@ function renderPunchSlot(label, timestamp, type) {
 }
 
 function getNextPunch(record) {
-  const currentMinutes = getCurrentMinutes();
+  const currentPeriod = getCurrentTimePeriod();
   const punchOrder = ['time_in_1', 'time_out_1', 'time_in_2', 'time_out_2'];
 
   for (const punch of punchOrder) {
     // Already logged — skip
     if (record && record[punch]) continue;
-    // Past cutoff — locked, skip
-    if (currentMinutes >= PUNCH_CUTOFFS[punch]) continue;
+    
+    // Check if punch is locked based on flexible time logic
+    if (isPunchLocked(punch)) continue;
+    
+    // Check if current time period allows this punch type
+    const punchPeriod = PUNCH_PERIODS[punch];
+    if (currentPeriod === 'morning' && punchPeriod !== 'morning') continue;
+    if (currentPeriod === 'afternoon' && punchPeriod === 'morning') continue;
+    
+    // Special handling for PM half-day scenarios
+    if (punch === 'time_in_2') {
+      // Allow time_in_2 if no record exists (PM half-day start) OR if morning is complete
+      if (record && record.time_in_1 && !record.time_out_1) continue; // Morning incomplete
+      // Otherwise allow (either no record, or morning complete, or PM half-day in progress)
+    }
+    
     // "Out" punches require the matching "In" to be logged first
     if (punch === 'time_out_1' && (!record || !record.time_in_1)) continue;
     if (punch === 'time_out_2' && (!record || !record.time_in_2)) continue;
+    
     return punch;
   }
 

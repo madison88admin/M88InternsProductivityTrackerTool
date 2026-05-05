@@ -139,11 +139,25 @@ function escapeHtmlAttr(text) {
     .replace(/'/g, '&#39;');
 }
 
-const DASHBOARD_PUNCH_CUTOFFS = {
-  time_in_1: 10 * 60 + 30,
-  time_out_1: 13 * 60,
-  time_in_2: 15 * 60,
-  time_out_2: 19 * 60 + 30,
+// Time periods for flexible punch availability (matching attendance.js)
+const TIME_PERIODS = {
+  morning: {
+    start: 7 * 60,      // 7:00 AM
+    end: 12 * 60,       // 12:00 PM (noon)
+  },
+  afternoon: {
+    start: 12 * 60,     // 12:00 PM
+    end: 17.5 * 60,     // 5:30 PM
+  },
+  endOfDay: 19.5 * 60, // 7:30 PM (auto-submit cutoff)
+};
+
+// Punch type to time period mapping
+const PUNCH_PERIODS = {
+  time_in_1: 'morning',
+  time_out_1: 'morning',
+  time_in_2: 'afternoon',
+  time_out_2: 'afternoon',
 };
 
 function getNowInPH() {
@@ -165,15 +179,63 @@ function getDashboardPunchLabel(type) {
   return labels[type] || 'Log Attendance';
 }
 
-function getNextDashboardPunch(record) {
+function getCurrentTimePeriod() {
   const currentMinutes = getCurrentMinutesInPH();
+  
+  if (currentMinutes >= TIME_PERIODS.morning.start && currentMinutes < TIME_PERIODS.morning.end) {
+    return 'morning';
+  } else if (currentMinutes >= TIME_PERIODS.afternoon.start && currentMinutes < TIME_PERIODS.afternoon.end) {
+    return 'afternoon';
+  }
+  return 'outside_hours';
+}
+
+function isDashboardPunchLocked(punchType) {
+  const currentMinutes = getCurrentMinutesInPH();
+  const period = PUNCH_PERIODS[punchType];
+  
+  if (!period) return true;
+  
+  // Check if current time is past the period's end time
+  if (currentMinutes >= TIME_PERIODS[period].end) {
+    return true;
+  }
+  
+  // Special case: end of day punch has additional auto-submit cutoff
+  if (punchType === 'time_out_2' && currentMinutes >= TIME_PERIODS.endOfDay) {
+    return true;
+  }
+  
+  return false;
+}
+
+function getNextDashboardPunch(record) {
+  const currentPeriod = getCurrentTimePeriod();
   const punchOrder = ['time_in_1', 'time_out_1', 'time_in_2', 'time_out_2'];
 
   for (const punch of punchOrder) {
-    if (record?.[punch]) continue;
-    if (currentMinutes >= DASHBOARD_PUNCH_CUTOFFS[punch]) continue;
-    if (punch === 'time_out_1' && !record?.time_in_1) continue;
-    if (punch === 'time_out_2' && !record?.time_in_2) continue;
+    // Already logged — skip
+    if (record && record[punch]) continue;
+    
+    // Check if punch is locked based on flexible time logic
+    if (isDashboardPunchLocked(punch)) continue;
+    
+    // Check if current time period allows this punch type
+    const punchPeriod = PUNCH_PERIODS[punch];
+    if (currentPeriod === 'morning' && punchPeriod !== 'morning') continue;
+    if (currentPeriod === 'afternoon' && punchPeriod === 'morning') continue;
+    
+    // Special handling for PM half-day scenarios
+    if (punch === 'time_in_2') {
+      // Allow time_in_2 if no record exists (PM half-day start) OR if morning is complete
+      if (record && record.time_in_1 && !record.time_out_1) continue; // Morning incomplete
+      // Otherwise allow (either no record, or morning complete, or PM half-day in progress)
+    }
+    
+    // "Out" punches require the matching "In" to be logged first
+    if (punch === 'time_out_1' && (!record || !record.time_in_1)) continue;
+    if (punch === 'time_out_2' && (!record || !record.time_in_2)) continue;
+    
     return punch;
   }
 

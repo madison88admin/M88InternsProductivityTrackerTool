@@ -41,22 +41,31 @@ BEGIN
     RAISE EXCEPTION 'Punch type is required' USING ERRCODE = '22023';
   END IF;
 
+  -- Flexible time period validation
+  -- Morning punches: 7:00 AM - 12:00 PM
+  -- Afternoon punches: 12:00 PM - 5:30 PM  
+  -- End of day auto-submit cutoff: 7:30 PM
   CASE p_punch_type
     WHEN 'time_in_1' THEN
-      IF v_minutes >= 10 * 60 + 30 THEN
-        RAISE EXCEPTION 'Morning Time In cutoff has passed' USING ERRCODE = '22023';
+      IF v_minutes >= 12 * 60 THEN
+        RAISE EXCEPTION 'Morning Time In cutoff has passed (noon)' USING ERRCODE = '22023';
       END IF;
     WHEN 'time_out_1' THEN
-      IF v_minutes >= 13 * 60 THEN
-        RAISE EXCEPTION 'Lunch Time Out cutoff has passed' USING ERRCODE = '22023';
+      IF v_minutes >= 12 * 60 THEN
+        RAISE EXCEPTION 'Lunch Time Out cutoff has passed (noon)' USING ERRCODE = '22023';
       END IF;
     WHEN 'time_in_2' THEN
-      IF v_minutes >= 15 * 60 THEN
-        RAISE EXCEPTION 'Afternoon Time In cutoff has passed' USING ERRCODE = '22023';
+      IF v_minutes >= 17.5 * 60 THEN
+        RAISE EXCEPTION 'Afternoon Time In cutoff has passed (5:30 PM)' USING ERRCODE = '22023';
       END IF;
     WHEN 'time_out_2' THEN
-      IF v_minutes >= 19 * 60 + 30 THEN
-        RAISE EXCEPTION 'End of Day Time Out cutoff has passed' USING ERRCODE = '22023';
+      IF v_minutes >= 19.5 * 60 THEN
+        RAISE EXCEPTION 'End of Day Time Out cutoff has passed (7:30 PM)' USING ERRCODE = '22023';
+      END IF;
+      -- Also check if afternoon window has closed (5:30 PM)
+      IF v_minutes >= 17.5 * 60 THEN
+        -- Allow but this should trigger half-day PM approval if morning is missed
+        NULL;
       END IF;
   END CASE;
 
@@ -68,25 +77,43 @@ BEGIN
    FOR UPDATE;
 
   IF NOT FOUND THEN
-    IF p_punch_type <> 'time_in_1' THEN
-      RAISE EXCEPTION 'Morning Time In must be logged first' USING ERRCODE = '23514';
+    -- Allow starting with either morning or afternoon punches (for PM half-day scenarios)
+    IF p_punch_type = 'time_in_1' THEN
+      INSERT INTO attendance_records (
+        intern_id,
+        date,
+        time_in_1,
+        ip_address_in_1,
+        supervisor_id
+      )
+      VALUES (
+        v_user_id,
+        v_today,
+        v_now,
+        p_ip_address,
+        v_profile.supervisor_id
+      )
+      RETURNING * INTO v_record;
+    ELSIF p_punch_type = 'time_in_2' THEN
+      -- PM half-day scenario: start with afternoon punch
+      INSERT INTO attendance_records (
+        intern_id,
+        date,
+        time_in_2,
+        ip_address_in_2,
+        supervisor_id
+      )
+      VALUES (
+        v_user_id,
+        v_today,
+        v_now,
+        p_ip_address,
+        v_profile.supervisor_id
+      )
+      RETURNING * INTO v_record;
+    ELSE
+      RAISE EXCEPTION 'Must start with either Morning Time In or Afternoon Time In' USING ERRCODE = '23514';
     END IF;
-
-    INSERT INTO attendance_records (
-      intern_id,
-      date,
-      time_in_1,
-      ip_address_in_1,
-      supervisor_id
-    )
-    VALUES (
-      v_user_id,
-      v_today,
-      v_now,
-      p_ip_address,
-      v_profile.supervisor_id
-    )
-    RETURNING * INTO v_record;
 
     RETURN v_record;
   END IF;
@@ -113,7 +140,8 @@ BEGIN
     END IF;
     v_next_punch := 'time_out_1';
   ELSIF p_punch_type = 'time_in_2' THEN
-    IF v_record.time_out_1 IS NULL OR v_record.time_in_2 IS NOT NULL THEN
+    -- Allow PM half-day: either time_out_1 exists (normal flow) OR this is a PM half-day scenario
+    IF (v_record.time_out_1 IS NULL AND v_record.time_in_1 IS NOT NULL) OR v_record.time_in_2 IS NOT NULL THEN
       RAISE EXCEPTION 'Afternoon Time In is not available yet' USING ERRCODE = '23514';
     END IF;
     v_next_punch := 'time_in_2';
