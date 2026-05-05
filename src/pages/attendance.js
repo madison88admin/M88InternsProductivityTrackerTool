@@ -35,9 +35,9 @@ const TIME_PERIODS = {
   },
   afternoon: {
     start: 12 * 60,     // 12:00 PM
-    end: 17.5 * 60,     // 5:30 PM
+    end: 19 * 60,       // 7:00 PM
   },
-  endOfDay: 19.5 * 60, // 7:30 PM (auto-submit cutoff)
+  endOfDay: 19 * 60,   // 7:00 PM (auto-submit cutoff)
 };
 
 // Punch type to time period mapping
@@ -551,7 +551,7 @@ export async function renderAttendancePage() {
       ` : ''}
 
       ${!holidayInfo.isHoliday ? `
-        <p class="text-xs text-neutral-400 mt-3">Flexible timing: Morning punches available until noon · Afternoon punches available until 5:30 PM · Auto-submit at 7:30 PM</p>
+        <p class="text-xs text-neutral-400 mt-3">Flexible timing: Morning punches available until noon · Afternoon punches available until 7:00 PM · Auto-submit at 7:00 PM</p>
       ` : ''}
     </div>
 

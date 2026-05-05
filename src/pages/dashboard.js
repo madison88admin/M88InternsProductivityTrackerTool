@@ -147,9 +147,9 @@ const TIME_PERIODS = {
   },
   afternoon: {
     start: 12 * 60,     // 12:00 PM
-    end: 17.5 * 60,     // 5:30 PM
+    end: 19 * 60,       // 7:00 PM
   },
-  endOfDay: 19.5 * 60, // 7:30 PM (auto-submit cutoff)
+  endOfDay: 19 * 60,   // 7:00 PM (auto-submit cutoff)
 };
 
 // Punch type to time period mapping
