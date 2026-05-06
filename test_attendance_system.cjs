@@ -2,7 +2,7 @@
  * Test Environment for Flexible Time Restrictions and Half-Day Attendance
  * 
  * This test suite validates:
- * 1. Flexible time periods (morning: 7AM-12PM, afternoon: 12PM-5:30PM)
+ * 1. Flexible time periods (morning: 7AM-12PM, lunch out: 12PM-12:40PM, afternoon: 12PM-5:30PM)
  * 2. Half-day approval for both AM and PM scenarios
  * 3. Database stored procedure validation
  * 4. Frontend-backend consistency
@@ -16,6 +16,10 @@ const TIME_PERIODS = {
   morning: {
     start: 7 * 60,      // 7:00 AM
     end: 12 * 60,       // 12:00 PM (noon)
+  },
+  lunchOut: {
+    start: 12 * 60,     // 12:00 PM
+    end: 12 * 60 + 40,  // 12:40 PM
   },
   afternoon: {
     start: 12 * 60,     // 12:00 PM
@@ -50,6 +54,11 @@ function isPunchLocked(punchType, currentMinutes) {
   
   if (!period) return true;
   
+  // Allow flexible timing for lunch out (time_out_1) until 12:40 PM
+  if (punchType === 'time_out_1') {
+    return currentMinutes >= TIME_PERIODS.lunchOut.end;
+  }
+  
   // Check if current time is past the period's end time
   if (currentMinutes >= TIME_PERIODS[period].end) {
     return true;
@@ -76,8 +85,12 @@ function getNextPunch(record, currentMinutes) {
     
     // Check if current time period allows this punch type
     const punchPeriod = PUNCH_PERIODS[punch];
-    if (currentPeriod === 'morning' && punchPeriod !== 'morning') continue;
-    if (currentPeriod === 'afternoon' && punchPeriod === 'morning') continue;
+    if (punch === 'time_out_1') {
+      if (currentMinutes >= TIME_PERIODS.lunchOut.end) continue;
+    } else {
+      if (currentPeriod === 'morning' && punchPeriod !== 'morning') continue;
+      if (currentPeriod === 'afternoon' && punchPeriod === 'morning') continue;
+    }
     
     // Special handling for PM half-day scenarios
     if (punch === 'time_in_2') {
@@ -103,7 +116,9 @@ function validatePunchDatabase(punchType, currentMinutes) {
       // Allow flexible timing for morning check-in
       break;
     case 'time_out_1':
-      // Allow flexible timing for lunch check-out
+      if (currentMinutes >= TIME_PERIODS.lunchOut.end) {
+        return { valid: false, error: 'Lunch Time Out cutoff has passed (12:40 PM)' };
+      }
       break;
     case 'time_in_2':
       if (currentMinutes >= 17.5 * 60) {
@@ -270,6 +285,8 @@ function runTests() {
   
   const edgeCases = [
     { test: 'Noon exactly (12:00 PM)', hour: 12, punch: 'time_in_1', shouldLock: true },
+    { test: 'Lunch Out still available (12:20 PM)', hour: 12 + 20/60, punch: 'time_out_1', shouldLock: false },
+    { test: 'Lunch Out cutoff exactly (12:40 PM)', hour: 12 + 40/60, punch: 'time_out_1', shouldLock: true },
     { test: 'Afternoon cutoff exactly (5:30 PM)', hour: 17.5, punch: 'time_in_2', shouldLock: true },
     { test: 'End of day cutoff exactly (7:30 PM)', hour: 19.5, punch: 'time_out_2', shouldLock: true },
     { test: 'Just before noon (11:59 AM)', hour: 11.983, punch: 'time_in_1', shouldLock: false },

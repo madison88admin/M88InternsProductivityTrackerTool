@@ -43,6 +43,7 @@ BEGIN
 
   -- Flexible time period validation
   -- Morning punches: 7:00 AM - 12:00 PM
+  -- Lunch Out: 12:00 PM - 12:40 PM
   -- Afternoon punches: 12:00 PM - 7:00 PM  
   -- End of day auto-submit cutoff: 7:00 PM
   CASE p_punch_type
@@ -50,8 +51,9 @@ BEGIN
       -- Allow flexible timing for morning check-in
       NULL;
     WHEN 'time_out_1' THEN
-      -- Allow flexible timing for lunch check-out
-      NULL;
+      IF v_minutes >= (12 * 60 + 40) THEN
+        RAISE EXCEPTION 'Lunch Time Out cutoff has passed (12:40 PM)' USING ERRCODE = '22023';
+      END IF;
     WHEN 'time_in_2' THEN
       IF v_minutes >= 19 * 60 THEN
         RAISE EXCEPTION 'Afternoon Time In cutoff has passed (7:00 PM)' USING ERRCODE = '22023';

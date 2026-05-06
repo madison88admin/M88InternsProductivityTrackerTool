@@ -33,6 +33,10 @@ const TIME_PERIODS = {
     start: 7 * 60,      // 7:00 AM
     end: 12 * 60,       // 12:00 PM (noon)
   },
+  lunchOut: {
+    start: 12 * 60,     // 12:00 PM
+    end: 12 * 60 + 40,  // 12:40 PM
+  },
   afternoon: {
     start: 12 * 60,     // 12:00 PM
     end: 19 * 60,       // 7:00 PM
@@ -122,9 +126,9 @@ function isPunchLocked(punchType) {
   
   if (!period) return true;
   
-  // Allow flexible timing for lunch out (time_out_1)
+  // Allow flexible timing for lunch out (time_out_1) until 12:40 PM
   if (punchType === 'time_out_1') {
-    return false;
+    return currentMinutes >= TIME_PERIODS.lunchOut.end;
   }
   
   // Check if current time is past the period's end time
@@ -556,7 +560,7 @@ export async function renderAttendancePage() {
       ` : ''}
 
       ${!holidayInfo.isHoliday ? `
-        <p class="text-xs text-neutral-400 mt-3">Flexible timing: Morning punches available until noon · Afternoon punches available until 7:00 PM · Auto-submit at 7:00 PM</p>
+        <p class="text-xs text-neutral-400 mt-3">Flexible timing: Morning punches available until noon · Lunch Out available until 12:40 PM · Afternoon punches available until 7:00 PM · Auto-submit at 7:00 PM</p>
       ` : ''}
     </div>
 
@@ -847,8 +851,12 @@ function getNextPunch(record) {
     
     // Check if current time period allows this punch type
     const punchPeriod = PUNCH_PERIODS[punch];
-    if (currentPeriod === 'morning' && punchPeriod !== 'morning') continue;
-    if (currentPeriod === 'afternoon' && punchPeriod === 'morning') continue;
+    if (punch === 'time_out_1') {
+      if (currentMinutes >= TIME_PERIODS.lunchOut.end) continue;
+    } else {
+      if (currentPeriod === 'morning' && punchPeriod !== 'morning') continue;
+      if (currentPeriod === 'afternoon' && punchPeriod === 'morning') continue;
+    }
     
     // Special handling for PM half-day scenarios
     if (punch === 'time_in_2') {
