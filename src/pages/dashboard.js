@@ -196,6 +196,11 @@ function isDashboardPunchLocked(punchType) {
   
   if (!period) return true;
   
+  // Allow flexible timing for lunch out (time_out_1)
+  if (punchType === 'time_out_1') {
+    return false;
+  }
+  
   // Check if current time is past the period's end time
   if (currentMinutes >= TIME_PERIODS[period].end) {
     return true;

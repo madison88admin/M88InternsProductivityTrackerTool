@@ -47,13 +47,11 @@ BEGIN
   -- End of day auto-submit cutoff: 7:00 PM
   CASE p_punch_type
     WHEN 'time_in_1' THEN
-      IF v_minutes >= 12 * 60 THEN
-        RAISE EXCEPTION 'Morning Time In cutoff has passed (noon)' USING ERRCODE = '22023';
-      END IF;
+      -- Allow flexible timing for morning check-in
+      NULL;
     WHEN 'time_out_1' THEN
-      IF v_minutes >= 12 * 60 THEN
-        RAISE EXCEPTION 'Lunch Time Out cutoff has passed (noon)' USING ERRCODE = '22023';
-      END IF;
+      -- Allow flexible timing for lunch check-out
+      NULL;
     WHEN 'time_in_2' THEN
       IF v_minutes >= 19 * 60 THEN
         RAISE EXCEPTION 'Afternoon Time In cutoff has passed (7:00 PM)' USING ERRCODE = '22023';

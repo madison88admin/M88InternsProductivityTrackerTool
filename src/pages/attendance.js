@@ -122,6 +122,11 @@ function isPunchLocked(punchType) {
   
   if (!period) return true;
   
+  // Allow flexible timing for lunch out (time_out_1)
+  if (punchType === 'time_out_1') {
+    return false;
+  }
+  
   // Check if current time is past the period's end time
   if (currentMinutes >= TIME_PERIODS[period].end) {
     return true;
@@ -459,7 +464,7 @@ export async function renderAttendancePage() {
 
 
         await logAudit('attendance.auto_submitted', 'attendance', todayRecord.id, {
-          reason: 'End of day cutoff reached (7:30 PM)',
+          reason: 'End of day cutoff reached (7:00 PM)',
           missing_punches: ['time_in_1', 'time_out_1', 'time_in_2', 'time_out_2'].filter(p => !todayRecord[p]),
         });
 

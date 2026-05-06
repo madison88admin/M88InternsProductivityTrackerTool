@@ -100,14 +100,10 @@ function getNextPunch(record, currentMinutes) {
 function validatePunchDatabase(punchType, currentMinutes) {
   switch (punchType) {
     case 'time_in_1':
-      if (currentMinutes >= 12 * 60) {
-        return { valid: false, error: 'Morning Time In cutoff has passed (noon)' };
-      }
+      // Allow flexible timing for morning check-in
       break;
     case 'time_out_1':
-      if (currentMinutes >= 12 * 60) {
-        return { valid: false, error: 'Lunch Time Out cutoff has passed (noon)' };
-      }
+      // Allow flexible timing for lunch check-out
       break;
     case 'time_in_2':
       if (currentMinutes >= 17.5 * 60) {
