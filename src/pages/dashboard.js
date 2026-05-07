@@ -220,6 +220,7 @@ function isDashboardPunchLocked(punchType) {
 
 function getNextDashboardPunch(record) {
   const currentPeriod = getCurrentTimePeriod();
+  const currentMinutes = getCurrentMinutesInPH();
   const punchOrder = ['time_in_1', 'time_out_1', 'time_in_2', 'time_out_2'];
 
   for (const punch of punchOrder) {
