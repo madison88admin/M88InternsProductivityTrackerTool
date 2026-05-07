@@ -839,6 +839,7 @@ function renderPunchSlot(label, timestamp, type) {
 }
 
 function getNextPunch(record) {
+  const currentMinutes = getCurrentMinutes();
   const currentPeriod = getCurrentTimePeriod();
   const punchOrder = ['time_in_1', 'time_out_1', 'time_in_2', 'time_out_2'];
 
