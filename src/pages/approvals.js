@@ -418,17 +418,13 @@ export async function renderApprovalsPage() {
       btn.disabled = true;
       btn.innerHTML = `${icons.check} Approving...`;
 
-      const results = await Promise.allSettled(
-        actionablePending.map(approval => processApproval(approval.id, 'approved', 'Bulk approved', approval))
-      );
+      const { succeeded, failed } = await processBulkApprovals(actionablePending, 'approved', 'Bulk approved');
 
-      const successCount = results.filter(r => r.status === 'fulfilled').length;
-      const failedCount = results.length - successCount;
-
-      if (failedCount === 0) {
-        showToast(`${successCount} items approved`, 'success');
+      if (failed.length === 0) {
+        showToast(`${succeeded.length} items approved`, 'success');
       } else {
-        showToast(`${successCount} approved, ${failedCount} failed`, successCount > 0 ? 'info' : 'error');
+        showToast(`${succeeded.length} approved, ${failed.length} failed — please retry the failed items`, failed.length === actionablePending.length ? 'error' : 'info');
+        console.error('Bulk approve failures:', failed);
       }
       renderApprovalsPage();
     });
@@ -454,17 +450,13 @@ export async function renderApprovalsPage() {
       btn.disabled = true;
       btn.innerHTML = `${icons.check} Approving...`;
 
-      const results = await Promise.allSettled(
-        actionablePending.map(approval => processApproval(approval.id, 'approved', 'Bulk approved', approval))
-      );
+      const { succeeded, failed } = await processBulkApprovals(actionablePending, 'approved', 'Bulk approved');
 
-      const successCount = results.filter(r => r.status === 'fulfilled').length;
-      const failedCount = results.length - successCount;
-
-      if (failedCount === 0) {
-        showToast(`${successCount} items approved`, 'success');
+      if (failed.length === 0) {
+        showToast(`${succeeded.length} items approved`, 'success');
       } else {
-        showToast(`${successCount} approved, ${failedCount} failed`, successCount > 0 ? 'info' : 'error');
+        showToast(`${succeeded.length} approved, ${failed.length} failed — please retry the failed items`, failed.length === actionablePending.length ? 'error' : 'info');
+        console.error('Bulk approve failures:', failed);
       }
       renderApprovalsPage();
     });
@@ -884,17 +876,13 @@ async function approveDailySummary(summary, approvals, container, close) {
     approveButton.innerHTML = `${icons.check} Approving...`;
   }
 
-  const results = await Promise.allSettled(
-    pendingApprovals.map(approval => processApproval(approval.id, 'approved', 'Approved from day summary', approval))
-  );
+  const { succeeded, failed } = await processBulkApprovals(pendingApprovals, 'approved', 'Approved from day summary');
 
-  const successCount = results.filter(result => result.status === 'fulfilled').length;
-  const failedCount = results.length - successCount;
-
-  if (failedCount === 0) {
-    showToast(`${successCount} item(s) approved`, 'success');
+  if (failed.length === 0) {
+    showToast(`${succeeded.length} item(s) approved`, 'success');
   } else {
-    showToast(`${successCount} approved, ${failedCount} failed`, successCount > 0 ? 'info' : 'error');
+    showToast(`${succeeded.length} approved, ${failed.length} failed — please retry the failed items`, failed.length === pendingApprovals.length ? 'error' : 'info');
+    console.error('Day summary approve failures:', failed);
   }
 
   close?.();
@@ -944,6 +932,64 @@ function openRejectModal(approvalId, approvals) {
       }
     });
   });
+}
+
+/**
+ * Retry a Supabase operation up to maxAttempts times with exponential backoff.
+ */
+async function withRetry(fn, maxAttempts = 3) {
+  let lastError;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastError = err;
+      if (attempt < maxAttempts) {
+        await new Promise(resolve => setTimeout(resolve, 300 * attempt));
+      }
+    }
+  }
+  throw lastError;
+}
+
+/**
+ * Process approvals sequentially in batches to avoid rate-limiting.
+ * Returns { succeeded: [], failed: [] } arrays of approval objects.
+ */
+async function processBulkApprovals(approvalList, status, comments) {
+  const succeeded = [];
+  const failed = [];
+
+  for (const approval of approvalList) {
+    try {
+      await withRetry(() => processApproval(approval.id, status, comments, approval));
+
+      // Verify the entity actually saved as approved in the DB
+      if (approval.type === 'attendance' && status === 'approved') {
+        const { data: record } = await supabase
+          .from('attendance_records')
+          .select('status')
+          .eq('id', approval.entity_id)
+          .maybeSingle();
+
+        if (record?.status !== 'approved') {
+          // Force a second attempt if the write didn't stick
+          await withRetry(() => supabase
+            .from('attendance_records')
+            .update({ status: 'approved', approved_at: new Date().toISOString() })
+            .eq('id', approval.entity_id)
+          );
+        }
+      }
+
+      succeeded.push(approval);
+    } catch (err) {
+      console.error(`Failed to process approval ${approval.id}:`, err);
+      failed.push({ approval, error: err?.message || 'Unknown error' });
+    }
+  }
+
+  return { succeeded, failed };
 }
 
 async function processApproval(approvalId, status, comments, approval) {

@@ -411,6 +411,7 @@ export async function fetchDarData(internId, startDate, endDate) {
       .from('attendance_records')
       .select('*')
       .eq('intern_id', internId)
+      .eq('status', 'approved')
       .gte('date', startDate)
       .lte('date', endDate)
       .order('date', { ascending: true }),

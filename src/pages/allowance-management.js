@@ -8,7 +8,7 @@ import { supabase } from '../lib/supabase.js';
 import { showToast } from '../lib/toast.js';
 import { logAudit } from '../lib/audit.js';
 import { icons } from '../lib/icons.js';
-import { calculateSessionHours, formatDate, formatHoursDisplay, getTrackingWeekStart, getTrackingWeekEnd } from '../lib/utils.js';
+import { calculateSessionHours, formatDate, formatHoursBothFormats, getTrackingWeekStart, getTrackingWeekEnd } from '../lib/utils.js';
 import { createModal, confirmDialog } from '../lib/component.js';
 
 export async function renderAllowanceManagementPage() {
@@ -114,7 +114,7 @@ export async function renderAllowanceManagementPage() {
                 <tr>
                   <td>${p.intern?.full_name || '—'}</td>
                   <td>${formatDate(p.week_start)} – ${formatDate(p.week_end)}</td>
-                  <td>${formatHoursDisplay(p.total_hours)}</td>
+                  <td>${formatHoursBothFormats(p.total_hours)}</td>
                   <td>₱${p.hourly_rate?.toFixed(2)}</td>
                   <td class="font-semibold">₱${p.total_amount?.toFixed(2)}</td>
                   <td><span class="badge-pending">${p.status.replace('_', ' ')}</span></td>
@@ -156,7 +156,7 @@ export async function renderAllowanceManagementPage() {
               <tr>
                 <td>${p.intern?.full_name || '—'}</td>
                 <td>${formatDate(p.week_start)} – ${formatDate(p.week_end)}</td>
-                <td>${formatHoursDisplay(p.total_hours)}</td>
+                <td>${formatHoursBothFormats(p.total_hours)}</td>
                 <td>₱${p.hourly_rate?.toFixed(2)}</td>
                 <td class="font-semibold">₱${p.total_amount?.toFixed(2)}</td>
                 <td>${p.reviewed_at ? formatDate(p.reviewed_at) : '—'}</td>
@@ -590,36 +590,61 @@ async function computeWeeklyAllowances(currentRate, internRates, allowanceRateMo
             .eq('week_start', weekStart)
             .maybeSingle();
 
-          // Get approved hours for the week
-          const { data: attendance } = await supabase
-            .from('attendance_records')
-            .select('total_hours, time_in_1, time_out_1, time_in_2, time_out_2')
-            .eq('intern_id', intern.id)
-            .eq('status', 'approved')
-            .gte('date', weekStart)
-            .lte('date', weekEnd);
+          const rawRate = allowanceRateMode === 'individual'
+            ? internRates[intern.id]
+            : currentRate?.hourly_rate;
+          const rate = Number(rawRate);
 
-          const totalHoursRaw = (attendance || []).reduce((sum, record) => sum + getAttendanceHours(record), 0);
-          const totalHours = Math.round(totalHoursRaw * 10000) / 10000;
+          if (!Number.isFinite(rate)) {
+            skippedNoRate++;
+            continue;
+          }
+
+          let totalHours = 0;
+          let hourlyRate = rate;
+          let totalAmount = 0;
+
+          const { data: computedAllowance, error: rpcError } = await supabase.rpc('compute_weekly_allowance', {
+            p_intern_id: intern.id,
+            p_week_start: weekStart,
+            p_week_end: weekEnd,
+            p_hourly_rate: rate,
+          });
+
+          const computedRow = Array.isArray(computedAllowance) ? computedAllowance[0] : computedAllowance;
+          if (!rpcError && computedRow) {
+            totalHours = Number(computedRow.total_hours || 0);
+            hourlyRate = Number(computedRow.hourly_rate || rate);
+            totalAmount = Number(computedRow.total_amount || 0);
+          } else {
+            // Fallback for environments where the migration has not been deployed yet.
+            const { data: attendance } = await supabase
+              .from('attendance_records')
+              .select('total_hours, time_in_1, time_out_1, time_in_2, time_out_2')
+              .eq('intern_id', intern.id)
+              .eq('status', 'approved')
+              .gte('date', weekStart)
+              .lte('date', weekEnd);
+
+            // Prefer derived hours from timestamps (matches DAR logic).
+            // Fall back to stored total_hours only when both punch pairs are absent.
+            const totalHoursRaw = (attendance || []).reduce((sum, record) => {
+              const derived = getAttendanceHours(record);
+              if (derived > 0) return sum + derived;
+              return sum + Number(record.total_hours || 0);
+            }, 0);
+            totalHours = Math.round(totalHoursRaw * 10000) / 10000;
+            totalAmount = Math.round(totalHours * hourlyRate * 100) / 100;
+          }
 
           if (totalHours > 0) {
-            const rawRate = allowanceRateMode === 'individual'
-              ? internRates[intern.id]
-              : currentRate?.hourly_rate;
-            const rate = Number(rawRate);
-
-            if (!Number.isFinite(rate)) {
-              skippedNoRate++;
-              continue;
-            }
-
             const payload = {
               intern_id: intern.id,
               week_start: weekStart,
               week_end: weekEnd,
               total_hours: totalHours,
-              hourly_rate: rate,
-              total_amount: Math.round(totalHours * rate * 100) / 100,
+              hourly_rate: hourlyRate,
+              total_amount: totalAmount,
               status: 'computed',
               reviewed_by: null,
               reviewed_at: null,

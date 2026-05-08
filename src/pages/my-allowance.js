@@ -6,7 +6,7 @@ import { getProfile } from '../lib/auth.js';
 import { renderLayout } from '../components/layout.js';
 import { supabase } from '../lib/supabase.js';
 import { icons } from '../lib/icons.js';
-import { formatDate, formatHoursDisplay, getInternTrackingWeekNumber } from '../lib/utils.js';
+import { formatDate, formatHoursBothFormats, getInternTrackingWeekNumber } from '../lib/utils.js';
 import { showToast } from '../lib/toast.js';
 import { fetchDarData, generateDarPdf } from './reports.js';
 import { markSidebarIndicatorSeen, sidebarIndicatorTypes } from '../lib/sidebar-indicators.js';
@@ -66,7 +66,7 @@ export async function renderMyAllowancePage() {
       </div>
       <div class="card text-center">
         <p class="text-sm text-neutral-500">Total Hours Logged</p>
-        <p class="text-3xl font-bold text-primary-600">${formatHoursDisplay(totalHours)}</p>
+        <p class="text-3xl font-bold text-primary-600">${formatHoursBothFormats(totalHours)}</p>
       </div>
       <div class="card text-center">
         <p class="text-sm text-neutral-500">Weeks Paid</p>
@@ -95,7 +95,7 @@ export async function renderMyAllowancePage() {
               <tr>
                 <td class="font-medium">Week ${getWeekNum(p.week_start)}</td>
                 <td class="whitespace-nowrap">${formatDate(p.week_start)} – ${formatDate(p.week_end)}</td>
-                <td>${formatHoursDisplay(p.total_hours)}${hasAdminLoggedInWeek(p.week_start, p.week_end) ? ' <span class="badge-secondary text-xs">Admin Logged</span>' : ''}</td>
+                <td>${formatHoursBothFormats(p.total_hours)}${hasAdminLoggedInWeek(p.week_start, p.week_end) ? ' <span class="badge-secondary text-xs">Admin Logged</span>' : ''}</td>
                 <td>₱${p.hourly_rate?.toFixed(2)}</td>
                 <td class="font-semibold">₱${p.total_amount?.toFixed(2)}</td>
                 <td>

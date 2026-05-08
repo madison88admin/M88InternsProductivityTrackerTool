@@ -28,6 +28,10 @@ function roundToTwo(n) {
   return Math.round(n * 100) / 100;
 }
 
+function roundToFour(n) {
+  return Math.round(n * 10000) / 10000;
+}
+
 function usageAndExit() {
   console.log('Usage: node scripts/backfill_allowance_periods.js --from YYYY-MM-DD --to YYYY-MM-DD [--force-update-approved]');
   process.exit(1);
@@ -112,7 +116,7 @@ async function main() {
       hourlyRate = internRates?.[internId] || baseRate;
     }
 
-    const totalHours = roundToTwo(g.total_hours || 0);
+    const totalHours = roundToFour(g.total_hours || 0);
     const totalAmount = roundToTwo(totalHours * Number(hourlyRate || 0));
 
     // Check existing allowance_period
