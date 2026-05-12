@@ -197,7 +197,7 @@ export async function renderMyDarDraftPage() {
       loadingRow.classList.remove('hidden');
 
       try {
-        const darData = await fetchDarData(profile.id, selectedWeek.start, selectedWeek.end);
+        const darData = await fetchDarData(profile.id, selectedWeek.start, selectedWeek.end, { approvedOnly: false });
         if (loadId !== activeLoadId) return;
 
         const weekNum = calculateInternWeekNumber(darData?.intern?.ojt_start_date, selectedWeek.start);

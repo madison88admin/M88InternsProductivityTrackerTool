@@ -393,7 +393,19 @@ async function updateDarPreview(el) {
   }
 }
 
-export async function fetchDarData(internId, startDate, endDate) {
+export async function fetchDarData(internId, startDate, endDate, { approvedOnly = true } = {}) {
+  let attendanceQuery = supabase
+    .from('attendance_records')
+    .select('*')
+    .eq('intern_id', internId);
+  if (approvedOnly) {
+    attendanceQuery = attendanceQuery.eq('status', 'approved');
+  }
+  attendanceQuery = attendanceQuery
+    .gte('date', startDate)
+    .lte('date', endDate)
+    .order('date', { ascending: true });
+
   const [
     { data: intern },
     { data: attendanceRaw },
@@ -407,14 +419,7 @@ export async function fetchDarData(internId, startDate, endDate) {
       .select('id, full_name, course, school, ojt_start_date, signature_url, supervisor_id, department_id, departments(name)')
       .eq('id', internId)
       .single(),
-    supabase
-      .from('attendance_records')
-      .select('*')
-      .eq('intern_id', internId)
-      .eq('status', 'approved')
-      .gte('date', startDate)
-      .lte('date', endDate)
-      .order('date', { ascending: true }),
+    attendanceQuery,
     supabase
       .from('narratives')
       .select('*, task:tasks(title)')
