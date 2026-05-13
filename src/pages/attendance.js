@@ -898,10 +898,9 @@ function openCorrectionModal(record, profile) {
         <select id="correction-punch" class="form-input" required>
           <option value="">Select punch type</option>
           ${record.time_in_1 ? '<option value="time_in_1">Correct Morning Time In</option>' : '<option value="time_in_1">Missed Morning Time In</option>'}
-          ${record.time_out_1 ? '<option value="time_out_1">Correct Lunch Time Out</option>' : ''}
+          ${record.time_out_1 ? '<option value="time_out_1">Correct Lunch Time Out</option>' : '<option value="time_out_1">Missed Lunch Time Out</option>'}
           ${record.time_in_2 ? '<option value="time_in_2">Correct Afternoon Time In</option>' : ''}
           ${record.time_out_2 ? '<option value="time_out_2">Correct End of Day Time Out</option>' : ''}
-          ${!record.time_out_1 && record.time_in_1 ? '<option value="time_out_1">Missed Lunch Time Out</option>' : ''}
           ${!record.time_in_2 && record.time_out_1 ? '<option value="time_in_2">Missed Afternoon Time In</option>' : ''}
           ${!record.time_out_2 && record.time_in_2 ? '<option value="time_out_2">Missed End of Day Time Out</option>' : ''}
         </select>
