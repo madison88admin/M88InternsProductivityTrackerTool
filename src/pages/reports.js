@@ -394,13 +394,12 @@ async function updateDarPreview(el) {
 }
 
 export async function fetchDarData(internId, startDate, endDate, { approvedOnly = true } = {}) {
+  // Always fetch all attendance records so time in/out is always visible.
+  // The approvedOnly flag now only controls whether signatures are shown (handled in generateDarPdf).
   let attendanceQuery = supabase
     .from('attendance_records')
     .select('*')
     .eq('intern_id', internId);
-  if (approvedOnly) {
-    attendanceQuery = attendanceQuery.eq('status', 'approved');
-  }
   attendanceQuery = attendanceQuery
     .gte('date', startDate)
     .lte('date', endDate)
@@ -810,11 +809,11 @@ export async function generateDarPdf(darData, weekNum, startDate, existingDoc, o
     ]);
 
     const mRowIdx = dayIdx * 2;
-    // Add intern signature for approved, holiday, or no-log entries
-    if ((isMorningApproved || isHolidayDate || isNoLog) && internSigDataUrl) {
+    // Signatures only show when the record is approved (or holiday)
+    // Unapproved records still show time in/out but no signatures
+    if ((isMorningApproved || isHolidayDate) && internSigDataUrl) {
       signatureCells.push({ row: mRowIdx, col: 5, dataUrl: internSigDataUrl });
     }
-    // Add supervisor signature only for approved or holiday (not for no-log)
     if ((isMorningApproved || isHolidayDate) && morningSupervisorSigDataUrl) {
       signatureCells.push({ row: mRowIdx, col: 6, dataUrl: morningSupervisorSigDataUrl });
     }
@@ -848,11 +847,11 @@ export async function generateDarPdf(darData, weekNum, startDate, existingDoc, o
     ]);
 
     const aRowIdx = dayIdx * 2 + 1;
-    // Add intern signature for approved, holiday, or no-log entries
-    if ((isAfternoonApproved || isHolidayDate || isNoLog) && internSigDataUrl) {
+    // Signatures only show when the record is approved (or holiday)
+    // Unapproved records still show time in/out but no signatures
+    if ((isAfternoonApproved || isHolidayDate) && internSigDataUrl) {
       signatureCells.push({ row: aRowIdx, col: 5, dataUrl: internSigDataUrl });
     }
-    // Add supervisor signature only for approved or holiday (not for no-log)
     if ((isAfternoonApproved || isHolidayDate) && afternoonSupervisorSigDataUrl) {
       signatureCells.push({ row: aRowIdx, col: 6, dataUrl: afternoonSupervisorSigDataUrl });
     }
@@ -881,7 +880,7 @@ export async function generateDarPdf(darData, weekNum, startDate, existingDoc, o
       minCellHeight: bodyRowH,
     },
     headStyles: {
-      fillColor: [41, 65, 148],
+      fillColor: [0, 0, 0],
       textColor: [255, 255, 255],
       fontStyle: 'bold',
       halign: 'center',
