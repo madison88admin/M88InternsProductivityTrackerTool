@@ -76,6 +76,7 @@ serve(async (req: Request) => {
       hoursRequired,
       ojtStartDate,
       isVoluntary,
+      receivesActionAlerts,
     } = await req.json();
 
     if (!email || !fullName || !role) {
@@ -117,6 +118,7 @@ serve(async (req: Request) => {
       department_id: departmentId || null,
       location_id: locationId || null,
       phone: phone || null,
+      receives_action_alerts: role === "admin" ? (receivesActionAlerts ?? true) : true,
     };
 
     if (role === "intern") {

@@ -54,6 +54,31 @@ export async function sendEmailNotification(userEmail, subject, htmlContent) {
 }
 
 /**
+ * Get active admins who should receive actionable alerts.
+ * @returns {Promise<Array>} Array of admin profiles (id, full_name, email)
+ */
+export async function getActionableAdmins() {
+  try {
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('id, full_name, email')
+      .eq('role', 'admin')
+      .eq('is_active', true)
+      .eq('receives_action_alerts', true);
+
+    if (error) {
+      console.error('Error fetching actionable admins:', error);
+      return [];
+    }
+
+    return data || [];
+  } catch (err) {
+    console.error('Failed to get actionable admins:', err);
+    return [];
+  }
+}
+
+/**
  * Generate HTML template for approval result notification
  */
 export function getApprovalResultTemplate(approvalType, status, comments) {

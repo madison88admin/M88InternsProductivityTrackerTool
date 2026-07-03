@@ -11,13 +11,168 @@ import { icons } from '../lib/icons.js';
 import { formatDate, formatTime, formatHoursDisplay, getPublicIP, isLateArrival, isOutsideAllowedHours, getTrackingWeekStart, getTrackingWeekEnd } from '../lib/utils.js';
 import { createModal } from '../lib/component.js';
 import { isHoliday } from '../lib/holidays.js';
-import { sendEmailNotification, getDepartmentSupervisors } from '../lib/email-notifications.js';
+import { sendEmailNotification, getDepartmentSupervisors, getActionableAdmins } from '../lib/email-notifications.js';
 import { showNarrativePromptModal } from '../lib/narrative-modal.js';
 
 const PH_TIMEZONE = 'Asia/Manila';
 const RECENT_ATTENDANCE_PAGE_SIZE = 10;
+const PUNCH_TIMEOUT_MS = 15000;
 let phMidnightRefreshTimer = null;
 let recentAttendancePage = 1;
+
+/**
+ * Wraps a promise with a timeout using Promise.race.
+ * Rejects with a distinguishable timeout error if the promise does not settle within timeoutMs.
+ * @param {Promise} promise - The promise to race against the timeout
+ * @param {number} timeoutMs - Timeout duration in milliseconds
+ * @returns {Promise} Resolves with the original promise result or rejects with a timeout error
+ */
+function withPunchTimeout(promise, timeoutMs = PUNCH_TIMEOUT_MS) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => {
+      setTimeout(() => {
+        const err = new Error('PUNCH_TIMEOUT');
+        err.isTimeout = true;
+        reject(err);
+      }, timeoutMs);
+    }),
+  ]);
+}
+
+/**
+ * Verifies a punch record by reading it back from the database.
+ * Returns the verified timestamp value for the given punchType column,
+ * or null if the record is not found or a query error occurs.
+ * @param {string} recordId - The attendance record ID to verify
+ * @param {string} punchType - The column name (e.g., 'time_in_1', 'time_out_1')
+ * @returns {Promise<string|null>} The verified timestamp or null
+ */
+async function verifyPunchRecord(recordId, punchType) {
+  try {
+    const { data, error } = await supabase
+      .from('attendance_records')
+      .select('time_in_1, time_out_1, time_in_2, time_out_2, date')
+      .eq('id', recordId)
+      .single();
+
+    if (error || !data) {
+      return null;
+    }
+
+    return data[punchType] || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Displays a punch confirmation dialog after a successful punch verification.
+ * Shows the punch type label, the verified timestamp from the database, and a success message.
+ * Returns a Promise that resolves when the user dismisses the dialog by clicking "OK".
+ * @param {string} punchLabel - The human-readable punch type (e.g., "Morning Time In")
+ * @param {string} verifiedTimestamp - The verified timestamp string from the database
+ * @returns {Promise<void>}
+ */
+function showPunchConfirmationDialog(punchLabel, verifiedTimestamp) {
+  return new Promise((resolve) => {
+    const formattedTime = new Intl.DateTimeFormat('en-PH', {
+      timeZone: PH_TIMEZONE,
+      hour: 'numeric',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: true,
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+    }).format(new Date(verifiedTimestamp));
+
+    const bodyHtml = `
+      <div class="text-center py-4">
+        <div class="mx-auto w-16 h-16 rounded-full bg-success-50 flex items-center justify-center mb-4">
+          <svg class="w-8 h-8 text-success-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+          </svg>
+        </div>
+        <p class="text-sm font-semibold text-neutral-700 mb-1">${punchLabel}</p>
+        <p class="text-lg font-bold text-neutral-900 mb-2">${formattedTime}</p>
+        <p class="text-sm text-success-600 mb-6">Your punch has been verified and recorded successfully.</p>
+        <button id="punch-dialog-ok" class="btn-primary w-full">OK</button>
+      </div>
+    `;
+
+    const { close } = createModal('Punch Confirmed', bodyHtml, (el) => {
+      el.querySelector('#punch-dialog-ok').addEventListener('click', () => {
+        close();
+        resolve();
+      });
+    }, { dismissible: false });
+  });
+}
+
+/**
+ * Displays a punch error dialog when a database error (non-timeout) occurs.
+ * Shows an error icon, the error description, and guidance text.
+ * Returns a Promise that resolves when the user dismisses the dialog by clicking "OK".
+ * @param {string} errorMessage - The error message to display
+ * @returns {Promise<void>}
+ */
+function showPunchErrorDialog(errorMessage) {
+  return new Promise((resolve) => {
+    const bodyHtml = `
+      <div class="text-center py-4">
+        <div class="mx-auto w-16 h-16 rounded-full bg-danger-50 flex items-center justify-center mb-4">
+          <svg class="w-8 h-8 text-danger-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+          </svg>
+        </div>
+        <p class="text-sm font-semibold text-danger-700 mb-2">Unable to Record Punch</p>
+        <p class="text-sm text-neutral-600 mb-2">${errorMessage}</p>
+        <p class="text-xs text-neutral-400 mb-6">If this issue persists, please contact your supervisor or system administrator.</p>
+        <button id="punch-dialog-ok" class="btn-primary w-full">OK</button>
+      </div>
+    `;
+
+    const { close } = createModal('Punch Error', bodyHtml, (el) => {
+      el.querySelector('#punch-dialog-ok').addEventListener('click', () => {
+        close();
+        resolve();
+      });
+    }, { dismissible: false });
+  });
+}
+
+/**
+ * Displays a timeout dialog when the punch request exceeds the configured timeout.
+ * Shows a timeout icon, a message about the connection issue, and a suggestion to retry.
+ * Returns a Promise that resolves when the user dismisses the dialog by clicking "OK".
+ * @returns {Promise<void>}
+ */
+function showPunchTimeoutDialog() {
+  return new Promise((resolve) => {
+    const bodyHtml = `
+      <div class="text-center py-4">
+        <div class="mx-auto w-16 h-16 rounded-full bg-warning-50 flex items-center justify-center mb-4">
+          <svg class="w-8 h-8 text-warning-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <circle cx="12" cy="12" r="10" stroke-width="2"/>
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6l4 2"/>
+          </svg>
+        </div>
+        <p class="text-sm font-semibold text-warning-700 mb-2">Connection Timed Out</p>
+        <p class="text-sm text-neutral-600 mb-2">The server took too long to respond. Your punch may not have been recorded.</p>
+        <p class="text-xs text-neutral-400 mb-6">Please check your internet connection and try again. If the problem continues, contact your supervisor.</p>
+        <button id="punch-dialog-ok" class="btn-primary w-full">OK</button>
+      </div>
+    `;
+
+    const { close } = createModal('Connection Timeout', bodyHtml, (el) => {
+      el.querySelector('#punch-dialog-ok').addEventListener('click', () => {
+        close();
+        resolve();
+      });
+    }, { dismissible: false });
+  });
+}
 
 function ipConsistencyBadge(ip_consistent, size = 'normal') {
   if (ip_consistent == null) return '';
@@ -650,10 +805,13 @@ export async function renderAttendancePage() {
         try {
           const ip = await getPublicIP();
           const ipForDb = sanitizeIpForInet(ip);
-          const { data, error } = await supabase.rpc('log_attendance_punch', {
-            p_punch_type: punchType,
-            p_ip_address: ipForDb,
-          });
+          const { data, error } = await withPunchTimeout(
+            supabase.rpc('log_attendance_punch', {
+              p_punch_type: punchType,
+              p_ip_address: ipForDb,
+            }),
+            PUNCH_TIMEOUT_MS
+          );
 
           if (error) throw error;
           todayRecord = Array.isArray(data) ? data[0] : data;
@@ -667,14 +825,24 @@ export async function renderAttendancePage() {
           if (punchType === 'time_in_1' && isLateArrival(now)) flags.push('late');
           if (isOutsideAllowedHours(now)) flags.push('outside_hours');
 
+          // Verify punch record by reading it back from the database
+          const verifiedTimestamp = await verifyPunchRecord(todayRecord.id, punchType);
+
+          // Show confirmation dialog (or partial-success if verification fails)
+          if (verifiedTimestamp) {
+            await showPunchConfirmationDialog(punchLabel, verifiedTimestamp);
+          } else {
+            // Partial success: punch was likely saved but verification could not complete
+            await showPunchConfirmationDialog(punchLabel, now);
+          }
+
+          // Audit logging (AFTER dialog dismissal)
           await logAudit(`attendance.${punchType}`, 'attendance', todayRecord?.id, {
             punch_type: punchType,
             timestamp: now,
             ip_address: ip,
             flags,
           });
-
-          showToast(`${punchLabel} recorded successfully`, 'success');
 
           // Create approval entry for complete day or half-day attendance
           const shouldCreateApproval = 
@@ -794,7 +962,11 @@ export async function renderAttendancePage() {
           // Re-render the page
           renderAttendancePage();
         } catch (err) {
-          showToast(getAttendanceErrorMessage(err), 'error');
+          if (err.message === 'PUNCH_TIMEOUT' || err.isTimeout) {
+            await showPunchTimeoutDialog();
+          } else {
+            await showPunchErrorDialog(getAttendanceErrorMessage(err));
+          }
           punchBtn.disabled = false;
           punchBtn.innerHTML = `${icons.clock}<span class="ml-2">${punchLabel}</span>`;
         }
@@ -983,12 +1155,8 @@ function openCorrectionModal(record, profile) {
         }
 
         // Also notify all active admins since only admins can approve corrections
-        supabase
-          .from('profiles')
-          .select('id')
-          .eq('role', 'admin')
-          .eq('is_active', true)
-          .then(({ data: admins }) => {
+        Promise.resolve(getActionableAdmins())
+          .then((admins) => {
             if (!admins || admins.length === 0) return;
             // Filter out supervisors we already notified
             const supervisorIds = deptSupervisors.map(s => s.id);

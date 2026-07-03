@@ -10,6 +10,7 @@ import { formatDate, formatDateKey, formatTime, formatHoursDisplay, getTrackingW
 import { showToast } from '../lib/toast.js';
 import { logAudit } from '../lib/audit.js';
 import { createModal } from '../lib/component.js';
+import { getActionableAdmins } from '../lib/email-notifications.js';
 
 function ipConsistencyBadge(ip_consistent) {
   if (ip_consistent == null) return '';
@@ -523,11 +524,7 @@ async function handleEscalateToAdmin(recordId, date, internId, internName, profi
   if (!confirm(`Escalate ${internName}'s incomplete attendance on ${formatDate(date)} to admin?`)) return;
 
   try {
-    const { data: admins } = await supabase
-      .from('profiles')
-      .select('id')
-      .eq('role', 'admin')
-      .eq('is_active', true);
+    const admins = await getActionableAdmins();
 
     if (admins && admins.length > 0) {
       const notifications = admins.map(a => ({

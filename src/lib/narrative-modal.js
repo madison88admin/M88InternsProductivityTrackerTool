@@ -9,7 +9,7 @@ import { logAudit } from './audit.js';
 import { formatDate, formatHoursDisplay, getTodayDate, calculateSessionHours } from './utils.js';
 import { createModal } from './component.js';
 import { isHoliday } from './holidays.js';
-import { sendEmailNotification, getDepartmentSupervisors } from './email-notifications.js';
+import { sendEmailNotification, getDepartmentSupervisors, getActionableAdmins } from './email-notifications.js';
 
 // Pre-load Quill to avoid dynamic import delays in modal
 let QuillModule = null;
@@ -720,11 +720,10 @@ export async function openNarrativeModal(options) {
         (async () => {
           try {
             // Batch: Get admins and supervisors once
-            const [adminsResult, deptSupervisors] = await Promise.all([
-              supabase.from('profiles').select('id').eq('role', 'admin').eq('is_active', true),
+            const [adminsForNotif, deptSupervisors] = await Promise.all([
+              getActionableAdmins(),
               getDepartmentSupervisors(profile.id),
             ]);
-            const adminsForNotif = adminsResult.data || [];
             const deptSupervisorIds = deptSupervisors.map(s => s.id);
 
             // Batch: Collect all approvals to insert at once

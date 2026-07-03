@@ -407,6 +407,16 @@ function openInviteModal(departments, locations, supervisors) {
               ${(departments || []).map(d => `<option value="${d.id}">${d.name}</option>`).join('')}
             </select>
           </div>
+          <div id="invite-admin-alerts-wrap" class="hidden flex items-center justify-between rounded-xl border border-neutral-200 px-4 py-3">
+            <div>
+              <p class="text-sm font-medium text-neutral-800">Action alerts</p>
+              <p class="text-xs text-neutral-400 mt-0.5">Receive actionable system emails and notifications for approvals, corrections, and task updates.</p>
+            </div>
+            <label class="relative inline-flex items-center cursor-pointer">
+              <input type="checkbox" id="invite-admin-alerts" class="sr-only peer" checked />
+              <div class="w-10 h-6 rounded-full peer-focus:ring-2 peer-focus:ring-primary-300 transition-colors bg-neutral-200 peer-checked:bg-primary-600 after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:after:translate-x-4"></div>
+            </label>
+          </div>
         </div>
 
         <!-- Intern-only fields -->
@@ -518,9 +528,11 @@ function openInviteModal(departments, locations, supervisors) {
       const role = e.target.value;
       const roleFields = el.querySelector('#role-fields');
       const internFields = el.querySelector('#intern-fields');
+      const adminAlertsWrap = el.querySelector('#invite-admin-alerts-wrap');
 
       roleFields.classList.toggle('hidden', !role);
       internFields.classList.toggle('hidden', role !== 'intern');
+      adminAlertsWrap.classList.toggle('hidden', role !== 'admin');
 
       // When switching to intern, apply dept→supervisor logic if a dept is already chosen
       if (role === 'intern') {
@@ -563,6 +575,7 @@ function openInviteModal(departments, locations, supervisors) {
           departmentId: departmentId || null,
           locationId: locationId || null,
           phone: el.querySelector('#invite-phone')?.value || null,
+          receivesActionAlerts: role === 'admin' ? el.querySelector('#invite-admin-alerts').checked : true,
         };
 
         if (role === 'intern') {
@@ -644,6 +657,16 @@ function openEditUserModal(user, departments, locations, supervisors) {
               ${(departments || []).map(d => `<option value="${d.id}" ${d.id === user.department_id ? 'selected' : ''}>${d.name}</option>`).join('')}
             </select>
           </div>
+          <div id="edit-admin-alerts-wrap" class="${user.role === 'admin' ? '' : 'hidden'} flex items-center justify-between rounded-xl border border-neutral-200 px-4 py-3">
+            <div>
+              <p class="text-sm font-medium text-neutral-800">Action alerts</p>
+              <p class="text-xs text-neutral-400 mt-0.5">Receive actionable system emails and notifications for approvals, corrections, and task updates.</p>
+            </div>
+            <label class="relative inline-flex items-center cursor-pointer">
+              <input type="checkbox" id="edit-admin-alerts" class="sr-only peer" ${user.receives_action_alerts !== false ? 'checked' : ''} />
+              <div class="w-10 h-6 rounded-full peer-focus:ring-2 peer-focus:ring-primary-300 transition-colors bg-neutral-200 peer-checked:bg-primary-600 after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:after:translate-x-4"></div>
+            </label>
+          </div>
         </div>
 
         <!-- Intern-only fields -->
@@ -702,9 +725,11 @@ function openEditUserModal(user, departments, locations, supervisors) {
       const role = e.target.value;
       const roleFields = el.querySelector('#role-fields');
       const internFields = el.querySelector('#intern-fields');
+      const adminAlertsWrap = el.querySelector('#edit-admin-alerts-wrap');
 
       roleFields.classList.toggle('hidden', !role);
       internFields.classList.toggle('hidden', role !== 'intern');
+      adminAlertsWrap.classList.toggle('hidden', role !== 'admin');
 
       // When switching to intern, apply dept→supervisor logic if a dept is already chosen
       if (role === 'intern') {
@@ -737,6 +762,7 @@ function openEditUserModal(user, departments, locations, supervisors) {
         location_id: el.querySelector('#edit-location').value || null,
         department_id: el.querySelector('#edit-department').value || null,
         phone: el.querySelector('#edit-phone').value || null,
+        receives_action_alerts: role === 'admin' ? el.querySelector('#edit-admin-alerts').checked : true,
       };
 
       if (role === 'intern') {

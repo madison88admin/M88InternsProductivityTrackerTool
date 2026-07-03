@@ -77,6 +77,7 @@ CREATE TABLE profiles (
   supervisor_id UUID REFERENCES profiles(id) ON DELETE SET NULL,
   status intern_status NOT NULL DEFAULT 'active',
   is_active BOOLEAN NOT NULL DEFAULT true,
+  receives_action_alerts BOOLEAN NOT NULL DEFAULT true,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );

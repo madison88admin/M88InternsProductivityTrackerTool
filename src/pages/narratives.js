@@ -12,7 +12,7 @@ import { icons } from '../lib/icons.js';
 import { formatDate, formatDateTime, formatHoursDisplay, getTodayDate, calculateSessionHours } from '../lib/utils.js';
 import { createModal } from '../lib/component.js';
 import { isHoliday } from '../lib/holidays.js';
-import { sendEmailNotification, getDepartmentSupervisors } from '../lib/email-notifications.js';
+import { sendEmailNotification, getDepartmentSupervisors, getActionableAdmins } from '../lib/email-notifications.js';
 import { openNarrativeModal as openSharedNarrativeModal } from '../lib/narrative-modal.js';
 import { markSidebarIndicatorSeen, sidebarIndicatorTypes } from '../lib/sidebar-indicators.js';
 
@@ -686,11 +686,7 @@ function openEditNarrativeModal(narrative, tasks, profile, attendanceByDate = {}
         }
 
         // Also notify all active admins (exclude supervisors already notified)
-        const { data: adminsForResubmit } = await supabase
-          .from('profiles')
-          .select('id')
-          .eq('role', 'admin')
-          .eq('is_active', true);
+        const adminsForResubmit = await getActionableAdmins();
 
         if (adminsForResubmit && adminsForResubmit.length > 0) {
           const supervisorIds = deptSupervisors.map(s => s.id);

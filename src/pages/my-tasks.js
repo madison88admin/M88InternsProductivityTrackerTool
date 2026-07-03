@@ -11,7 +11,7 @@ import { icons } from '../lib/icons.js';
 import { formatDate, getTodayDate } from '../lib/utils.js';
 import { createModal } from '../lib/component.js';
 import { isHoliday } from '../lib/holidays.js';
-import { sendEmailNotification, getDepartmentSupervisors } from '../lib/email-notifications.js';
+import { sendEmailNotification, getDepartmentSupervisors, getActionableAdmins } from '../lib/email-notifications.js';
 import { markSidebarIndicatorSeen, sidebarIndicatorTypes } from '../lib/sidebar-indicators.js';
 
 export async function renderMyTasksPage() {
@@ -405,11 +405,7 @@ export async function renderMyTasksPage() {
             }
 
             // Also notify all active admins (exclude supervisors already notified)
-            const { data: admins } = await supabase
-              .from('profiles')
-              .select('id, email, full_name')
-              .eq('role', 'admin')
-              .eq('is_active', true);
+            const admins = await getActionableAdmins();
 
             if (admins && admins.length > 0) {
               const supervisorIds = deptSupervisors.map(s => s.id);
@@ -549,11 +545,7 @@ export async function renderMyTasksPage() {
             }
 
             // Also notify all active admins (exclude department supervisors)
-            const { data: admins } = await supabase
-              .from('profiles')
-              .select('id, email, full_name')
-              .eq('role', 'admin')
-              .eq('is_active', true);
+            const admins = await getActionableAdmins();
 
             if (admins && admins.length > 0) {
               const adminNotifs = admins
