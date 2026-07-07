@@ -10,7 +10,7 @@ import { logAudit } from '../lib/audit.js';
 import { icons } from '../lib/icons.js';
 import { formatDate, renderAvatar } from '../lib/utils.js';
 import { createModal, confirmDialog } from '../lib/component.js';
-import { openOjtCompletionModal } from '../lib/ojt-completion.js';
+import { completeActiveTasksForIntern, openOjtCompletionModal } from '../lib/ojt-completion.js';
 
 const USERS_PER_PAGE = 50;
 
@@ -247,11 +247,11 @@ export async function renderUserManagementPage() {
               const taskSummary = activeTasks
                 .map(t => `${t.title} (${t.status})`)
                 .join(', ');
-              showToast(
-                `Cannot deactivate intern. The following tasks are still assigned or in progress: ${taskSummary}`,
-                'error'
+
+              const shouldComplete = confirm(
+                `This intern still has active tasks: ${taskSummary}. Complete them automatically and deactivate the account?`
               );
-              return;
+              if (!shouldComplete) return;
             }
           }
 
@@ -259,9 +259,17 @@ export async function renderUserManagementPage() {
             `Are you sure you want to deactivate ${user?.full_name}?`,
             async () => {
               try {
+                const completedTaskIds = user.role === 'intern'
+                  ? await completeActiveTasksForIntern(userId)
+                  : [];
                 await supabase.from('profiles').update({ is_active: false }).eq('id', userId);
                 await logAudit('user.deactivated', 'user', userId);
-                showToast(`User deactivated`, 'success');
+                showToast(
+                  completedTaskIds.length > 0
+                    ? `User deactivated and ${completedTaskIds.length} active task(s) completed`
+                    : `User deactivated`,
+                  'success'
+                );
                 await renderPage();
               } catch (err) {
                 showToast('Failed to update user', 'error');

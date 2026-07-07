@@ -11,6 +11,61 @@ import { createModal, confirmDialog } from './component.js';
 import { icons } from './icons.js';
 
 /**
+ * Force-complete any active tasks assigned to an intern.
+ * Used when an admin chooses to deactivate an account so the task
+ * queue does not block the account action.
+ */
+export async function completeActiveTasksForIntern(internId, reviewerId = null) {
+  const { data: activeTasks, error } = await supabase
+    .from('tasks')
+    .select('id, title, status, pending_status, is_self_submitted')
+    .eq('assigned_to', internId)
+    .in('status', ['not_started', 'in_progress']);
+
+  if (error) throw error;
+  if (!activeTasks || activeTasks.length === 0) return [];
+
+  const completedAt = new Date().toISOString();
+  const completedTaskIds = [];
+
+  for (const task of activeTasks) {
+    const taskUpdates = {
+      status: 'completed',
+      pending_status: null,
+    };
+
+    if (task.is_self_submitted) {
+      taskUpdates.submission_status = 'approved';
+    }
+
+    const { error: taskError } = await supabase
+      .from('tasks')
+      .update(taskUpdates)
+      .eq('id', task.id);
+
+    if (taskError) throw taskError;
+
+    const { error: approvalError } = await supabase
+      .from('approvals')
+      .update({
+        status: 'approved',
+        reviewed_by: reviewerId,
+        reviewed_at: completedAt,
+        comments: 'Task auto-completed during account deactivation.',
+      })
+      .eq('entity_id', task.id)
+      .eq('status', 'pending')
+      .in('type', ['task_status', 'task_submission']);
+
+    if (approvalError) throw approvalError;
+
+    completedTaskIds.push(task.id);
+  }
+
+  return completedTaskIds;
+}
+
+/**
  * Open the OJT completion action modal.
  * @param {string} internId  UUID of the intern's profile record.
  * @param {Function} [onComplete]  Optional callback to re-render the calling page.
@@ -123,36 +178,25 @@ export async function openOjtCompletionModal(internId, onComplete) {
 
     // ── Deactivate ───────────────────────────────────────────────────────────
     el.querySelector('#ojt-deactivate').addEventListener('click', async () => {
-      // Block deactivation if the intern still has active tasks
-      const { data: activeTasks } = await supabase
-        .from('tasks')
-        .select('id, title, status')
-        .eq('assigned_to', internId)
-        .in('status', ['not_started', 'in_progress']);
-
-      if (activeTasks && activeTasks.length > 0) {
-        const taskSummary = activeTasks.map(t => `${t.title} (${t.status})`).join(', ');
-        showToast(
-          `Cannot deactivate: the following tasks are still active: ${taskSummary}`,
-          'error'
-        );
-        return;
-      }
-
       close();
       confirmDialog(
         `Are you sure you want to deactivate ${intern.full_name}?`,
         async () => {
           try {
+            const completedTaskIds = await completeActiveTasksForIntern(internId);
             const { error: deactErr } = await supabase
               .from('profiles')
               .update({ is_active: false })
               .eq('id', internId);
             if (deactErr) throw deactErr;
             await logAudit('user.deactivated', 'user', internId);
-            showToast(`${intern.full_name} deactivated`, 'success');
+            if (completedTaskIds.length > 0) {
+              showToast(`${intern.full_name} deactivated and ${completedTaskIds.length} active task(s) completed`, 'success');
+            } else {
+              showToast(`${intern.full_name} deactivated`, 'success');
+            }
             onComplete?.();
-          } catch {
+          } catch (err) {
             showToast('Failed to deactivate intern', 'error');
           }
         },
